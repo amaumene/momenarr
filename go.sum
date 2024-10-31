@@ -1,0 +1,5 @@
+github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/google/go-querystring v1.0.0 h1:Xkwi/a1rcvNg1PPYe5vI8GbeBY/jrVuDX5ASuANWTrk=
+github.com/google/go-querystring v1.0.0/go.mod h1:odCYkC5MyYFN7vkCjXpyrEuKhc/BUO6wN/zVPAxq5ck=
+github.com/jacklaaa89/trakt v0.0.0-20200518144431-c06a8b42a164 h1:h9lA0j6Eyk0rocOoQumysnELC7H1EKE5VEgR5YE9dBw=
+github.com/jacklaaa89/trakt v0.0.0-20200518144431-c06a8b42a164/go.mod h1:qc1oFcGEDvSm8HpaLIpYwquNJjuocnDBE7zzdck0CUM=
