@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,34 @@ var (
 	traktClientSecret string
 )
 
+func findBiggest(rss Rss) Item {
+	// Find the item with the biggest length
+	var maxItem Item
+	var maxLength int
+
+	for _, item := range rss.Channel.Items {
+		if (strings.Contains(strings.ToLower(item.Title), "bluray") || strings.Contains(strings.ToLower(item.Title), "blu-ray")) && !strings.Contains(strings.ToLower(item.Title), "remux") {
+			continue
+		}
+
+		length, err := strconv.Atoi(item.Enclosure.Length)
+		if err != nil {
+			log.Printf("Error converting length to integer: %v", err)
+			continue
+		}
+		if length > maxLength {
+			maxLength = length
+			maxItem = item
+		}
+	}
+
+	fmt.Printf("Item with the biggest length:\n")
+	fmt.Printf("Title: %s\n", maxItem.Title)
+	fmt.Printf("Size: %s\n", maxItem.Enclosure.Length)
+	fmt.Printf("Link: %s\n", maxItem.Enclosure.URL)
+	return maxItem
+}
+
 func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64) {
 	fmt.Printf("Episode: S%dE%d\n", showProgress.NextEpisode.Season, episodeNum)
 
@@ -49,26 +78,7 @@ func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListE
 		log.Fatalf("Error unmarshaling XML: %v", err)
 	}
 
-	// Find the item with the biggest length
-	var maxItem Item
-	var maxLength int
-
-	for _, item := range rss.Channel.Items {
-		length, err := strconv.Atoi(item.Enclosure.Length)
-		if err != nil {
-			log.Printf("Error converting length to integer: %v", err)
-			continue
-		}
-		if length > maxLength {
-			maxLength = length
-			maxItem = item
-		}
-	}
-
-	fmt.Printf("Item with the biggest length:\n")
-	fmt.Printf("Title: %s\n", maxItem.Title)
-	fmt.Printf("Size: %s\n", maxItem.Enclosure.Length)
-	fmt.Printf("Link: %s\n", maxItem.Enclosure.URL)
+	maxItem := findBiggest(rss)
 
 	exists, err := fileExists(maxItem.Title)
 	if err != nil {
@@ -95,21 +105,40 @@ func getNewEpisodes(token *trakt.Token) {
 		if err != nil {
 			log.Fatalf("Error scanning item: %v", err)
 		}
-		fmt.Printf("%s\n", item.Show.Title)
-		progressParams := &trakt.ProgressParams{
-			Params: trakt.Params{OAuth: token.AccessToken},
-		}
-		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
-		if err != nil {
-			log.Fatalf("Error getting show progress: %v", err)
-		}
+		if item.Show == nil {
+			fmt.Printf("%s, IMDB: %s\n", item.Movie.Title, item.Movie.IMDB)
+			xmlResponse, err := searchMovie(item.Movie.IMDB)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				return
+			}
 
-		//newEpisode := 3
-		//for i := 0; i < newEpisode; i++ {
-		//episodeNum := showProgress.NextEpisode.Number + int64(i)
-		episodeNum := showProgress.NextEpisode.Number
-		getNextEpisodes(showProgress, item, episodeNum)
-		//}
+			var rss Rss
+			// Unmarshal the XML data into the struct
+			err = xml.Unmarshal([]byte(xmlResponse), &rss)
+			if err != nil {
+				log.Fatalf("Error unmarshaling XML: %v", err)
+			}
+			maxItem := findBiggest(rss)
+			uploadFileWithRetries(maxItem.Enclosure.URL, maxItem.Title)
+		}
+		if item.Movie == nil {
+			fmt.Printf("%s\n", item.Show.Title)
+			progressParams := &trakt.ProgressParams{
+				Params: trakt.Params{OAuth: token.AccessToken},
+			}
+			showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
+			if err != nil {
+				log.Fatalf("Error getting show progress: %v", err)
+			}
+
+			//newEpisode := 3
+			//for i := 0; i < newEpisode; i++ {
+			//episodeNum := showProgress.NextEpisode.Number + int64(i)
+			episodeNum := showProgress.NextEpisode.Number
+			getNextEpisodes(showProgress, item, episodeNum)
+			//}
+		}
 	}
 
 	if err := iterator.Err(); err != nil {
