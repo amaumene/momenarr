@@ -13,4 +13,4 @@ USER 1001
 VOLUME /data
 EXPOSE 3000/tcp
 
-CMD [ "/app/maumenarr" ]
+CMD [ "/app/momenarr" ]
