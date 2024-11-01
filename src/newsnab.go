@@ -4,7 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"github.com/jacklaaa89/trakt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -64,7 +64,7 @@ func searchTVShow(TVDB trakt.TVDB, showSeason int, showEpisode int) (string, err
 	}
 
 	// Read the body of the response
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("error reading response body: %v", err)
 	}
@@ -91,7 +91,7 @@ func searchMovie(IMDB trakt.IMDB) (string, error) {
 	}
 
 	// Read the body of the response
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("error reading response body: %v", err)
 	}

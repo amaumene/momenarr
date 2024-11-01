@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
+	"github.com/melbahja/got"
 	"io"
 	"log"
 	"net/http"
@@ -32,29 +34,18 @@ func writeContentToFile(resp *http.Response, file APIFile) error {
 	}
 	defer tempFile.Close()
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var totalDownloaded int64
-	chunkSize := file.Size / 4 // Number of chunks to split the file into
-	startTime := time.Now()
-
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			start := int64(i) * chunkSize
-			end := start + chunkSize
-			if i == 3 {
-				end = file.Size
-			}
-
-			if err := downloadChunk(resp.Request.URL.String(), start, end, tempFile, &mu, &totalDownloaded, startTime, file.ShortName, file.Size); err != nil {
-				log.Println("Error downloading chunk:", err)
-			}
-		}(i)
+	ctx := context.Background()
+	got.UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15"
+	dl := got.NewDownload(ctx, resp.Request.URL.String(), tempFile.Name())
+	// Init
+	if err := dl.Init(); err != nil {
+		fmt.Println(err)
 	}
-
-	wg.Wait()
+	// Start download
+	if err := dl.Start(); err != nil {
+		fmt.Println(err)
+	}
+	fmt.Printf("Average speed was: %.2f MB/s\n", float64(dl.AvgSpeed())/1024/1024)
 
 	// Verify if the downloaded file size matches the expected total size
 	fileInfo, err := tempFile.Stat()
@@ -90,7 +81,7 @@ func writeContentToFile(resp *http.Response, file APIFile) error {
 	return nil
 }
 
-func downloadChunk(url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded *int64, startTime time.Time, shortName string, totalSize int64) error {
+func downloadChunk(url string, start, end int64, tempFile *os.File, mu *sync.Mutex) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("error creating request: %v", err)
@@ -117,14 +108,7 @@ func downloadChunk(url string, start, end int64, tempFile *os.File, mu *sync.Mut
 				mu.Unlock()
 				return fmt.Errorf("error writing to temporary file: %v", writeErr)
 			}
-			start += int64(n)
-			*totalDownloaded += int64(n)
 			mu.Unlock()
-
-			// Print progress outside of the lock to reduce lock contention
-			elapsedTime := time.Since(startTime).Seconds()
-			speed := float64(*totalDownloaded) / elapsedTime / 1024 // speed in KB/s
-			fmt.Printf("\rDownloading %s... %.2f%% complete, Speed: %.2f KB/s", shortName, float64(*totalDownloaded)/float64(totalSize)*100, speed)
 		}
 		if err != nil {
 			if err == io.EOF {

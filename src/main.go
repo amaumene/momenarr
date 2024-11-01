@@ -55,16 +55,11 @@ func findBiggest(rss Rss) Item {
 		}
 	}
 
-	fmt.Printf("Item with the biggest length:\n")
-	fmt.Printf("Title: %s\n", maxItem.Title)
-	fmt.Printf("Size: %s\n", maxItem.Enclosure.Length)
-	fmt.Printf("Link: %s\n", maxItem.Enclosure.URL)
+	fmt.Printf("Choosen file: %s\n", maxItem.Title)
 	return maxItem
 }
 
 func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64) {
-	fmt.Printf("Episode: S%dE%d\n", showProgress.NextEpisode.Season, episodeNum)
-
 	xmlResponse, err := searchTVShow(item.Show.TVDB, int(showProgress.NextEpisode.Season), int(episodeNum))
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -106,7 +101,6 @@ func getNewEpisodes(token *trakt.Token) {
 			log.Fatalf("Error scanning item: %v", err)
 		}
 		if item.Show == nil {
-			fmt.Printf("%s, IMDB: %s\n", item.Movie.Title, item.Movie.IMDB)
 			xmlResponse, err := searchMovie(item.Movie.IMDB)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
@@ -123,7 +117,6 @@ func getNewEpisodes(token *trakt.Token) {
 			uploadFileWithRetries(maxItem.Enclosure.URL, maxItem.Title)
 		}
 		if item.Movie == nil {
-			fmt.Printf("%s\n", item.Show.Title)
 			progressParams := &trakt.ProgressParams{
 				Params: trakt.Params{OAuth: token.AccessToken},
 			}
@@ -195,12 +188,6 @@ func main() {
 	http.HandleFunc("/api/data", handlePostData)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	})
-
-	http.HandleFunc("/refresh", func(w http.ResponseWriter, r *http.Request) {
-		getNewEpisodes(token)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Episodes refreshed successfully"))
 	})
 
 	port := ":3000"

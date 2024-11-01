@@ -61,8 +61,6 @@ func extractVideoInfo(filename string) VideoInfo {
 func compareVideos(file1, file2 string) bool {
 	info1 := extractVideoInfo(file1)
 	info2 := extractVideoInfo(file2)
-	fmt.Println(info1)
-	fmt.Println(info2)
 
 	return info1.Title == info2.Title && info1.Season == info2.Season &&
 		info1.Episode == info2.Episode && info1.VideoQuality == info2.VideoQuality &&
