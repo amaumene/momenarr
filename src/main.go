@@ -132,12 +132,11 @@ func getNewEpisodes(token *trakt.Token) {
 				log.Fatalf("Error getting show progress: %v", err)
 			}
 
-			//newEpisode := 3
-			//for i := 0; i < newEpisode; i++ {
-			//episodeNum := showProgress.NextEpisode.Number + int64(i)
-			episodeNum := showProgress.NextEpisode.Number
-			getNextEpisodes(showProgress, item, episodeNum)
-			//}
+			newEpisode := 3
+			for i := 0; i < newEpisode; i++ {
+				episodeNum := showProgress.NextEpisode.Number + int64(i)
+				getNextEpisodes(showProgress, item, episodeNum)
+			}
 		}
 	}
 
