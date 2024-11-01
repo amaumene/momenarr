@@ -9,32 +9,29 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 )
 
-func setUpTrakt() *trakt.Token {
-	trakt.Key = traktApiKey
-	clientSecret := traktClientSecret
+const (
+	apiURL            = "https://api.torbox.app/v1/api/usenet/mylist"
+	requestDLURL      = "https://api.torbox.app/v1/api/usenet/requestdl"
+	createUsenetDLURL = "https://api.torbox.app/v1/api/usenet/createusenetdownload"
+	controlUsenetURL  = "https://api.torbox.app/v1/api/usenet/controlusenetdownload"
+	maxRetries        = 3
+	retryDelay        = 2 * time.Second
+)
 
-	if trakt.Key == "" || clientSecret == "" {
-		log.Fatalf("TRAKT_API_KEY and TRAKT_CLIENT_SECRET must be set in environment variables")
-	}
-
-	tokenPath := os.Getenv("TOKEN_PATH")
-	if tokenPath == "" {
-		log.Printf("TOKEN_PATH not set, using current directory")
-		tokenPath = "."
-	}
-	tokenFile := tokenPath + "/token.json"
-
-	token, err := getToken(clientSecret, tokenFile)
-	if err != nil {
-		log.Fatalf("Error getting token: %v", err)
-	}
-	return token
-}
+var (
+	torboxApiKey      string
+	downloadDir       string
+	tempDir           string
+	httpClient        = &http.Client{}
+	newsNabHost       string
+	newsNabApiKey     string
+	traktApiKey       string
+	traktClientSecret string
+)
 
 func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64) {
 	fmt.Printf("Episode: S%dE%d\n", showProgress.NextEpisode.Season, episodeNum)
@@ -72,6 +69,16 @@ func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListE
 	fmt.Printf("Title: %s\n", maxItem.Title)
 	fmt.Printf("Size: %s\n", maxItem.Enclosure.Length)
 	fmt.Printf("Link: %s\n", maxItem.Enclosure.URL)
+
+	exists, err := fileExists(maxItem.Title)
+	if err != nil {
+		log.Fatalf("Error checking file existence: %v", err)
+	}
+
+	if exists {
+		fmt.Printf("File already exists on disk, skipping download\n")
+		return
+	}
 	uploadFileWithRetries(maxItem.Enclosure.URL, maxItem.Title)
 }
 
@@ -97,37 +104,18 @@ func getNewEpisodes(token *trakt.Token) {
 			log.Fatalf("Error getting show progress: %v", err)
 		}
 
-		newEpisode := 0
-		for i := 0; i < newEpisode; i++ {
-			episodeNum := showProgress.NextEpisode.Number + int64(i)
-			getNextEpisodes(showProgress, item, episodeNum)
-		}
+		//newEpisode := 3
+		//for i := 0; i < newEpisode; i++ {
+		//episodeNum := showProgress.NextEpisode.Number + int64(i)
+		episodeNum := showProgress.NextEpisode.Number
+		getNextEpisodes(showProgress, item, episodeNum)
+		//}
 	}
 
 	if err := iterator.Err(); err != nil {
 		log.Fatalf("Error iterating history: %v", err)
 	}
 }
-
-const (
-	apiURL            = "https://api.torbox.app/v1/api/usenet/mylist"
-	requestDLURL      = "https://api.torbox.app/v1/api/usenet/requestdl"
-	createUsenetDLURL = "https://api.torbox.app/v1/api/usenet/createusenetdownload"
-	controlUsenetURL  = "https://api.torbox.app/v1/api/usenet/controlusenetdownload"
-	maxRetries        = 3
-	retryDelay        = 2 * time.Second
-)
-
-var (
-	torboxApiKey      string
-	downloadDir       string
-	tempDir           string
-	httpClient        = &http.Client{}
-	newsNabHost       string
-	newsNabApiKey     string
-	traktApiKey       string
-	traktClientSecret string
-)
 
 func init() {
 	traktApiKey = os.Getenv("TRAKT_API_KEY")
@@ -163,39 +151,28 @@ func init() {
 	createDir(tempDir)
 
 	// Clean
-	cleanDir(downloadDir)
 	cleanDir(tempDir)
-}
-
-func createDir(dir string) {
-	err := os.MkdirAll(dir, 0755)
-	if err != nil {
-		log.Fatalf("Failed to create directory %s: %v", dir, err)
-	}
-}
-
-func cleanDir(tempDir string) {
-	files, err := os.ReadDir(tempDir)
-	if err != nil {
-		log.Fatalf("Failed to read temp directory: %v", err)
-	}
-
-	for _, file := range files {
-		err := os.RemoveAll(filepath.Join(tempDir, file.Name()))
-		if err != nil {
-			log.Printf("Failed to remove file %s: %v", file.Name(), err)
-		}
-	}
 }
 
 func main() {
 	token := setUpTrakt()
 
-	go getNewEpisodes(token)
+	go func() {
+		for {
+			getNewEpisodes(token)
+			time.Sleep(1 * time.Hour)
+		}
+	}()
 
 	http.HandleFunc("/api/data", handlePostData)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/refresh", func(w http.ResponseWriter, r *http.Request) {
+		getNewEpisodes(token)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Episodes refreshed successfully"))
 	})
 
 	port := ":3000"

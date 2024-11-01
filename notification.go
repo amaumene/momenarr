@@ -31,16 +31,27 @@ func processNotification(notification Notification) {
 	}
 
 	// Perform a GET request to an API and retrieve the response body
-	respBody, err := performGetRequest(apiURL, torboxApiKey)
-	if err != nil {
-		log.Printf("API request error: %v\n", err)
-		return
+	var respBody []byte
+	var apiResponse APIResponse
+
+	retryDelays := []time.Duration{1 * time.Minute, 2 * time.Minute, 4 * time.Minute}
+
+	for i, delay := range retryDelays {
+		respBody, err = performGetRequest(apiURL, torboxApiKey)
+		if err != nil {
+			log.Printf("API request error: %v\n", err)
+		} else if err := json.Unmarshal(respBody, &apiResponse); err == nil {
+			break
+		} else {
+			log.Printf("Failed to parse API response: %v\n", err)
+		}
+		if i < len(retryDelays)-1 {
+			time.Sleep(delay)
+		}
 	}
 
-	// Parse the API response
-	var apiResponse APIResponse
-	if err := json.Unmarshal(respBody, &apiResponse); err != nil {
-		log.Printf("Failed to parse API response: %v\n", err)
+	if err != nil || json.Unmarshal(respBody, &apiResponse) != nil {
+		log.Println("Exhausted all retries")
 		return
 	}
 

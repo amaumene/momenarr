@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/jacklaaa89/trakt"
 	"github.com/jacklaaa89/trakt/authorization"
+	"log"
 	"os"
 )
 
@@ -67,4 +68,26 @@ func saveTokenToFile(token *trakt.Token, tokenFile string) error {
 		return fmt.Errorf("error encoding token to JSON: %v", err)
 	}
 	return nil
+}
+
+func setUpTrakt() *trakt.Token {
+	trakt.Key = traktApiKey
+	clientSecret := traktClientSecret
+
+	if trakt.Key == "" || clientSecret == "" {
+		log.Fatalf("TRAKT_API_KEY and TRAKT_CLIENT_SECRET must be set in environment variables")
+	}
+
+	tokenPath := os.Getenv("TOKEN_PATH")
+	if tokenPath == "" {
+		log.Printf("TOKEN_PATH not set, using current directory")
+		tokenPath = "."
+	}
+	tokenFile := tokenPath + "/token.json"
+
+	token, err := getToken(clientSecret, tokenFile)
+	if err != nil {
+		log.Fatalf("Error getting token: %v", err)
+	}
+	return token
 }

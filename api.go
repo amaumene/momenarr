@@ -170,7 +170,7 @@ func deleteFile(itemID int, token string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to delete file, status: %s", resp.Status)
 	}
-	fmt.Printf("File deleted successfully\n")
+	fmt.Printf("Remote file deleted successfully\n")
 	return nil
 }
 
