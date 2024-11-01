@@ -7,13 +7,16 @@ import (
 	"github.com/jacklaaa89/trakt/show"
 	"github.com/jacklaaa89/trakt/sync"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"time"
 )
 
 func setUpTrakt() *trakt.Token {
-	trakt.Key = os.Getenv("TRAKT_API_KEY")
-	clientSecret := os.Getenv("TRAKT_CLIENT_SECRET")
+	trakt.Key = traktApiKey
+	clientSecret := traktClientSecret
 
 	if trakt.Key == "" || clientSecret == "" {
 		log.Fatalf("TRAKT_API_KEY and TRAKT_CLIENT_SECRET must be set in environment variables")
@@ -69,23 +72,10 @@ func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListE
 	fmt.Printf("Title: %s\n", maxItem.Title)
 	fmt.Printf("Size: %s\n", maxItem.Enclosure.Length)
 	fmt.Printf("Link: %s\n", maxItem.Enclosure.URL)
+	uploadFileWithRetries(maxItem.Enclosure.URL, maxItem.Title)
 }
 
-var newsNabHost string
-var newsNabApiKey string
-
-func main() {
-	newsNabApiKey = os.Getenv("NEWSNAB_API_KEY")
-	if newsNabApiKey == "" {
-		log.Fatalf("NEWSNAB_API_KEY empty. Example: 12345678901234567890123456789012")
-	}
-	newsNabHost = os.Getenv("NEWSNAB_HOST")
-	if newsNabHost == "" {
-		log.Fatalf("NEWSNAB_HOST empty. Example: nzbs.com, no need for http:// or https://, it has to be https however")
-	}
-
-	token := setUpTrakt()
-
+func getNewEpisodes(token *trakt.Token) {
 	tokenParams := trakt.ListParams{OAuth: token.AccessToken}
 
 	watchListParams := &trakt.ListWatchListParams{
@@ -107,7 +97,7 @@ func main() {
 			log.Fatalf("Error getting show progress: %v", err)
 		}
 
-		newEpisode := 3
+		newEpisode := 0
 		for i := 0; i < newEpisode; i++ {
 			episodeNum := showProgress.NextEpisode.Number + int64(i)
 			getNextEpisodes(showProgress, item, episodeNum)
@@ -117,4 +107,98 @@ func main() {
 	if err := iterator.Err(); err != nil {
 		log.Fatalf("Error iterating history: %v", err)
 	}
+}
+
+const (
+	apiURL            = "https://api.torbox.app/v1/api/usenet/mylist"
+	requestDLURL      = "https://api.torbox.app/v1/api/usenet/requestdl"
+	createUsenetDLURL = "https://api.torbox.app/v1/api/usenet/createusenetdownload"
+	controlUsenetURL  = "https://api.torbox.app/v1/api/usenet/controlusenetdownload"
+	maxRetries        = 3
+	retryDelay        = 2 * time.Second
+)
+
+var (
+	torboxApiKey      string
+	downloadDir       string
+	tempDir           string
+	httpClient        = &http.Client{}
+	newsNabHost       string
+	newsNabApiKey     string
+	traktApiKey       string
+	traktClientSecret string
+)
+
+func init() {
+	traktApiKey = os.Getenv("TRAKT_API_KEY")
+	traktClientSecret = os.Getenv("TRAKT_CLIENT_SECRET")
+
+	if traktApiKey == "" || traktClientSecret == "" {
+		log.Fatalf("TRAKT_API_KEY and TRAKT_CLIENT_SECRET must be set in environment variables")
+	}
+	newsNabApiKey = os.Getenv("NEWSNAB_API_KEY")
+	if newsNabApiKey == "" {
+		log.Fatalf("NEWSNAB_API_KEY empty. Example: 12345678901234567890123456789012")
+	}
+	newsNabHost = os.Getenv("NEWSNAB_HOST")
+	if newsNabHost == "" {
+		log.Fatalf("NEWSNAB_HOST empty. Example: nzbs.com, no need for https://")
+	}
+	torboxApiKey = os.Getenv("TORBOX_API_KEY")
+	if torboxApiKey == "" {
+		log.Fatal("TORBOX_API_KEY must be set in environment variables")
+	}
+	downloadDir = os.Getenv("DOWNLOAD_DIR")
+	if downloadDir == "" {
+		log.Fatal("DOWNLOAD_DIR must be set in environment variables")
+	}
+	// Create if it doesn't exist
+	createDir(downloadDir)
+
+	tempDir = os.Getenv("TEMP_DIR")
+	if tempDir == "" {
+		log.Fatal("TEMP_DIR environment variable is not set")
+	}
+	// Create if it doesn't exist
+	createDir(tempDir)
+
+	// Clean
+	cleanDir(downloadDir)
+	cleanDir(tempDir)
+}
+
+func createDir(dir string) {
+	err := os.MkdirAll(dir, 0755)
+	if err != nil {
+		log.Fatalf("Failed to create directory %s: %v", dir, err)
+	}
+}
+
+func cleanDir(tempDir string) {
+	files, err := os.ReadDir(tempDir)
+	if err != nil {
+		log.Fatalf("Failed to read temp directory: %v", err)
+	}
+
+	for _, file := range files {
+		err := os.RemoveAll(filepath.Join(tempDir, file.Name()))
+		if err != nil {
+			log.Printf("Failed to remove file %s: %v", file.Name(), err)
+		}
+	}
+}
+
+func main() {
+	token := setUpTrakt()
+
+	go getNewEpisodes(token)
+
+	http.HandleFunc("/api/data", handlePostData)
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	port := ":3000"
+	fmt.Printf("Server is running on port %s\n", port)
+	log.Fatal(http.ListenAndServe(port, nil))
 }
