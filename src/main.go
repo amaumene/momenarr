@@ -7,7 +7,7 @@ import (
 	"github.com/jacklaaa89/trakt"
 	"github.com/jacklaaa89/trakt/show"
 	"github.com/jacklaaa89/trakt/sync"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,7 +43,9 @@ func findBiggest(rss Rss) Item {
 
 		length, err := strconv.Atoi(item.Enclosure.Length)
 		if err != nil {
-			log.Printf("Error converting length to integer: %v", err)
+			log.WithFields(log.Fields{
+				"length": item.Enclosure.Length,
+			}).Info("Cannot convert length to int")
 			continue
 		}
 		if length > maxLength {
@@ -65,18 +67,24 @@ func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListE
 	// Unmarshal the XML data into the struct
 	err = xml.Unmarshal([]byte(xmlResponse), &rss)
 	if err != nil {
-		log.Fatalf("Error unmarshaling XML: %v", err)
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Fatal("Error unmarshalling XML")
 	}
 
 	maxItem := findBiggest(rss)
 
 	exists, err := fileExists(maxItem.Title, appConfig.downloadDir)
 	if err != nil {
-		log.Fatalf("Error checking file existence: %v", err)
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Fatal("Error checking file existence")
 	}
 
 	if exists {
-		fmt.Printf("File already exists on disk, skipping download\n")
+		log.WithFields(log.Fields{
+			"file": maxItem.Title,
+		}).Info("File already exists on disk, skipping download")
 		return
 	}
 	//uploadFileWithRetries(maxItem.Enclosure.URL, maxItem.Title)
@@ -94,7 +102,10 @@ func getNewEpisodes(appConfig App) {
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
-			log.Fatalf("Error scanning item: %v", err)
+			log.WithFields(log.Fields{
+				"item": item,
+				"err":  err,
+			}).Fatal("Error scanning item")
 		}
 
 		progressParams := &trakt.ProgressParams{
@@ -102,7 +113,10 @@ func getNewEpisodes(appConfig App) {
 		}
 		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
 		if err != nil {
-			log.Fatalf("Error getting show progress: %v", err)
+			log.WithFields(log.Fields{
+				"show": item.Show.Title,
+				"err":  err,
+			}).Fatal("Error getting show progress")
 		}
 
 		newEpisode := 3
@@ -114,7 +128,9 @@ func getNewEpisodes(appConfig App) {
 	}
 
 	if err := iterator.Err(); err != nil {
-		log.Fatalf("Error iterating history: %v", err)
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Fatal("Error iterating history")
 	}
 }
 
@@ -130,7 +146,10 @@ func getNewMovies(appConfig App) {
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
-			log.Fatalf("Error scanning item: %v", err)
+			log.WithFields(log.Fields{
+				"item": item,
+				"err":  err,
+			}).Fatal("Error scanning item")
 		}
 		xmlResponse, err := searchMovie(item.Movie.IMDB, appConfig)
 		if err != nil {
@@ -141,7 +160,9 @@ func getNewMovies(appConfig App) {
 		var rss Rss
 		err = xml.Unmarshal([]byte(xmlResponse), &rss)
 		if err != nil {
-			log.Fatalf("Error unmarshaling XML: %v", err)
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Fatal("Error unmarshalling XML")
 		}
 		maxItem := findBiggest(rss)
 
@@ -149,23 +170,34 @@ func getNewMovies(appConfig App) {
 
 		UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(maxItem.Enclosure.URL, maxItem.Title)
 		if err != nil {
-			log.Fatalf("Error creating transfer: %v", err)
+			log.WithFields(log.Fields{
+				"item": maxItem.Title,
+				"err":  err,
+			}).Fatal("Error creating transfer")
 		}
 		if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
 			fmt.Printf("Usenet download ID: %d", UsenetCreateDownloadResponse.Data.UsenetDownloadID)
 			UsenetDownload, err := appConfig.TorBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
 			if err != nil {
-				log.Fatalf("Error finding download: %v", err)
+				log.WithFields(log.Fields{
+					"item": UsenetDownload[0].Files[0].ShortName,
+					"err":  err,
+				}).Fatal("Error finding download")
 			}
 			err = downloadFromTorBox(UsenetDownload, appConfig)
 			if err != nil {
-				log.Fatalf("Error downloading file: %v", err)
+				log.WithFields(log.Fields{
+					"item": UsenetDownload[0].Files[0].ShortName,
+					"err":  err,
+				}).Fatal("Error download from torbox")
 			}
 		}
 	}
 
 	if err := iterator.Err(); err != nil {
-		log.Fatalf("Error iterating history: %v", err)
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Fatal("Error iterating history")
 	}
 }
 
@@ -175,7 +207,7 @@ func main() {
 	appConfig.traktToken = setUpTrakt(appConfig, traktApiKey, traktClientSecret)
 	appConfig.TorBoxClient = torbox.NewTorBoxClient(getEnvTorBox())
 
-	getNewMovies(appConfig)
+	//getNewMovies(appConfig)
 
 	http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
 		handlePostData(w, r, appConfig)
