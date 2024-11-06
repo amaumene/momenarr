@@ -70,13 +70,8 @@ func saveTokenToFile(token *trakt.Token, tokenFile string) error {
 	return nil
 }
 
-func setUpTrakt() *trakt.Token {
+func setUpTrakt(appConfig App, traktApiKey string, traktClientSecret string) *trakt.Token {
 	trakt.Key = traktApiKey
-	clientSecret := traktClientSecret
-
-	if trakt.Key == "" || clientSecret == "" {
-		log.Fatalf("TRAKT_API_KEY and TRAKT_CLIENT_SECRET must be set in environment variables")
-	}
 
 	tokenPath := os.Getenv("TOKEN_PATH")
 	if tokenPath == "" {
@@ -85,7 +80,7 @@ func setUpTrakt() *trakt.Token {
 	}
 	tokenFile := tokenPath + "/token.json"
 
-	token, err := getToken(clientSecret, tokenFile)
+	token, err := getToken(traktClientSecret, tokenFile)
 	if err != nil {
 		log.Fatalf("Error getting token: %v", err)
 	}

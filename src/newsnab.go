@@ -47,9 +47,9 @@ type Enclosure struct {
 	Type   string `xml:"type,attr"`
 }
 
-func searchTVShow(TVDB trakt.TVDB, showSeason int, showEpisode int) (string, error) {
+func searchTVShow(TVDB trakt.TVDB, showSeason int, showEpisode int, appConfig App) (string, error) {
 	// Construct the URL with the provided arguments
-	url := fmt.Sprintf("https://%s/api?apikey=%s&t=tvsearch&tvdbid=%d&season=%d&ep=%d", newsNabHost, newsNabApiKey, TVDB, showSeason, showEpisode)
+	url := fmt.Sprintf("https://%s/api?apikey=%s&t=tvsearch&tvdbid=%d&season=%d&ep=%d", appConfig.newsNabHost, appConfig.newsNabApiKey, TVDB, showSeason, showEpisode)
 
 	// Make the HTTP GET request
 	resp, err := http.Get(url)
@@ -72,11 +72,10 @@ func searchTVShow(TVDB trakt.TVDB, showSeason int, showEpisode int) (string, err
 	return string(body), nil
 }
 
-func searchMovie(IMDB trakt.IMDB) (string, error) {
+func searchMovie(IMDB trakt.IMDB, appConfig App) (string, error) {
 	imdbID := strings.TrimPrefix(string(IMDB), "tt")
 	// Construct the URL with the provided arguments
-	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%s", newsNabHost, newsNabApiKey, imdbID)
-	fmt.Println(url)
+	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%s", appConfig.newsNabHost, appConfig.newsNabApiKey, imdbID)
 
 	// Make the HTTP GET request
 	resp, err := http.Get(url)

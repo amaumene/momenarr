@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/amaumene/momenarr/torbox"
 	"github.com/razsteinmetz/go-ptn"
 	"log"
 	"os"
@@ -67,7 +68,7 @@ func compareVideos(file1, file2 string) bool {
 		info1.AudioQuality == info2.AudioQuality && info1.GroupName == info2.GroupName
 }
 
-func fileExists(filename string) (bool, error) {
+func fileExists(filename string, downloadDir string) (bool, error) {
 	{
 		files, err := os.ReadDir(downloadDir)
 		if err != nil {
@@ -76,10 +77,30 @@ func fileExists(filename string) (bool, error) {
 
 		for _, file := range files {
 			fileNameWithoutExt := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-			if compareVideos(fileNameWithoutExt, filename) {
+			//if compareVideos(fileNameWithoutExt, filename) {
+			//	return true, nil
+			//}
+			if fileNameWithoutExt == filename {
 				return true, nil
 			}
 		}
 		return false, nil
 	}
+}
+
+func findBiggestFile(downloads []torbox.UsenetDownload) ([]torbox.UsenetDownload, error) {
+	for _, download := range downloads {
+		largestFile := download.Files[0]
+		for _, file := range download.Files {
+			if file.Size > largestFile.Size {
+				largestFile = file
+			}
+		}
+		filteredDownload := []torbox.UsenetDownload{}
+
+		filteredDownload = append(filteredDownload, download)
+		filteredDownload[0].Files = []torbox.UsenetDownloadFile{largestFile}
+		return filteredDownload, nil
+	}
+	return nil, fmt.Errorf("cannot find biggest file in download")
 }
