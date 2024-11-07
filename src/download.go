@@ -1,15 +1,16 @@
 package main
 
 import (
-	"context"
 	"crypto/md5"
 	"fmt"
-	"github.com/amaumene/momenarr/got"
 	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 )
 
 func compareMD5sum(appConfig App, UsenetDownload []torbox.UsenetDownload) (bool, error) {
@@ -31,40 +32,6 @@ func compareMD5sum(appConfig App, UsenetDownload []torbox.UsenetDownload) (bool,
 	}
 	return true, nil
 }
-func downloadWithGot(fileLink string, UsenetDownload []torbox.UsenetDownload, appConfig App) error {
-	ctx := context.Background()
-	//ctx, cancel := context.WithCancel(ctx)
-	download := got.NewDownload(ctx, fileLink, filepath.Join(appConfig.downloadDir, UsenetDownload[0].Files[0].ShortName))
-	download.Concurrency = 4
-	download.ChunkSize = 1073741824 // 1GiB
-	download.Interval = 10000       // 10 sec
-
-	got.UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15"
-
-	if err := download.Init(); err != nil {
-		return err
-	}
-
-	go func() {
-		if err := download.Start(); err != nil {
-			log.WithFields(log.Fields{
-				"fileName": UsenetDownload[0].Files[0].ShortName,
-			}).Fatal("Error when downloading")
-		}
-	}()
-
-	download.RunProgress(func(d *got.Download) {
-		log.WithFields(log.Fields{
-			"fileName": UsenetDownload[0].Files[0].ShortName,
-			"speed":    download.AvgSpeed() / 1024 / 1024,
-			"size":     download.Size() / 1024 / 1024,
-		}).Info("Downloading")
-	})
-	log.WithFields(log.Fields{
-		"fileName": UsenetDownload[0].Files[0].ShortName,
-	}).Info("Download finished")
-	return nil
-}
 
 func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) error {
 	biggestUsenetDownload, err := findBiggestFile(UsenetDownload)
@@ -81,13 +48,13 @@ func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) e
 		return err
 	}
 
-	err = downloadWithGot(fileLink, biggestUsenetDownload, appConfig)
+	err = downloadUsingHTTP(fileLink, biggestUsenetDownload, appConfig)
 	if err != nil {
 		fileLink, err = appConfig.TorBoxClient.RequestUsenetDownloadLink(biggestUsenetDownload)
 		if err != nil {
 			return err
 		}
-		return downloadWithGot(fileLink, biggestUsenetDownload, appConfig)
+		return downloadUsingHTTP(fileLink, biggestUsenetDownload, appConfig)
 	}
 
 	downloadedMD5, err := compareMD5sum(appConfig, biggestUsenetDownload)
@@ -96,10 +63,124 @@ func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) e
 		if err != nil {
 			return err
 		}
-		return downloadWithGot(fileLink, biggestUsenetDownload, appConfig)
+		return downloadUsingHTTP(fileLink, biggestUsenetDownload, appConfig)
 	}
 	log.WithFields(log.Fields{
 		"fileName": biggestUsenetDownload[0].Files[0].ShortName,
 	}).Info("Download and md5sum check finished")
+	return nil
+}
+
+func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, appConfig App) error {
+	httpClient := &http.Client{}
+	resp, err := httpClient.Get(fileLink)
+	if err != nil {
+		return fmt.Errorf("failed to download file content: %v", err)
+	}
+	defer resp.Body.Close()
+
+	tempFile, err := os.CreateTemp(appConfig.tempDir, "tempfile-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %v", err)
+	}
+	defer tempFile.Close()
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var totalDownloaded int64
+	chunkSize := int64(1073741824) // 1GiB chunk
+	startTime := time.Now()
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			start := int64(i) * chunkSize
+			end := start + chunkSize
+			if i == 3 {
+				end = usenetDownload[0].Files[0].Size
+			}
+
+			if err := fetchFileChunk(httpClient, resp.Request.URL.String(), start, end, tempFile, &mu, totalDownloaded, startTime, usenetDownload[0].Files[0].ShortName, usenetDownload[0].Files[0].Size); err != nil {
+				log.Println("Error downloading chunk:", err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	finalFilePath := filepath.Join(appConfig.downloadDir, usenetDownload[0].Files[0].ShortName)
+	if err := os.Rename(tempFile.Name(), finalFilePath); err != nil {
+		return fmt.Errorf("failed to rename temporary file: %v", err)
+	}
+
+	return nil
+}
+
+func fetchFileChunk(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded int64, startTime time.Time, shortName string, totalSize int64) error {
+	const maxRetries = 3
+	const retryDelay = 2 * time.Second
+
+	var localErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		localErr = fetchChunkWithRetry(httpClient, url, start, end, tempFile, mu, &totalDownloaded, startTime, shortName, totalSize)
+		if localErr == nil {
+			return nil
+		}
+
+		if attempt < maxRetries {
+			fmt.Printf("Error downloading chunk (attempt %d/%d): %v. Retrying in %v...\n", attempt, maxRetries, localErr, retryDelay)
+			time.Sleep(retryDelay)
+		} else {
+			return fmt.Errorf("error downloading chunk after %d attempts: %v", maxRetries, localErr)
+		}
+	}
+	return nil
+}
+
+func fetchChunkWithRetry(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded *int64, startTime time.Time, shortName string, totalSize int64) error {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("error creating request: %v", err)
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end-1))
+	req.Proto = "HTTP/2.0"
+	partResp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("error performing request: %v", err)
+	}
+	defer partResp.Body.Close()
+
+	// Check for non-success status code
+	if partResp.StatusCode < 200 || partResp.StatusCode >= 300 {
+		return fmt.Errorf("error: received non-success status code %d", partResp.StatusCode)
+	}
+
+	partBuf := make([]byte, 32*1024)
+	for {
+		n, err := partResp.Body.Read(partBuf)
+		if n > 0 {
+			mu.Lock()
+			if _, writeErr := tempFile.WriteAt(partBuf[:n], start); writeErr != nil {
+				mu.Unlock()
+				return fmt.Errorf("error writing to temporary file: %v", writeErr)
+			}
+			start += int64(n)
+			*totalDownloaded += int64(n)
+			mu.Unlock()
+			// Print progress outside of the lock to reduce lock contention
+			elapsedTime := time.Since(startTime).Seconds()
+			speed := float64(*totalDownloaded) / elapsedTime / 1024 // speed in KB/s
+			fmt.Printf("\rDownloading %s... %.2f%% complete, Speed: %.2f KB/s", shortName, float64(*totalDownloaded)/float64(totalSize)*100, speed)
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			// Retry the current chunk due to an error
+			return fmt.Errorf("error reading response body: %v", err)
+		}
+	}
 	return nil
 }
