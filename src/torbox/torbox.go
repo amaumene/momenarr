@@ -127,11 +127,7 @@ func (pm *TorBox) ControlUsenetDownload(id int, operation string) error {
 		return err
 	}
 
-	//body := &bytes.Buffer{}
-	//writer := multipart.NewWriter(body)
-
 	// Create a map with the data to send
-
 	data := map[string]interface{}{
 		"usenet_id": id,
 		"operation": operation,
@@ -142,7 +138,7 @@ func (pm *TorBox) ControlUsenetDownload(id int, operation string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON: %v", err)
 	}
-	fmt.Printf("JSON: %s\n", jsonData)
+
 	req, err := http.NewRequest("POST", url.String(), bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %v", err)
