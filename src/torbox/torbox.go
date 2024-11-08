@@ -48,7 +48,7 @@ func (pm *TorBox) createTorBoxURLrequestDL(urlPath string, usenet_id int, file_i
 }
 
 var (
-	ErrAPIKeyNotSet = fmt.Errorf("premiumize.me API key not set")
+	ErrAPIKeyNotSet = fmt.Errorf("TorBox API key not set")
 )
 
 func (pm *TorBox) CreateUsenetDownload(link string, name string) (UsenetCreateDownloadResponse, error) {
@@ -115,6 +115,53 @@ func (pm *TorBox) CreateUsenetDownload(link string, name string) (UsenetCreateDo
 	}
 
 	return UsenetCreateDownloadResponse, nil
+}
+
+func (pm *TorBox) ControlUsenetDownload(id int, operation string) error {
+	if pm.APIKey == "" {
+		return ErrAPIKeyNotSet
+	}
+
+	url, err := pm.createTorBoxURL("/usenet/controlusenetdownload")
+	if err != nil {
+		return err
+	}
+
+	//body := &bytes.Buffer{}
+	//writer := multipart.NewWriter(body)
+
+	// Create a map with the data to send
+
+	data := map[string]interface{}{
+		"usenet_id": id,
+		"operation": operation,
+	}
+
+	// Marshal the map into a JSON byte slice
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %v", err)
+	}
+	fmt.Printf("JSON: %s\n", jsonData)
+	req, err := http.NewRequest("POST", url.String(), bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", pm.APIKey))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to upload file: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to control download, status: %s, response: %s", resp.Status, string(respBody))
+	}
+	return nil
 }
 
 func (pm *TorBox) ListUsenetDownloads() ([]UsenetDownload, error) {

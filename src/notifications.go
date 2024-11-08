@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/amaumene/momenarr/torbox"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"regexp"
 )
 
@@ -18,7 +18,34 @@ func processNotification(notification torbox.Notification, appConfig App) {
 		log.Printf("Error finding download: %v\n", err)
 		return
 	}
-	downloadFromTorBox(UsenetDownload, appConfig)
+
+	if notification.Data.Title == "Usenet Download Completed" {
+		downloadFromTorBox(UsenetDownload, appConfig)
+	}
+	if notification.Data.Title == "Usenet Download Failed" {
+		fmt.Printf("Usenet Download Failed: %d\n", UsenetDownload[0].ID)
+		err = appConfig.TorBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+		if err != nil {
+			log.Printf("Error deleting download: %v\n", err)
+			return
+		}
+		for i, movie := range currentMovies {
+			for j, item := range movie.Items {
+				if item.Title == extractedString && item.Failed == false {
+					currentMovies[i].Items[j].Failed = true
+					UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(item.Enclosure.URL, item.Title)
+					if err != nil {
+						log.WithFields(log.Fields{
+							"item": movie.Items[0].Title,
+							"err":  err,
+						}).Fatal("Error creating transfer")
+					}
+					fmt.Println(UsenetCreateDownloadResponse)
+					break
+				}
+			}
+		}
+	}
 	return
 }
 

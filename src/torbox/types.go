@@ -84,6 +84,13 @@ type UsenetOperationRequest struct {
 	All       bool   `json:"all,omitempty"`
 }
 
+type UsenetOperationResponse struct {
+	Success bool    `json:"success"`
+	Error   *string `json:"error"`
+	Detail  string  `json:"detail"`
+	Data    bool    `json:"data,omitempty"`
+}
+
 type Notification struct {
 	Type      string           `json:"type"`
 	Timestamp time.Time        `json:"timestamp"`

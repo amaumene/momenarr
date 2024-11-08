@@ -39,11 +39,12 @@ type Item struct {
 	Category    string    `xml:"category"`
 	Description string    `xml:"description"`
 	Enclosure   Enclosure `xml:"enclosure"`
+	Failed      bool
 }
 
 type Enclosure struct {
 	URL    string `xml:"url,attr"`
-	Length string `xml:"length,attr"`
+	Length int64  `xml:"length,attr"`
 	Type   string `xml:"type,attr"`
 }
 
