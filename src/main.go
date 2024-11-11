@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 )
 
 type App struct {
@@ -71,42 +72,45 @@ func sortNZBsShows(rss Rss, show *trakt.Show) Rss {
 }
 
 func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64, appConfig App) {
-	xmlResponse, err := searchTVShow(item.Show.TVDB, int(showProgress.NextEpisode.Season), int(episodeNum), appConfig)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
+	fileName := fmt.Sprintf("%s S%02dE%02d", item.Show.Title, showProgress.NextEpisode.Season, episodeNum)
+	if !fileExists(fileName, appConfig.downloadDir) {
+		xmlResponse, err := searchTVShow(item.Show.TVDB, int(showProgress.NextEpisode.Season), int(episodeNum), appConfig)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
 
-	var rss Rss
-	err = xml.Unmarshal([]byte(xmlResponse), &rss)
-	if err != nil {
-		log.WithFields(log.Fields{
-			"err": err,
-		}).Fatal("Error unmarshalling XML")
-	}
-	filteredRss := sortNZBsShows(rss, item.Show)
+		var rss Rss
+		err = xml.Unmarshal([]byte(xmlResponse), &rss)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Fatal("Error unmarshalling XML")
+		}
+		filteredRss := sortNZBsShows(rss, item.Show)
 
-	show := findOrCreateData(item.Show.Title + " S" + strconv.Itoa(int(showProgress.NextEpisode.Season)) + "E" + strconv.Itoa(int(episodeNum)))
-	show.Items = append(show.Items, filteredRss.Channel.Items...)
-	log.WithFields(log.Fields{
-		"name":    show.Items[0].Title,
-		"season":  showProgress.NextEpisode.Season,
-		"episode": episodeNum,
-	}).Info("Going to download")
-	UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(show.Items[0].Enclosure.URL, show.Items[0].Title)
-	if err != nil {
+		show := findOrCreateData(item.Show.Title + " S" + strconv.Itoa(int(showProgress.NextEpisode.Season)) + "E" + strconv.Itoa(int(episodeNum)))
+		show.Items = append(show.Items, filteredRss.Channel.Items...)
 		log.WithFields(log.Fields{
-			"show": show.Items[0].Title,
-			"err":  err,
-		}).Fatal("Error creating transfer")
-	}
-	if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
-		err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
+			"name":    show.Items[0].Title,
+			"season":  showProgress.NextEpisode.Season,
+			"episode": episodeNum,
+		}).Info("Going to download")
+		UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(show.Items[0].Enclosure.URL, show.Items[0].Title)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"show": show.Items[0].Title,
 				"err":  err,
-			}).Fatal("Error downloading cached data")
+			}).Fatal("Error creating transfer")
+		}
+		if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
+			err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
+			if err != nil {
+				log.WithFields(log.Fields{
+					"show": show.Items[0].Title,
+					"err":  err,
+				}).Fatal("Error downloading cached data")
+			}
 		}
 	}
 }
@@ -184,39 +188,41 @@ func getNewMovies(appConfig App) {
 				"err":  err,
 			}).Fatal("Error scanning item")
 		}
-		xmlResponse, err := searchMovie(item.Movie.IMDB, appConfig)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			return
-		}
+		if !fileExists(item.Movie.Title, appConfig.downloadDir) {
+			xmlResponse, err := searchMovie(item.Movie.IMDB, appConfig)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				return
+			}
 
-		var rss Rss
-		err = xml.Unmarshal([]byte(xmlResponse), &rss)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"err": err,
-			}).Fatal("Error unmarshalling XML")
-		}
-		filteredRss := sortNZBsMovies(rss, item.Movie)
-		movie := findOrCreateData(item.Movie.Title)
-		movie.Items = append(movie.Items, filteredRss.Channel.Items...)
+			var rss Rss
+			err = xml.Unmarshal([]byte(xmlResponse), &rss)
+			if err != nil {
+				log.WithFields(log.Fields{
+					"err": err,
+				}).Fatal("Error unmarshalling XML")
+			}
+			filteredRss := sortNZBsMovies(rss, item.Movie)
+			movie := findOrCreateData(item.Movie.Title)
+			movie.Items = append(movie.Items, filteredRss.Channel.Items...)
 
-		fmt.Printf("Choosen file: %s", movie.Items[0].Title)
+			fmt.Printf("Choosen file: %s", movie.Items[0].Title)
 
-		UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(movie.Items[0].Enclosure.URL, movie.Items[0].Title)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"movie": movie.Items[0].Title,
-				"err":   err,
-			}).Fatal("Error creating transfer")
-		}
-		if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
-			err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
+			UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(movie.Items[0].Enclosure.URL, movie.Items[0].Title)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"movie": movie.Items[0].Title,
 					"err":   err,
-				}).Fatal("Error downloading cached data")
+				}).Fatal("Error creating transfer")
+			}
+			if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
+				err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
+				if err != nil {
+					log.WithFields(log.Fields{
+						"movie": movie.Items[0].Title,
+						"err":   err,
+					}).Fatal("Error downloading cached data")
+				}
 			}
 		}
 	}
@@ -257,8 +263,13 @@ func main() {
 	appConfig.traktToken = setUpTrakt(appConfig, traktApiKey, traktClientSecret)
 	appConfig.TorBoxClient = torbox.NewTorBoxClient(getEnvTorBox())
 
-	//getNewMovies(appConfig)
-	getNewEpisodes(appConfig)
+	go func() {
+		for {
+			getNewMovies(appConfig)
+			getNewEpisodes(appConfig)
+			time.Sleep(6 * time.Hour)
+		}
+	}()
 
 	http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
 		handlePostData(w, r, appConfig)

@@ -49,12 +49,9 @@ func extractVideoInfo(filename string) VideoInfo {
 	}
 
 	return VideoInfo{
-		Title:        strings.ToLower(strings.TrimSpace(parsed.Title)),
-		Season:       fmt.Sprintf("%02d", parsed.Season),
-		Episode:      fmt.Sprintf("%02d", parsed.Episode),
-		VideoQuality: strings.ToLower(strings.TrimSpace(parsed.Resolution)),
-		AudioQuality: strings.ToLower(strings.TrimSpace(parsed.Audio)),
-		GroupName:    strings.ToLower(strings.TrimSpace(parsed.Group)),
+		Title:   strings.ToLower(strings.TrimSpace(parsed.Title)),
+		Season:  fmt.Sprintf("%02d", parsed.Season),
+		Episode: fmt.Sprintf("%02d", parsed.Episode),
 	}
 }
 
@@ -64,27 +61,24 @@ func compareVideos(file1, file2 string) bool {
 	info2 := extractVideoInfo(file2)
 
 	return info1.Title == info2.Title && info1.Season == info2.Season &&
-		info1.Episode == info2.Episode && info1.VideoQuality == info2.VideoQuality &&
-		info1.AudioQuality == info2.AudioQuality && info1.GroupName == info2.GroupName
+		info1.Episode == info2.Episode
 }
 
-func fileExists(filename string, downloadDir string) (bool, error) {
+func fileExists(filename string, downloadDir string) bool {
 	{
 		files, err := os.ReadDir(downloadDir)
 		if err != nil {
-			return false, fmt.Errorf("failed to read download directory: %v", err)
+			return false
+			//	log this error
 		}
 
 		for _, file := range files {
 			fileNameWithoutExt := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-			//if compareVideos(fileNameWithoutExt, filename) {
-			//	return true, nil
-			//}
-			if fileNameWithoutExt == filename {
-				return true, nil
+			if compareVideos(fileNameWithoutExt, filename) {
+				return true
 			}
 		}
-		return false, nil
+		return false
 	}
 }
 
