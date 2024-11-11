@@ -50,19 +50,17 @@ func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) e
 
 	err = downloadUsingHTTP(fileLink, biggestUsenetDownload, appConfig)
 	if err != nil {
-		fileLink, err = appConfig.TorBoxClient.RequestUsenetDownloadLink(biggestUsenetDownload)
-		if err != nil {
-			return err
-		}
+		log.WithFields(log.Fields{
+			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
+		}).Info("Download failed, trying again")
 		return downloadFromTorBox(UsenetDownload, appConfig)
 	}
 
 	downloadedMD5, err := compareMD5sum(appConfig, biggestUsenetDownload)
 	if downloadedMD5 == false {
-		fileLink, err = appConfig.TorBoxClient.RequestUsenetDownloadLink(biggestUsenetDownload)
-		if err != nil {
-			return err
-		}
+		log.WithFields(log.Fields{
+			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
+		}).Info("Check md5sum failed, trying again")
 		return downloadFromTorBox(UsenetDownload, appConfig)
 	}
 	log.WithFields(log.Fields{
@@ -145,7 +143,6 @@ func fetchChunkWithRetry(httpClient *http.Client, url string, start, end int64, 
 		return fmt.Errorf("error creating request: %v", err)
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end-1))
-	req.Proto = "HTTP/2.0"
 	partResp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("error performing request: %v", err)
