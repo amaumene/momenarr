@@ -272,7 +272,7 @@ func main() {
 
 	go func() {
 		for {
-			cleanWatched(appConfig)
+			//cleanWatched(appConfig)
 			getNewMovies(appConfig)
 			getNewEpisodes(appConfig)
 			time.Sleep(6 * time.Hour)
