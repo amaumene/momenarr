@@ -54,7 +54,7 @@ func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) e
 		if err != nil {
 			return err
 		}
-		return downloadUsingHTTP(fileLink, biggestUsenetDownload, appConfig)
+		return downloadFromTorBox(UsenetDownload, appConfig)
 	}
 
 	downloadedMD5, err := compareMD5sum(appConfig, biggestUsenetDownload)
@@ -63,7 +63,7 @@ func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) e
 		if err != nil {
 			return err
 		}
-		return downloadUsingHTTP(fileLink, biggestUsenetDownload, appConfig)
+		return downloadFromTorBox(UsenetDownload, appConfig)
 	}
 	log.WithFields(log.Fields{
 		"fileName": biggestUsenetDownload[0].Files[0].ShortName,

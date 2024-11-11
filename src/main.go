@@ -247,7 +247,7 @@ func downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownload
 	}
 	if UsenetDownload[0].Cached {
 		log.WithFields(log.Fields{
-			"name": UsenetDownload[0].Files[0].ShortName,
+			"name": UsenetDownload[0].Name,
 		}).Info("Starting download from cached data")
 		err = downloadFromTorBox(UsenetDownload, appConfig)
 		if err != nil {
