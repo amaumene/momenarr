@@ -118,8 +118,8 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 }
 
 func fetchFileChunk(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded int64, startTime time.Time, shortName string, totalSize int64) error {
-	const maxRetries = 3
-	const retryDelay = 2 * time.Second
+	const maxRetries = 300
+	const retryDelay = 10 * time.Second
 
 	var localErr error
 
@@ -170,9 +170,9 @@ func fetchChunkWithRetry(httpClient *http.Client, url string, start, end int64, 
 			*totalDownloaded += int64(n)
 			mu.Unlock()
 			// Print progress outside of the lock to reduce lock contention
-			elapsedTime := time.Since(startTime).Seconds()
-			speed := float64(*totalDownloaded) / elapsedTime / 1024 // speed in KB/s
-			fmt.Printf("\rDownloading %s... %.2f%% complete, Speed: %.2f KB/s", shortName, float64(*totalDownloaded)/float64(totalSize)*100, speed)
+			//elapsedTime := time.Since(startTime).Seconds()
+			//speed := float64(*totalDownloaded) / elapsedTime / 1024 // speed in KB/s
+			//fmt.Printf("\rDownloading %s... %.2f%% complete, Speed: %.2f KB/s", shortName, float64(*totalDownloaded)/float64(totalSize)*100, speed)
 		}
 		if err != nil {
 			if err == io.EOF {
