@@ -1,6 +1,6 @@
 FROM registry.access.redhat.com/ubi9/go-toolset AS builder
 
-COPY ./src/* .
+COPY ./* .
 
 RUN rm go.mod && rm go.sum
 
