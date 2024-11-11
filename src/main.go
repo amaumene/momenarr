@@ -73,7 +73,7 @@ func sortNZBsShows(rss Rss, show *trakt.Show) Rss {
 
 func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64, appConfig App) {
 	fileName := fmt.Sprintf("%s S%02dE%02d", item.Show.Title, showProgress.NextEpisode.Season, episodeNum)
-	if !fileExists(fileName, appConfig.downloadDir) {
+	if fileExists(fileName, appConfig.downloadDir) != "" {
 		xmlResponse, err := searchTVShow(item.Show.TVDB, int(showProgress.NextEpisode.Season), int(episodeNum), appConfig)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -188,7 +188,7 @@ func getNewMovies(appConfig App) {
 				"err":  err,
 			}).Fatal("Error scanning item")
 		}
-		if !fileExists(item.Movie.Title, appConfig.downloadDir) {
+		if fileExists(item.Movie.Title, appConfig.downloadDir) != "" {
 			xmlResponse, err := searchMovie(item.Movie.IMDB, appConfig)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
@@ -265,8 +265,9 @@ func main() {
 
 	go func() {
 		for {
-			getNewMovies(appConfig)
-			getNewEpisodes(appConfig)
+			cleanWatched(appConfig)
+			//getNewMovies(appConfig)
+			//getNewEpisodes(appConfig)
 			time.Sleep(6 * time.Hour)
 		}
 	}()
