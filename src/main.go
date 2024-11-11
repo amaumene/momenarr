@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -43,12 +42,9 @@ func sortNZBsMovies(rss Rss, movie *trakt.Movie) Rss {
 	returnedRss := Rss{}
 	for _, item := range rss.Channel.Items {
 		info, _ := ptn.Parse(item.Title)
-		if int64(info.Year) == movie.Year && info.Title == movie.Title {
-			if strings.ToLower(info.Quality) == strings.ToLower("BluRay") || strings.ToLower(info.Quality) == strings.ToLower("WEB-DL") {
-				if info.Resolution == "1080p" || info.Resolution == "2160p" {
-					fmt.Printf("Choosen file: %v", item.Title)
-					returnedRss.Channel.Items = append(returnedRss.Channel.Items, item)
-				}
+		if int64(info.Year) == movie.Year {
+			if info.Resolution == "1080p" || info.Resolution == "2160p" {
+				returnedRss.Channel.Items = append(returnedRss.Channel.Items, item)
 			}
 		}
 	}
@@ -63,10 +59,8 @@ func sortNZBsShows(rss Rss, show *trakt.Show) Rss {
 	for _, item := range rss.Channel.Items {
 		info, _ := ptn.Parse(item.Title)
 		if info.Title == show.Title {
-			if strings.ToLower(info.Quality) == strings.ToLower("BluRay") || strings.ToLower(info.Quality) == strings.ToLower("WEB-DL") {
-				if info.Resolution == "1080p" || info.Resolution == "2160p" {
-					returnedRss.Channel.Items = append(returnedRss.Channel.Items, item)
-				}
+			if info.Resolution == "1080p" || info.Resolution == "2160p" {
+				returnedRss.Channel.Items = append(returnedRss.Channel.Items, item)
 			}
 		}
 	}
@@ -211,22 +205,26 @@ func getNewMovies(appConfig App) {
 			movie := findOrCreateData(item.Movie.Title)
 			movie.Items = append(movie.Items, filteredRss.Channel.Items...)
 
-			fmt.Printf("Choosen file: %v", movie.Items)
-
-			UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(movie.Items[0].Enclosure.URL, movie.Items[0].Title)
-			if err != nil {
+			if len(movie.Items) > 0 {
 				log.WithFields(log.Fields{
-					"movie": movie.Items[0].Title,
-					"err":   err,
-				}).Fatal("Error creating transfer")
-			}
-			if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
-				err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
+					"name": movie.Items[0].Title,
+				}).Info("Going to download")
+
+				UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(movie.Items[0].Enclosure.URL, movie.Items[0].Title)
 				if err != nil {
 					log.WithFields(log.Fields{
 						"movie": movie.Items[0].Title,
 						"err":   err,
-					}).Fatal("Error downloading cached data")
+					}).Fatal("Error creating transfer")
+				}
+				if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
+					err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
+					if err != nil {
+						log.WithFields(log.Fields{
+							"movie": movie.Items[0].Title,
+							"err":   err,
+						}).Fatal("Error downloading cached data")
+					}
 				}
 			}
 		}
