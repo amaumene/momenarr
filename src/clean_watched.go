@@ -11,7 +11,6 @@ import (
 )
 
 func cleanWatched(appConfig App) {
-
 	processHistoryShows(appConfig)
 }
 

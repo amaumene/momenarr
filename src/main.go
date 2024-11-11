@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -43,8 +44,9 @@ func sortNZBsMovies(rss Rss, movie *trakt.Movie) Rss {
 	for _, item := range rss.Channel.Items {
 		info, _ := ptn.Parse(item.Title)
 		if int64(info.Year) == movie.Year && info.Title == movie.Title {
-			if info.Quality == "BluRay" || info.Quality == "WEB-DL" {
+			if strings.ToLower(info.Quality) == strings.ToLower("BluRay") || strings.ToLower(info.Quality) == strings.ToLower("WEB-DL") {
 				if info.Resolution == "1080p" || info.Resolution == "2160p" {
+					fmt.Printf("Choosen file: %v", item.Title)
 					returnedRss.Channel.Items = append(returnedRss.Channel.Items, item)
 				}
 			}
@@ -61,7 +63,7 @@ func sortNZBsShows(rss Rss, show *trakt.Show) Rss {
 	for _, item := range rss.Channel.Items {
 		info, _ := ptn.Parse(item.Title)
 		if info.Title == show.Title {
-			if info.Quality == "BluRay" || info.Quality == "WEB-DL" {
+			if strings.ToLower(info.Quality) == strings.ToLower("BluRay") || strings.ToLower(info.Quality) == strings.ToLower("WEB-DL") {
 				if info.Resolution == "1080p" || info.Resolution == "2160p" {
 					returnedRss.Channel.Items = append(returnedRss.Channel.Items, item)
 				}
@@ -73,7 +75,7 @@ func sortNZBsShows(rss Rss, show *trakt.Show) Rss {
 
 func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64, appConfig App) {
 	fileName := fmt.Sprintf("%s S%02dE%02d", item.Show.Title, showProgress.NextEpisode.Season, episodeNum)
-	if fileExists(fileName, appConfig.downloadDir) != "" {
+	if fileExists(fileName, appConfig.downloadDir) == "" {
 		xmlResponse, err := searchTVShow(item.Show.TVDB, int(showProgress.NextEpisode.Season), int(episodeNum), appConfig)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -188,7 +190,10 @@ func getNewMovies(appConfig App) {
 				"err":  err,
 			}).Fatal("Error scanning item")
 		}
-		if fileExists(item.Movie.Title, appConfig.downloadDir) != "" {
+		if fileExists(item.Movie.Title, appConfig.downloadDir) == "" {
+			log.WithFields(log.Fields{
+				"movie": item.Movie.Title,
+			}).Info("Looking for movie")
 			xmlResponse, err := searchMovie(item.Movie.IMDB, appConfig)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
@@ -206,7 +211,7 @@ func getNewMovies(appConfig App) {
 			movie := findOrCreateData(item.Movie.Title)
 			movie.Items = append(movie.Items, filteredRss.Channel.Items...)
 
-			fmt.Printf("Choosen file: %s", movie.Items[0].Title)
+			fmt.Printf("Choosen file: %v", movie.Items)
 
 			UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(movie.Items[0].Enclosure.URL, movie.Items[0].Title)
 			if err != nil {

@@ -65,21 +65,19 @@ func compareVideos(file1, file2 string) bool {
 }
 
 func fileExists(filename string, downloadDir string) string {
-	{
-		files, err := os.ReadDir(downloadDir)
-		if err != nil {
-			return ""
-			//	log this error
-		}
-
-		for _, file := range files {
-			fileNameWithoutExt := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-			if compareVideos(fileNameWithoutExt, filename) {
-				return file.Name()
-			}
-		}
+	files, err := os.ReadDir(downloadDir)
+	if err != nil {
 		return ""
+		//	log this error
 	}
+
+	for _, file := range files {
+		fileNameWithoutExt := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+		if compareVideos(fileNameWithoutExt, filename) {
+			return file.Name()
+		}
+	}
+	return ""
 }
 
 func findBiggestFile(downloads []torbox.UsenetDownload) ([]torbox.UsenetDownload, error) {
