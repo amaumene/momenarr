@@ -253,6 +253,10 @@ func downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownload
 		if err != nil {
 			return err
 		}
+		err = appConfig.TorBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 	log.WithFields(log.Fields{
