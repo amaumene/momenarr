@@ -1,4 +1,4 @@
-package momenarr
+package main
 
 import (
 	"fmt"
