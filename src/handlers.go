@@ -1,8 +1,8 @@
-package main
+package momenarr
 
 import (
 	"encoding/json"
-	"github.com/amaumene/momenarr/torbox"
+	"github.com/amaumene/momenarr/internal/torbox"
 	"io"
 	"net/http"
 )

@@ -1,9 +1,9 @@
-package main
+package momenarr
 
 import (
 	"crypto/md5"
 	"fmt"
-	"github.com/amaumene/momenarr/torbox"
+	"github.com/amaumene/momenarr/internal/torbox"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"

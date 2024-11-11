@@ -1,9 +1,9 @@
-package main
+package momenarr
 
 import (
 	"encoding/xml"
 	"fmt"
-	"github.com/amaumene/momenarr/torbox"
+	"github.com/amaumene/momenarr/internal/torbox"
 	"github.com/jacklaaa89/trakt"
 	"github.com/jacklaaa89/trakt/show"
 	"github.com/jacklaaa89/trakt/sync"

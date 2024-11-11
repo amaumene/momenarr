@@ -1,8 +1,8 @@
-package main
+package momenarr
 
 import (
 	"fmt"
-	"github.com/amaumene/momenarr/torbox"
+	"github.com/amaumene/momenarr/internal/torbox"
 	log "github.com/sirupsen/logrus"
 	"regexp"
 )

@@ -1,8 +1,8 @@
-package main
+package momenarr
 
 import (
 	"fmt"
-	"github.com/amaumene/momenarr/torbox"
+	"github.com/amaumene/momenarr/internal/torbox"
 	"github.com/razsteinmetz/go-ptn"
 	"log"
 	"os"

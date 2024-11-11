@@ -1,4 +1,4 @@
-package main
+package momenarr
 
 import (
 	"encoding/xml"

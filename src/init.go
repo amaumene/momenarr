@@ -1,4 +1,4 @@
-package main
+package momenarr
 
 import (
 	log "github.com/sirupsen/logrus"
