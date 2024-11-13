@@ -1,56 +1,66 @@
 package main
 
 import (
-	"encoding/xml"
 	"fmt"
 	"github.com/jacklaaa89/trakt"
 	"io"
 	"net/http"
-	"strings"
 )
 
-type Rss struct {
-	XMLName xml.Name `xml:"rss"`
-	Channel Channel  `xml:"channel"`
+type Feed struct {
+	Attributes FeedAttributes `json:"@attributes"`
+	Channel    Channel        `json:"channel"`
+}
+
+type FeedAttributes struct {
+	Version string `json:"version"`
 }
 
 type Channel struct {
-	Title       string   `xml:"title"`
-	Description string   `xml:"description"`
-	Link        string   `xml:"link"`
-	Language    string   `xml:"language"`
-	WebMaster   string   `xml:"webMaster"`
-	Category    string   `xml:"category"`
-	Response    Response `xml:"response"`
-	Items       []Item   `xml:"item"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Link        string   `json:"link"`
+	Language    string   `json:"language"`
+	WebMaster   string   `json:"webMaster"`
+	Category    struct{} `json:"category"`
+	Response    Response `json:"response"`
+	Item        []Item   `json:"item"`
 }
 
 type Response struct {
-	Offset int `xml:"offset,attr"`
-	Total  int `xml:"total,attr"`
+	Attributes ResponseAttributes `json:"@attributes"`
+}
+
+type ResponseAttributes struct {
+	Offset string `json:"offset"`
+	Total  string `json:"total"`
 }
 
 type Item struct {
-	Title       string    `xml:"title"`
-	Guid        string    `xml:"guid"`
-	Link        string    `xml:"link"`
-	Comments    string    `xml:"comments"`
-	PubDate     string    `xml:"pubDate"`
-	Category    string    `xml:"category"`
-	Description string    `xml:"description"`
-	Enclosure   Enclosure `xml:"enclosure"`
-	Failed      bool
+	Title    string `json:"title"`
+	GUID     string `json:"guid"`
+	Link     string `json:"link"`
+	Comments string `json:"comments"`
+	PubDate  string `json:"pubDate"`
+	//Category    string    `json:"category"`
+	Description string    `json:"description"`
+	Enclosure   Enclosure `json:"enclosure"`
+	Failed      bool      `json:"failed"`
 }
 
 type Enclosure struct {
-	URL    string `xml:"url,attr"`
-	Length int64  `xml:"length,attr"`
-	Type   string `xml:"type,attr"`
+	Attributes EnclosureAttributes `json:"@attributes"`
+}
+
+type EnclosureAttributes struct {
+	URL    string `json:"url"`
+	Length string `json:"length"`
+	Type   string `json:"type"`
 }
 
 func searchTVShow(TVDB trakt.TVDB, showSeason int, showEpisode int, appConfig App) (string, error) {
 	// Construct the URL with the provided arguments
-	url := fmt.Sprintf("https://%s/api?apikey=%s&t=tvsearch&tvdbid=%d&season=%d&ep=%d", appConfig.newsNabHost, appConfig.newsNabApiKey, TVDB, showSeason, showEpisode)
+	url := fmt.Sprintf("https://%s/api?apikey=%s&t=tvsearch&tvdbid=%d&season=%d&ep=%d&o=json", appConfig.newsNabHost, appConfig.newsNabApiKey, TVDB, showSeason, showEpisode)
 
 	// Make the HTTP GET request
 	resp, err := http.Get(url)
@@ -73,11 +83,9 @@ func searchTVShow(TVDB trakt.TVDB, showSeason int, showEpisode int, appConfig Ap
 	return string(body), nil
 }
 
-func searchMovie(IMDB trakt.IMDB, appConfig App) (string, error) {
-	imdbID := strings.TrimPrefix(string(IMDB), "tt")
+func searchMovie(IMDB int, appConfig App) (string, error) {
 	// Construct the URL with the provided arguments
-	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%s", appConfig.newsNabHost, appConfig.newsNabApiKey, imdbID)
-
+	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%d&o=json", appConfig.newsNabHost, appConfig.newsNabApiKey, IMDB)
 	// Make the HTTP GET request
 	resp, err := http.Get(url)
 	if err != nil {

@@ -19,13 +19,14 @@ func processHistoryShows(appConfig App) {
 
 	historyParams := &trakt.ListHistoryParams{
 		ListParams: params,
-		Type:       "show",
+		Type:       "shows",
 		EndAt:      time.Now(),
-		StartAt:    time.Now().AddDate(0, 0, -5),
+		StartAt:    time.Now().AddDate(0, 0, -7),
 	}
 	iterator := sync.History(historyParams)
 	for iterator.Next() {
 		item, err := iterator.History()
+		fmt.Printf("Processing item: %v\n", item)
 		if err != nil {
 			log.Fatalf("Error scanning item: %v", err)
 		}
