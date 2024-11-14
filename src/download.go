@@ -33,6 +33,50 @@ func compareMD5sum(appConfig App, UsenetDownload []torbox.UsenetDownload) (bool,
 	return true, nil
 }
 
+func downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, appConfig App) error {
+	log.WithFields(log.Fields{
+		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
+	}).Info("Found cached usenet download")
+	UsenetDownload, err := appConfig.TorBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
+	if err != nil {
+		return err
+	}
+	if UsenetDownload[0].Cached {
+		log.WithFields(log.Fields{
+			"name": UsenetDownload[0].Name,
+		}).Info("Starting download from cached data")
+
+		// Start the downloadFromTorBox function in a new goroutine
+		go func() {
+			err := downloadFromTorBox(UsenetDownload, appConfig)
+			if err != nil {
+				log.WithFields(log.Fields{
+					"name":  UsenetDownload[0].Name,
+					"error": err,
+				}).Error("Failed to download from TorBox")
+			} else {
+				log.WithFields(log.Fields{
+					"name": UsenetDownload[0].Name,
+				}).Info("Download from TorBox complete")
+				// Optionally, you can proceed with further actions like deleting the usenet download
+				err = appConfig.TorBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+				if err != nil {
+					log.WithFields(log.Fields{
+						"name":  UsenetDownload[0].Name,
+						"error": err,
+					}).Error("Failed to delete the usenet download")
+				}
+			}
+		}()
+
+		return nil
+	}
+	log.WithFields(log.Fields{
+		"name": UsenetDownload[0].Name,
+	}).Info("Not really in cache, skipping and hoping to get a notification")
+	return nil
+}
+
 func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) error {
 	biggestUsenetDownload, err := findBiggestFile(UsenetDownload)
 	if err != nil {
@@ -109,7 +153,7 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 
 	finalFilePath := filepath.Join(appConfig.downloadDir, usenetDownload[0].Files[0].ShortName)
 	if err := os.Rename(tempFile.Name(), finalFilePath); err != nil {
-		return fmt.Errorf("failed to rename temporary file: %v", err)
+		return err
 	}
 
 	return nil

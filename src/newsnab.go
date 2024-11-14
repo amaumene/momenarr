@@ -83,7 +83,7 @@ func searchTVShow(TVDB trakt.TVDB, showSeason int, showEpisode int, appConfig Ap
 	return string(body), nil
 }
 
-func searchMovie(IMDB int, appConfig App) (string, error) {
+func searchMovie(IMDB int64, appConfig App) (string, error) {
 	// Construct the URL with the provided arguments
 	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%d&o=json", appConfig.newsNabHost, appConfig.newsNabApiKey, IMDB)
 	// Make the HTTP GET request

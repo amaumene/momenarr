@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -9,9 +8,12 @@ import (
 	"github.com/jacklaaa89/trakt"
 	"github.com/jacklaaa89/trakt/show"
 	"github.com/jacklaaa89/trakt/sync"
-	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
+	"github.com/ostafen/clover/v2"
+	"github.com/ostafen/clover/v2/document"
+	"github.com/ostafen/clover/v2/query"
 	log "github.com/sirupsen/logrus"
+	"github.com/timshannon/bolthold"
+	bolt "go.etcd.io/bbolt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -29,7 +31,7 @@ type App struct {
 	TorBoxClient       torbox.TorBox
 	TorBoxMoviesFolder string
 	TorBoxShowsFolder  string
-	db                 *sql.DB
+	db                 *clover.DB
 }
 
 type Downloads struct {
@@ -41,7 +43,7 @@ var (
 	currentDownloads []Downloads
 )
 
-func sortNZBsMovies(Feed Feed, year int) []Item {
+func sortNZBsMovies(Feed Feed, year int64) []Item {
 	// Filter the slice before sorting
 	filteredItems := []Item{}
 	for _, item := range Feed.Channel.Item {
@@ -66,12 +68,11 @@ func sortNZBsMovies(Feed Feed, year int) []Item {
 		if !iIsRemux && jIsRemux {
 			return false
 		}
-
-		// Then sort by length
 		return Feed.Channel.Item[i].Enclosure.Attributes.Length > Feed.Channel.Item[j].Enclosure.Attributes.Length
 	})
 	var nzbs []Item
 	nzbs = append(nzbs, Feed.Channel.Item...)
+	fmt.Println(nzbs)
 	return nzbs
 }
 
@@ -214,13 +215,26 @@ func syncMoviesDb(appConfig App) {
 				"err":  err,
 			}).Fatal("Error scanning item")
 		}
-		_, err = appConfig.db.Exec("INSERT INTO movies (imdb_id, title, year) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM movies WHERE imdb_id = ?)", strings.TrimPrefix(string(item.Movie.IMDB), "tt"), item.Movie.Title, item.Movie.Year, strings.TrimPrefix(string(item.Movie.IMDB), "tt"))
-		if err != nil {
-			log.WithFields(log.Fields{
-				"imdb_id": item.Movie.IMDB,
-				"title":   item.Movie.Title,
-				"year":    item.Movie.Year,
-			}).Fatal("Error inserting movie into database")
+		IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(item.Movie.IMDB), "tt"), 10, 64)
+		movie := Movie{
+			IMDB:       IMDB,
+			Title:      item.Movie.Title,
+			Year:       item.Movie.Year,
+			OnDisk:     false,
+			File:       "",
+			DownloadID: 0,
+		}
+		existingMovie, _ := appConfig.db.FindAll(query.NewQuery("movies").Where(query.Field("IMDB").Eq(IMDB)))
+		if len(existingMovie) == 0 {
+			doc := document.NewDocumentOf(movie)
+			_, err = appConfig.db.InsertOne("movies", doc)
+			if err != nil {
+				log.WithFields(log.Fields{
+					"imdb_id": item.Movie.IMDB,
+					"title":   item.Movie.Title,
+					"year":    item.Movie.Year,
+				}).Fatal("Error inserting movie into database")
+			}
 		}
 	}
 
@@ -231,70 +245,29 @@ func syncMoviesDb(appConfig App) {
 	}
 }
 
-func downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, appConfig App) error {
-	log.WithFields(log.Fields{
-		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
-	}).Info("Found cached usenet download")
-	UsenetDownload, err := appConfig.TorBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
-	if err != nil {
-		return err
-	}
-	if UsenetDownload[0].Cached {
-		log.WithFields(log.Fields{
-			"name": UsenetDownload[0].Name,
-		}).Info("Starting download from cached data")
-		err = downloadFromTorBox(UsenetDownload, appConfig)
-		if err != nil {
-			return err
-		}
-		err = appConfig.TorBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	log.WithFields(log.Fields{
-		"name": UsenetDownload[0].Name,
-	}).Info("Not really in cache, skipping and hoping to get a notification")
-	return nil
-}
-
 // Movie represents the structure for the queried movie data.
 type Movie struct {
-	imdbID     int
+	IMDB       int64
 	Title      string
-	Year       int
+	Year       int64
 	OnDisk     bool
 	File       string
-	downloadID int
-	NZBs       []Item
+	DownloadID int64
 }
 
-func getMonitoredMovies(appConfig App) []Movie {
-	rows, err := appConfig.db.Query("SELECT imdb_id, year FROM movies WHERE on_disk = 0")
-	if err != nil {
-		log.Fatal(err)
-	}
-	var movies []Movie
-	for rows.Next() {
-		var movie Movie
-
-		if err := rows.Scan(&movie.imdbID, &movie.Year); err != nil {
-			log.Fatal(err)
-		}
-		movies = append(movies, movie)
-	}
-	if err := rows.Err(); err != nil {
-		log.Fatal(err)
-	}
-	rows.Close()
-	return movies
+type NZB struct {
+	ID  int64
+	NZB Item
 }
 
 func populateNzbsMovies(appConfig App) error {
-	movies := getMonitoredMovies(appConfig)
-	for _, movie := range movies {
-		jsonResponse, err := searchMovie(movie.imdbID, appConfig)
+	docs, _ := appConfig.db.FindAll(query.NewQuery("movies").Where(query.Field("OnDisk").IsFalse()))
+
+	movie := Movie{}
+
+	for _, doc := range docs {
+		doc.Unmarshal(&movie)
+		jsonResponse, err := searchMovie(movie.IMDB, appConfig)
 		if err != nil {
 			log.WithFields(log.Fields{"movie": movie}).Fatal("Error searching movie")
 			return err
@@ -309,73 +282,80 @@ func populateNzbsMovies(appConfig App) error {
 			return err
 		}
 
-		filteredFeed := sortNZBsMovies(feed, movie.Year)
-		nzbsData, _ := json.Marshal(filteredFeed)
-		if len(filteredFeed) > 0 {
-			_, err = appConfig.db.Exec(`UPDATE movies SET nzbs = jsonb_set(?) WHERE imdb_id = ?`, nzbsData, movie.imdbID)
-			if err != nil {
-				return err
+		//filteredFeed := sortNZBsMovies(feed, movie.Year)
+		if len(feed.Channel.Item) > 0 {
+			for _, item := range feed.Channel.Item {
+				nzb := NZB{
+					ID:  movie.IMDB,
+					NZB: item,
+				}
+				doc := document.NewDocumentOf(nzb)
+				_, err = appConfig.db.InsertOne("nzbs", doc)
+				if err != nil {
+					log.WithFields(log.Fields{
+						"IMDB": nzb.ID,
+						"NZB":  nzb.NZB,
+					}).Fatal("Error inserting nzb into database")
+				}
 			}
-			log.WithFields(log.Fields{
-				"imdb_id": movie.imdbID,
-				"title":   movie.Title,
-				"year":    movie.Year,
-			}).Info("Updated nzbs field for movie")
 		}
 	}
 	return nil
 }
 
-func createOrDownloadCached(appConfig App, link string, title string) error {
-	torboxDownload, err := appConfig.TorBoxClient.CreateUsenetDownload(link, title)
-	if err != nil {
-		log.WithFields(log.Fields{
-			"movie": title,
-			"err":   err,
-		}).Fatal("Error creating transfer")
-	}
-	if torboxDownload.Detail == "Found cached usenet download. Using cached download." {
-		err = downloadCachedData(torboxDownload, appConfig)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"movie": title,
-				"err":   err,
-			}).Fatal("Error downloading cached data")
-		}
-	}
-	//store the id in the db
-	fmt.Println(torboxDownload.Data.UsenetDownloadID)
-	return nil
-}
+//	func createOrDownloadCached(appConfig App, imdbid int, link string, title string) error {
+//		torboxDownload, err := appConfig.TorBoxClient.CreateUsenetDownload(link, title)
+//		if err != nil {
+//			log.WithFields(log.Fields{
+//				"movie": title,
+//				"err":   err,
+//			}).Fatal("Error creating transfer")
+//		}
+//		fmt.Printf("%+v", torboxDownload)
+//		if torboxDownload.Success {
+//			_, err = appConfig.db.Exec(`UPDATE movies SET download_id = ? WHERE imdb_id = ?`, torboxDownload.Data.UsenetDownloadID, imdbid)
+//			if err != nil {
+//				return err
+//			}
+//			log.WithFields(log.Fields{
+//				"imdb_id": imdbid,
+//				"title":   title,
+//			}).Info("Download started successfully")
+//		}
+//		if torboxDownload.Detail == "Found cached usenet download. Using cached download." {
+//			err = downloadCachedData(torboxDownload, appConfig)
+//			if err != nil {
+//				log.WithFields(log.Fields{
+//					"movie": title,
+//					"err":   err,
+//				}).Fatal("Error downloading cached data")
+//			}
+//		}
+//		return nil
+//	}
 
 func getNewMovies(appConfig App) error {
-	err := populateNzbsMovies(appConfig)
-	if err != nil {
-		log.Fatal("Populating NZBs movies")
-		return err
-	}
-	rows, err := appConfig.db.Query(
-		`SELECT json_extract(nzbs.value, '$.title') AS title,
-			json_extract(nzbs.value, '$.link') AS link
-		FROM movies,
-			json_each(movies.nzbs) AS nzbs
-		WHERE json_extract(nzbs.value, '$.failed') = 0
-		GROUP BY title;`)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for rows.Next() {
-		var link string
-		var title string
-		if err := rows.Scan(&title, &link); err != nil {
-			log.Fatal(err)
+	docs, _ := appConfig.db.FindAll(query.NewQuery("movies").Where(query.Field("OnDisk").IsFalse()))
+	for _, doc := range docs {
+		movie := Movie{}
+		doc.Unmarshal(&movie)
+		nzbs, _ := appConfig.db.FindAll(query.NewQuery("nzbs").Where(query.Field("ID").Eq(movie.IMDB)))
+		allNZBs := []NZB{}
+		sort.Slice(nzbs, func(i, j int) bool {
+			return nzbs[i]..Enclosure.Attributes.Length < nzbs[j].NZB.Enclosure.Attributes.Length
+		})
+		for _, nzb := range nzbs {
+			nzb := NZB{}
+			doc.Unmarshal(&nzb)
+			allNZBs = append(allNZBs, nzb)
 		}
-		createOrDownloadCached(appConfig, link, title)
+		for _, nzb := range nzbs {
+		
+		}
+		nzb := NZB{}
+		nzbs[0].Unmarshal(&nzb)
+		fmt.Printf("%v+", nzb)
 	}
-	if err := rows.Err(); err != nil {
-		log.Fatal(err)
-	}
-	rows.Close()
 	return nil
 }
 
@@ -385,26 +365,12 @@ func main() {
 	appConfig.traktToken = setUpTrakt(appConfig, traktApiKey, traktClientSecret)
 	appConfig.TorBoxClient = torbox.NewTorBoxClient(getEnvTorBox())
 	var err error
-	appConfig.db, err = sql.Open("sqlite3", "./data.db")
+	appConfig.db, err = clover.Open("data-db")
 	if err != nil {
-		log.Fatal(err)
+		log.WithFields(log.Fields{"err": err}).Fatal("Error opening database")
 	}
-	_, err = appConfig.db.Exec(`
-		CREATE TABLE IF NOT EXISTS movies (
-			imdb_id INTEGER PRIMARY KEY,
-			title   TEXT	NOT NULL,
-			year	INTEGER NOT NULL,
-			on_disk INTEGER NOT NULL DEFAULT 0,
-			file TEXT  NOT NULL DEFAULT '',
-			download_id INTEGER NOT NULL DEFAULT 0,
-			nzbs BLOB
-		) STRICT;
-	`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer appConfig.db.Close()
+	appConfig.db.CreateCollection("movies")
+	appConfig.db.CreateCollection("nzbs")
 
 	// Create a channel to listen for interrupt signals (e.g., SIGINT)
 	shutdownChan := make(chan os.Signal, 1)
@@ -427,6 +393,7 @@ func main() {
 	}()
 
 	syncMoviesDb(appConfig)
+	populateNzbsMovies(appConfig)
 	getNewMovies(appConfig)
 	//go func() {
 	//	for {

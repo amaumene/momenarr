@@ -2,10 +2,6 @@ FROM registry.access.redhat.com/ubi9/go-toolset AS builder
 
 COPY ./src .
 
-RUN rm go.mod && rm go.sum
-
-RUN go mod init github.com/amaumene/momenarr && go mod tidy
-
 RUN go build -o momenarr
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal
