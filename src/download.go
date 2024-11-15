@@ -33,7 +33,7 @@ func compareMD5sum(appConfig App, UsenetDownload []torbox.UsenetDownload) (bool,
 	return true, nil
 }
 
-func downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, appConfig App) error {
+func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse) error {
 	log.WithFields(log.Fields{
 		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
 	}).Info("Found cached usenet download")

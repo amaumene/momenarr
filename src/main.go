@@ -200,7 +200,7 @@ func (appConfig *App) populateNzbForMovies() {
 	}
 }
 
-func (appConfig *App) getNzbFromDB(ID int64) NZB {
+func (appConfig *App) getNzbFromDB(ID int64) (NZB, error) {
 	var nzb []NZB
 	err := appConfig.store.Find(&nzb, bolthold.Where("ID").Eq(ID).And("Title").
 		RegExp(regexp.MustCompile("(?i)remux")).
@@ -210,9 +210,6 @@ func (appConfig *App) getNzbFromDB(ID int64) NZB {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("Request NZB from database")
-	}
-	if len(nzb) > 0 {
-		return nzb[0]
 	}
 	if len(nzb) == 0 {
 		err = appConfig.store.Find(&nzb, bolthold.Where("ID").Eq(ID).And("Title").
@@ -224,20 +221,25 @@ func (appConfig *App) getNzbFromDB(ID int64) NZB {
 				"err": err,
 			}).Error("Request NZB from database")
 		}
-		return nzb[0]
 	}
-	log.WithFields(log.Fields{
-		"ID": ID,
-	}).Fatal("No NZB found, will crash for now")
-	return nzb[0]
+	if len(nzb) > 0 {
+		return nzb[0], nil
+	}
+	return NZB{}, fmt.Errorf("No NZB found for %d", ID)
 }
 
 func (appConfig *App) downloadMovieNotOnDisk() {
 	var movies []Movie
 	_ = appConfig.store.Find(&movies, bolthold.Where("OnDisk").Eq(false))
 	for _, movie := range movies {
-		nzb := appConfig.getNzbFromDB(movie.IMDB)
-		appConfig.createOrDownloadCached(movie.IMDB, nzb)
+		nzb, err := appConfig.getNzbFromDB(movie.IMDB)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Request NZB from database")
+		} else {
+			appConfig.createOrDownloadCached(movie.IMDB, nzb)
+		}
 	}
 }
 
@@ -270,13 +272,13 @@ func (appConfig *App) createOrDownloadCached(IMDB int64, nzb NZB) error {
 		}).Info("Download started successfully")
 	}
 	if torboxDownload.Detail == "Found cached usenet download. Using cached download." {
-		//err = downloadCachedData(torboxDownload, appConfig)
-		//if err != nil {
-		//	log.WithFields(log.Fields{
-		//		"movie": Title,
-		//		"err":   err,
-		//	}).Fatal("Error downloading cached data")
-		//}
+		err = appConfig.downloadCachedData(torboxDownload)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"movie": nzb.Title,
+				"err":   err,
+			}).Fatal("Error downloading cached data")
+		}
 	}
 	return nil
 }
@@ -289,8 +291,8 @@ func main() {
 	log.SetOutput(os.Stdout)
 
 	var err error
-	os.Remove("data-store")
-	appConfig.store, err = bolthold.Open("data-store", 0666, nil)
+	os.Remove("data.db")
+	appConfig.store, err = bolthold.Open("data.db", 0666, nil)
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Fatal("Error opening database")
 	}

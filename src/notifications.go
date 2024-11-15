@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
+	"github.com/timshannon/bolthold"
 	"regexp"
 )
 
@@ -36,70 +37,40 @@ func processNotification(notification torbox.Notification, appConfig App) {
 			}).Fatal("Downloading transfer")
 		}
 	}
-	//if notification.Data.Title == "Usenet Download Failed" {
-	//	log.WithFields(log.Fields{
-	//		"id":   UsenetDownload[0].ID,
-	//		"name": UsenetDownload[0].Name,
-	//		"err":  err,
-	//	}).Info("Usenet download failed")
-	//	//err = appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
-	//	//if err != nil {
-	//	//	log.WithFields(log.Fields{
-	//	//		"id":  UsenetDownload[0].ID,
-	//	//		"err": err,
-	//	//	}).Fatal("Deleting failed transfer")
-	//	//}
-	//	movie := Movie{}
-	//	err := appConfig.store.View(func(tx *buntdb.Tx) error {
-	//		val, err := tx.Get(strconv.Itoa(UsenetDownload[0].ID))
-	//		if err != nil {
-	//			return err
-	//		}
-	//		err = json.Unmarshal([]byte(val), &movie)
-	//		if err != nil {
-	//			log.Fatal(err)
-	//		}
-	//		return nil
-	//	})
-	//	if err != nil {
-	//		log.WithFields(log.Fields{
-	//			"id":  UsenetDownload[0].ID,
-	//			"err": err,
-	//		}).Fatal("Couldn't get value from store")
-	//	}
-	//	for i, item := range movie.Item {
-	//		if item.Title == extractedString && item.Failed == false {
-	//			movie.Item[i].Failed = true
-	//			log.WithFields(log.Fields{
-	//				"name": movie.Item[i+1].Title,
-	//			}).Info("Going to download")
-	//			UsenetCreateDownloadResponse, err := appConfig.torBoxClient.CreateUsenetDownload(movie.Item[i+1].Enclosure.Attributes.URL, movie.Item[i+1].Title)
-	//			if err != nil {
-	//				log.WithFields(log.Fields{
-	//					"name": movie.Item[i+1].Title,
-	//					"err":  err,
-	//				}).Fatal("Creating transfer")
-	//			}
-	//			err = appConfig.store.Update(func(tx *buntdb.Tx) error {
-	//				b, err := json.Marshal(movie)
-	//				if err != nil {
-	//					return err
-	//				}
-	//				_, _, err = tx.Set(strconv.Itoa(UsenetCreateDownloadResponse.Data.UsenetDownloadID), string(b), nil)
-	//				return err
-	//			})
-	//			err = appConfig.store.Update(func(tx *buntdb.Tx) error {
-	//				_, err = tx.Delete(strconv.Itoa(UsenetDownload[0].ID))
-	//				return err
-	//			})
-	//			appConfig.store.Shrink()
-	//			if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
-	//				downloadCachedData(UsenetCreateDownloadResponse, appConfig)
-	//			}
-	//			break
-	//		}
-	//	}
-	//}
+	if notification.Data.Title == "Usenet Download Failed" {
+		log.WithFields(log.Fields{
+			"id":   UsenetDownload[0].ID,
+			"name": UsenetDownload[0].Name,
+			"err":  err,
+		}).Warning("Usenet download failed")
+		err = appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+		if err != nil {
+			log.WithFields(log.Fields{
+				"id":  UsenetDownload[0].ID,
+				"err": err,
+			}).Error("Deleting failed transfer")
+		}
+		err = appConfig.store.UpdateMatching(&NZB{}, bolthold.Where("Title").Eq(extractedString), func(record interface{}) error {
+			update, ok := record.(*NZB) // record will always be a pointer
+			if !ok {
+				return fmt.Errorf("Record isn't the correct type!  Wanted NZB, got %T", record)
+			}
+			update.Failed = true
+			return nil
+		})
+		var movies []Movie
+		_ = appConfig.store.Find(&movies, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
+		for _, movie := range movies {
+			nzb, err := appConfig.getNzbFromDB(movie.IMDB)
+			if err != nil {
+				log.WithFields(log.Fields{
+					"err": err,
+				}).Error("Request NZB from database")
+			} else {
+				appConfig.createOrDownloadCached(movie.IMDB, nzb)
+			}
+		}
+	}
 	return
 }
 
