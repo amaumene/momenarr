@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/amaumene/momenarr/internal/torbox"
+	"github.com/amaumene/momenarr/torbox"
 	"github.com/razsteinmetz/go-ptn"
 	"log"
 	"os"

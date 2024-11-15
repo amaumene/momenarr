@@ -3,7 +3,7 @@ package main
 import (
 	"crypto/md5"
 	"fmt"
-	"github.com/amaumene/momenarr/internal/torbox"
+	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"

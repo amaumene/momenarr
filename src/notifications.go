@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/amaumene/momenarr/internal/torbox"
+	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
 	"regexp"
 )
@@ -50,7 +50,7 @@ func processNotification(notification torbox.Notification, appConfig App) {
 	//	//	}).Fatal("Deleting failed transfer")
 	//	//}
 	//	movie := Movie{}
-	//	err := appConfig.db.View(func(tx *buntdb.Tx) error {
+	//	err := appConfig.store.View(func(tx *buntdb.Tx) error {
 	//		val, err := tx.Get(strconv.Itoa(UsenetDownload[0].ID))
 	//		if err != nil {
 	//			return err
@@ -65,7 +65,7 @@ func processNotification(notification torbox.Notification, appConfig App) {
 	//		log.WithFields(log.Fields{
 	//			"id":  UsenetDownload[0].ID,
 	//			"err": err,
-	//		}).Fatal("Couldn't get value from db")
+	//		}).Fatal("Couldn't get value from store")
 	//	}
 	//	for i, item := range movie.Item {
 	//		if item.Title == extractedString && item.Failed == false {
@@ -80,7 +80,7 @@ func processNotification(notification torbox.Notification, appConfig App) {
 	//					"err":  err,
 	//				}).Fatal("Creating transfer")
 	//			}
-	//			err = appConfig.db.Update(func(tx *buntdb.Tx) error {
+	//			err = appConfig.store.Update(func(tx *buntdb.Tx) error {
 	//				b, err := json.Marshal(movie)
 	//				if err != nil {
 	//					return err
@@ -88,11 +88,11 @@ func processNotification(notification torbox.Notification, appConfig App) {
 	//				_, _, err = tx.Set(strconv.Itoa(UsenetCreateDownloadResponse.Data.UsenetDownloadID), string(b), nil)
 	//				return err
 	//			})
-	//			err = appConfig.db.Update(func(tx *buntdb.Tx) error {
+	//			err = appConfig.store.Update(func(tx *buntdb.Tx) error {
 	//				_, err = tx.Delete(strconv.Itoa(UsenetDownload[0].ID))
 	//				return err
 	//			})
-	//			appConfig.db.Shrink()
+	//			appConfig.store.Shrink()
 	//			if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
 	//				downloadCachedData(UsenetCreateDownloadResponse, appConfig)
 	//			}

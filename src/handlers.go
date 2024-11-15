@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/amaumene/momenarr/internal/torbox"
+	"github.com/amaumene/momenarr/torbox"
 	"io"
 	"net/http"
 )

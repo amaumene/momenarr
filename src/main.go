@@ -2,22 +2,17 @@ package main
 
 import (
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
-	"github.com/amaumene/momenarr/internal/torbox"
+	"github.com/amaumene/momenarr/newsnab"
+	"github.com/amaumene/momenarr/torbox"
 	"github.com/jacklaaa89/trakt"
-	"github.com/jacklaaa89/trakt/show"
 	"github.com/jacklaaa89/trakt/sync"
-	"github.com/ostafen/clover/v2"
-	"github.com/ostafen/clover/v2/document"
-	"github.com/ostafen/clover/v2/query"
 	log "github.com/sirupsen/logrus"
 	"github.com/timshannon/bolthold"
-	bolt "go.etcd.io/bbolt"
 	"net/http"
 	"os"
 	"os/signal"
-	"sort"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -31,174 +26,98 @@ type App struct {
 	TorBoxClient       torbox.TorBox
 	TorBoxMoviesFolder string
 	TorBoxShowsFolder  string
-	db                 *clover.DB
+	store              *bolthold.Store
 }
 
-type Downloads struct {
-	ID   string
-	Item []Item `xml:"item"`
-}
+//func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64, appConfig App) {
+//	fileName := fmt.Sprintf("%s S%02dE%02d", item.Show.Title, showProgress.NextEpisode.Season, episodeNum)
+//	if fileExists(fileName, appConfig.downloadDir) == "" {
+//		xmlResponse, err := newsnab.searchTVShow(item.Show.TVDB, int(showProgress.NextEpisode.Season), int(episodeNum), appConfig)
+//		if err != nil {
+//			fmt.Printf("Error: %v\n", err)
+//			return
+//		}
+//
+//		var Feed newsnab.Feed
+//		err = xml.Unmarshal([]byte(xmlResponse), &Feed)
+//		if err != nil {
+//			log.WithFields(log.Fields{
+//				"err": err,
+//			}).Fatal("Error unmarshalling XML")
+//		}
+//		filteredFeed := sortNZBsShows(Feed, item.Show)
+//
+//		show := findOrCreateData(item.Show.Title + " S" + strconv.Itoa(int(showProgress.NextEpisode.Season)) + "E" + strconv.Itoa(int(episodeNum)))
+//		show.Item = append(show.Item, filteredFeed.Channel.Item...)
+//		log.WithFields(log.Fields{
+//			"name":    show.Item[0].Title,
+//			"season":  showProgress.NextEpisode.Season,
+//			"episode": episodeNum,
+//		}).Info("Going to download")
+//		UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(show.Item[0].Enclosure.Attributes.URL, show.Item[0].Title)
+//		if err != nil {
+//			log.WithFields(log.Fields{
+//				"show": show.Item[0].Title,
+//				"err":  err,
+//			}).Fatal("Error creating transfer")
+//		}
+//		if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
+//			err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
+//			if err != nil {
+//				log.WithFields(log.Fields{
+//					"show": show.Item[0].Title,
+//					"err":  err,
+//				}).Fatal("Error downloading cached data")
+//			}
+//		}
+//	}
+//}
+//
+//func getNewEpisodes(appConfig App) {
+//	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
+//
+//	watchListParams := &trakt.ListWatchListParams{
+//		ListParams: tokenParams,
+//		Type:       "show",
+//	}
+//	iterator := sync.WatchList(watchListParams)
+//
+//	for iterator.Next() {
+//		item, err := iterator.Entry()
+//		if err != nil {
+//			log.WithFields(log.Fields{
+//				"item": item,
+//				"err":  err,
+//			}).Fatal("Error scanning item")
+//		}
+//
+//		progressParams := &trakt.ProgressParams{
+//			Params: trakt.Params{OAuth: appConfig.traktToken.AccessToken},
+//		}
+//		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
+//		if err != nil {
+//			log.WithFields(log.Fields{
+//				"show": item.Show.Title,
+//				"err":  err,
+//			}).Fatal("Error getting show progress")
+//		}
+//
+//		newEpisode := 3
+//		for i := 0; i < newEpisode; i++ {
+//			episodeNum := showProgress.NextEpisode.Number + int64(i)
+//			getNextEpisodes(showProgress, item, episodeNum, appConfig)
+//		}
+//
+//	}
+//
+//	if err := iterator.Err(); err != nil {
+//		log.WithFields(log.Fields{
+//			"err": err,
+//		}).Fatal("Error iterating history")
+//	}
+//}
 
-var (
-	currentDownloads []Downloads
-)
-
-func sortNZBsMovies(Feed Feed, year int64) []Item {
-	// Filter the slice before sorting
-	filteredItems := []Item{}
-	for _, item := range Feed.Channel.Item {
-		titleLower := strings.ToLower(item.Title)
-		movieYearStr := fmt.Sprintf(".%d.", year)
-		if strings.Contains(titleLower, "remux") || strings.Contains(titleLower, "2160p") || strings.Contains(titleLower, "1080p") {
-			if strings.Contains(item.Title, movieYearStr) {
-				filteredItems = append(filteredItems, item)
-			}
-		}
-	}
-	Feed.Channel.Item = filteredItems
-
-	sort.Slice(Feed.Channel.Item, func(i, j int) bool {
-		// Sort by 'remux' in title first
-		iIsRemux := strings.Contains(strings.ToLower(Feed.Channel.Item[i].Title), "remux")
-		jIsRemux := strings.Contains(strings.ToLower(Feed.Channel.Item[j].Title), "remux")
-
-		if iIsRemux && !jIsRemux {
-			return true
-		}
-		if !iIsRemux && jIsRemux {
-			return false
-		}
-		return Feed.Channel.Item[i].Enclosure.Attributes.Length > Feed.Channel.Item[j].Enclosure.Attributes.Length
-	})
-	var nzbs []Item
-	nzbs = append(nzbs, Feed.Channel.Item...)
-	fmt.Println(nzbs)
-	return nzbs
-}
-
-func sortNZBsShows(Feed Feed, show *trakt.Show) Feed {
-	sort.Slice(Feed.Channel.Item, func(i, j int) bool {
-		return Feed.Channel.Item[i].Enclosure.Attributes.Length > Feed.Channel.Item[j].Enclosure.Attributes.Length
-	})
-	sort.Slice(Feed.Channel.Item, func(i, j int) bool {
-		// Sort by 'remux' in title first
-		iIsRemux := strings.Contains(strings.ToLower(Feed.Channel.Item[i].Title), "remux")
-		jIsRemux := strings.Contains(strings.ToLower(Feed.Channel.Item[j].Title), "remux")
-
-		if iIsRemux && !jIsRemux {
-			return true
-		}
-		if !iIsRemux && jIsRemux {
-			return false
-		}
-
-		// Then sort by length
-		return Feed.Channel.Item[i].Enclosure.Attributes.Length > Feed.Channel.Item[j].Enclosure.Attributes.Length
-	})
-	return Feed
-}
-
-func getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64, appConfig App) {
-	fileName := fmt.Sprintf("%s S%02dE%02d", item.Show.Title, showProgress.NextEpisode.Season, episodeNum)
-	if fileExists(fileName, appConfig.downloadDir) == "" {
-		xmlResponse, err := searchTVShow(item.Show.TVDB, int(showProgress.NextEpisode.Season), int(episodeNum), appConfig)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			return
-		}
-
-		var Feed Feed
-		err = xml.Unmarshal([]byte(xmlResponse), &Feed)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"err": err,
-			}).Fatal("Error unmarshalling XML")
-		}
-		filteredFeed := sortNZBsShows(Feed, item.Show)
-
-		show := findOrCreateData(item.Show.Title + " S" + strconv.Itoa(int(showProgress.NextEpisode.Season)) + "E" + strconv.Itoa(int(episodeNum)))
-		show.Item = append(show.Item, filteredFeed.Channel.Item...)
-		log.WithFields(log.Fields{
-			"name":    show.Item[0].Title,
-			"season":  showProgress.NextEpisode.Season,
-			"episode": episodeNum,
-		}).Info("Going to download")
-		UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(show.Item[0].Enclosure.Attributes.URL, show.Item[0].Title)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"show": show.Item[0].Title,
-				"err":  err,
-			}).Fatal("Error creating transfer")
-		}
-		if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
-			err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
-			if err != nil {
-				log.WithFields(log.Fields{
-					"show": show.Item[0].Title,
-					"err":  err,
-				}).Fatal("Error downloading cached data")
-			}
-		}
-	}
-}
-
-func getNewEpisodes(appConfig App) {
-	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
-
-	watchListParams := &trakt.ListWatchListParams{
-		ListParams: tokenParams,
-		Type:       "show",
-	}
-	iterator := sync.WatchList(watchListParams)
-
-	for iterator.Next() {
-		item, err := iterator.Entry()
-		if err != nil {
-			log.WithFields(log.Fields{
-				"item": item,
-				"err":  err,
-			}).Fatal("Error scanning item")
-		}
-
-		progressParams := &trakt.ProgressParams{
-			Params: trakt.Params{OAuth: appConfig.traktToken.AccessToken},
-		}
-		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"show": item.Show.Title,
-				"err":  err,
-			}).Fatal("Error getting show progress")
-		}
-
-		newEpisode := 3
-		for i := 0; i < newEpisode; i++ {
-			episodeNum := showProgress.NextEpisode.Number + int64(i)
-			getNextEpisodes(showProgress, item, episodeNum, appConfig)
-		}
-
-	}
-
-	if err := iterator.Err(); err != nil {
-		log.WithFields(log.Fields{
-			"err": err,
-		}).Fatal("Error iterating history")
-	}
-}
-
-func findOrCreateData(ID string) *Downloads {
-	for i := range currentDownloads {
-		if currentDownloads[i].ID == ID {
-			return &currentDownloads[i]
-		}
-	}
-	// If not found, create a new one and append to currentDownloads
-	newMovie := Downloads{ID: ID, Item: []Item{}}
-	currentDownloads = append(currentDownloads, newMovie)
-	return &currentDownloads[len(currentDownloads)-1]
-}
-
-func syncMoviesDb(appConfig App) {
+func (appConfig *App) syncMoviesDbFromTrakt() {
 	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
 
 	watchListParams := &trakt.ListWatchListParams{
@@ -224,20 +143,13 @@ func syncMoviesDb(appConfig App) {
 			File:       "",
 			DownloadID: 0,
 		}
-		existingMovie, _ := appConfig.db.FindAll(query.NewQuery("movies").Where(query.Field("IMDB").Eq(IMDB)))
-		if len(existingMovie) == 0 {
-			doc := document.NewDocumentOf(movie)
-			_, err = appConfig.db.InsertOne("movies", doc)
-			if err != nil {
-				log.WithFields(log.Fields{
-					"imdb_id": item.Movie.IMDB,
-					"title":   item.Movie.Title,
-					"year":    item.Movie.Year,
-				}).Fatal("Error inserting movie into database")
-			}
+		err = appConfig.store.Insert(IMDB, movie)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Fatal("Error inserting movie into database")
 		}
 	}
-
 	if err := iterator.Err(); err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
@@ -245,9 +157,75 @@ func syncMoviesDb(appConfig App) {
 	}
 }
 
-// Movie represents the structure for the queried movie data.
+func (appConfig *App) populateNzbForMovies() {
+	var movies []Movie
+	_ = appConfig.store.Find(&movies, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
+	for _, movie := range movies {
+		jsonResponse, err := newsnab.searchMovie(movie.IMDB, appConfig.newsNabHost, appConfig.newsNabApiKey)
+		if err != nil {
+			log.WithFields(log.Fields{"movie": movie.Title}).Fatal("Error searching movie")
+			return
+		}
+
+		var feed newsnab.Feed
+		err = json.Unmarshal([]byte(jsonResponse), &feed)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Fatal("Error unmarshalling JSON")
+			return
+		}
+
+		if len(feed.Channel.Item) > 0 {
+			for _, item := range feed.Channel.Item {
+				length, err := strconv.ParseInt(item.Enclosure.Attributes.Length, 10, 64)
+				if err != nil {
+					log.WithFields(log.Fields{
+						"err": err,
+					}).Fatal("Error converting Length to int64")
+					return
+				}
+				nzb := NZB{
+					ID:     movie.IMDB,
+					Link:   feed.Channel.Link,
+					Length: length,
+					Title:  item.Title,
+				}
+				err = appConfig.store.Insert(item.GUID, nzb)
+				if err != nil {
+					log.WithFields(log.Fields{
+						"err": err,
+					}).Fatal("Error inserting movie into database")
+				}
+			}
+		}
+	}
+}
+
+func (appConfig *App) getNzbForMovie() {
+	var movies []Movie
+	_ = appConfig.store.Find(&movies, bolthold.Where("OnDisk").Eq(false))
+	for _, movie := range movies {
+		var result_nzbs []NZB
+		err := appConfig.store.Find(&result_nzbs, bolthold.Where("ID").
+			Eq(movie.IMDB).And("Title").RegExp(regexp.MustCompile("(?i)remux|1080p|2160p")).
+			SortBy("Length").Reverse().Limit(1).Index("ID"))
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Request bolthold")
+		}
+		for _, i := range result_nzbs {
+			log.WithFields(log.Fields{
+				"title":  i.Title,
+				"length": i.Length,
+			}).Info("Found NZB")
+		}
+	}
+}
+
 type Movie struct {
-	IMDB       int64
+	IMDB       int64 `boltholdIndex:"IMDB"`
 	Title      string
 	Year       int64
 	OnDisk     bool
@@ -256,51 +234,10 @@ type Movie struct {
 }
 
 type NZB struct {
-	ID  int64
-	NZB Item
-}
-
-func populateNzbsMovies(appConfig App) error {
-	docs, _ := appConfig.db.FindAll(query.NewQuery("movies").Where(query.Field("OnDisk").IsFalse()))
-
-	movie := Movie{}
-
-	for _, doc := range docs {
-		doc.Unmarshal(&movie)
-		jsonResponse, err := searchMovie(movie.IMDB, appConfig)
-		if err != nil {
-			log.WithFields(log.Fields{"movie": movie}).Fatal("Error searching movie")
-			return err
-		}
-
-		var feed Feed
-		err = json.Unmarshal([]byte(jsonResponse), &feed)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"err": err,
-			}).Fatal("Error unmarshalling JSON")
-			return err
-		}
-
-		//filteredFeed := sortNZBsMovies(feed, movie.Year)
-		if len(feed.Channel.Item) > 0 {
-			for _, item := range feed.Channel.Item {
-				nzb := NZB{
-					ID:  movie.IMDB,
-					NZB: item,
-				}
-				doc := document.NewDocumentOf(nzb)
-				_, err = appConfig.db.InsertOne("nzbs", doc)
-				if err != nil {
-					log.WithFields(log.Fields{
-						"IMDB": nzb.ID,
-						"NZB":  nzb.NZB,
-					}).Fatal("Error inserting nzb into database")
-				}
-			}
-		}
-	}
-	return nil
+	ID     int64 `boltholdIndex:"ID"`
+	Link   string
+	Length int64
+	Title  string
 }
 
 //	func createOrDownloadCached(appConfig App, imdbid int, link string, title string) error {
@@ -313,7 +250,7 @@ func populateNzbsMovies(appConfig App) error {
 //		}
 //		fmt.Printf("%+v", torboxDownload)
 //		if torboxDownload.Success {
-//			_, err = appConfig.db.Exec(`UPDATE movies SET download_id = ? WHERE imdb_id = ?`, torboxDownload.Data.UsenetDownloadID, imdbid)
+//			_, err = appConfig.store.Exec(`UPDATE movies SET download_id = ? WHERE imdb_id = ?`, torboxDownload.Data.UsenetDownloadID, imdbid)
 //			if err != nil {
 //				return err
 //			}
@@ -334,43 +271,40 @@ func populateNzbsMovies(appConfig App) error {
 //		return nil
 //	}
 
-func getNewMovies(appConfig App) error {
-	docs, _ := appConfig.db.FindAll(query.NewQuery("movies").Where(query.Field("OnDisk").IsFalse()))
-	for _, doc := range docs {
-		movie := Movie{}
-		doc.Unmarshal(&movie)
-		nzbs, _ := appConfig.db.FindAll(query.NewQuery("nzbs").Where(query.Field("ID").Eq(movie.IMDB)))
-		allNZBs := []NZB{}
-		sort.Slice(nzbs, func(i, j int) bool {
-			return nzbs[i]..Enclosure.Attributes.Length < nzbs[j].NZB.Enclosure.Attributes.Length
-		})
-		for _, nzb := range nzbs {
-			nzb := NZB{}
-			doc.Unmarshal(&nzb)
-			allNZBs = append(allNZBs, nzb)
-		}
-		for _, nzb := range nzbs {
-		
-		}
-		nzb := NZB{}
-		nzbs[0].Unmarshal(&nzb)
-		fmt.Printf("%v+", nzb)
-	}
-	return nil
-}
+//func getNewMovies(appConfig App) error {
+//	docs, _ := appConfig.db.FindAll(query.NewQuery("movies").Where(query.Field("OnDisk").IsFalse()))
+//	for _, doc := range docs {
+//		movie := Movie{}
+//		doc.Unmarshal(&movie)
+//		start := time.Now()
+//		nzbs, _ := appConfig.db.FindAll(query.NewQuery("nzbs").Where(query.Field("ID").Eq(movie.IMDB).And(query.Field("Title").Like("\"(?i)remux|1080p|2160p\""))).Sort(query.SortOption{"Length", -1}).Limit(1))
+//		fmt.Printf("clover request took %s\n", time.Since(start))
+//		var result_nzbs []NZB
+//		for _, i := range nzbs {
+//			nzb := NZB{}
+//			i.Unmarshal(&nzb)
+//			log.WithFields(log.Fields{
+//				"title":  nzb.Title,
+//				"length": nzb.Length,
+//			}).Info("Found nzb")
+//		}
+//
+//	}
+//	return nil
+//}
 
 func main() {
 	appConfig := setConfig()
 	traktApiKey, traktClientSecret := getEnvTrakt()
 	appConfig.traktToken = setUpTrakt(appConfig, traktApiKey, traktClientSecret)
 	appConfig.TorBoxClient = torbox.NewTorBoxClient(getEnvTorBox())
+
 	var err error
-	appConfig.db, err = clover.Open("data-db")
+	os.Remove("data-store")
+	appConfig.store, err = bolthold.Open("data-store", 0666, nil)
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Fatal("Error opening database")
 	}
-	appConfig.db.CreateCollection("movies")
-	appConfig.db.CreateCollection("nzbs")
 
 	// Create a channel to listen for interrupt signals (e.g., SIGINT)
 	shutdownChan := make(chan os.Signal, 1)
@@ -382,7 +316,7 @@ func main() {
 		log.Info("Received shutdown signal, shutting down gracefully...")
 
 		// Close the database connection
-		if err := appConfig.db.Close(); err != nil {
+		if err := appConfig.store.Close(); err != nil {
 			log.Error("Error closing database: ", err)
 		}
 
@@ -391,10 +325,8 @@ func main() {
 		log.Info("Server shut down successfully.")
 		os.Exit(0)
 	}()
-
-	syncMoviesDb(appConfig)
-	populateNzbsMovies(appConfig)
-	getNewMovies(appConfig)
+	appConfig.syncMoviesDbFromTrakt()
+	appConfig.populateNzbForMovies()
 	//go func() {
 	//	for {
 	//		//cleanWatched(appConfig)
