@@ -30,15 +30,14 @@ type ResponseAttributes struct {
 }
 
 type Item struct {
-	Title    string `json:"title"`
-	GUID     string `json:"guid"`
-	Link     string `json:"link"`
-	Comments string `json:"comments"`
-	PubDate  string `json:"pubDate"`
-	//Category    string    `json:"category"`
+	Title       string    `json:"title"`
+	GUID        string    `json:"guid"`
+	Link        string    `json:"link"`
+	Comments    string    `json:"comments"`
+	PubDate     string    `json:"pubDate"`
+	Category    string    `json:"category"`
 	Description string    `json:"description"`
 	Enclosure   Enclosure `json:"enclosure"`
-	Failed      bool      `json:"failed"`
 }
 
 type Enclosure struct {

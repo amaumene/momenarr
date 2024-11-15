@@ -16,7 +16,7 @@ func processNotification(notification torbox.Notification, appConfig App) {
 		}).Info("Extracting string")
 		return
 	}
-	UsenetDownload, err := appConfig.TorBoxClient.FindDownloadByName(extractedString)
+	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByName(extractedString)
 	if err != nil {
 		log.Printf("Error finding download: %v\n", err)
 		log.WithFields(log.Fields{
@@ -42,7 +42,7 @@ func processNotification(notification torbox.Notification, appConfig App) {
 	//		"name": UsenetDownload[0].Name,
 	//		"err":  err,
 	//	}).Info("Usenet download failed")
-	//	//err = appConfig.TorBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+	//	//err = appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
 	//	//if err != nil {
 	//	//	log.WithFields(log.Fields{
 	//	//		"id":  UsenetDownload[0].ID,
@@ -73,7 +73,7 @@ func processNotification(notification torbox.Notification, appConfig App) {
 	//			log.WithFields(log.Fields{
 	//				"name": movie.Item[i+1].Title,
 	//			}).Info("Going to download")
-	//			UsenetCreateDownloadResponse, err := appConfig.TorBoxClient.CreateUsenetDownload(movie.Item[i+1].Enclosure.Attributes.URL, movie.Item[i+1].Title)
+	//			UsenetCreateDownloadResponse, err := appConfig.torBoxClient.CreateUsenetDownload(movie.Item[i+1].Enclosure.Attributes.URL, movie.Item[i+1].Title)
 	//			if err != nil {
 	//				log.WithFields(log.Fields{
 	//					"name": movie.Item[i+1].Title,

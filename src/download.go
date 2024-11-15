@@ -37,7 +37,7 @@ func downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownload
 	log.WithFields(log.Fields{
 		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
 	}).Info("Found cached usenet download")
-	UsenetDownload, err := appConfig.TorBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
+	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownload
 					"name": UsenetDownload[0].Name,
 				}).Info("Download from TorBox complete")
 				// Optionally, you can proceed with further actions like deleting the usenet download
-				err = appConfig.TorBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+				err = appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
 				if err != nil {
 					log.WithFields(log.Fields{
 						"name":  UsenetDownload[0].Name,
@@ -87,7 +87,7 @@ func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) e
 		"fileName": biggestUsenetDownload[0].Files[0].ShortName,
 	}).Info("Starting download")
 
-	fileLink, err := appConfig.TorBoxClient.RequestUsenetDownloadLink(biggestUsenetDownload)
+	fileLink, err := appConfig.torBoxClient.RequestUsenetDownloadLink(biggestUsenetDownload)
 	if err != nil {
 		return err
 	}
