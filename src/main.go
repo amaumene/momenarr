@@ -15,53 +15,53 @@ import (
 	"strings"
 )
 
-func (appConfig *App) searchNZB(episode Media) newsnab.Feed {
+func (appConfig *App) searchNZB(media Media) newsnab.Feed {
 	var feed newsnab.Feed
-	if episode.Number > 0 && episode.Season > 0 {
-		jsonResponse, err := newsnab.SearchTVShow(episode.TVDB, episode.Season, episode.Number, appConfig.newsNabHost, appConfig.newsNabApiKey)
+	if media.Number > 0 && media.Season > 0 {
+		jsonResponse, err := newsnab.SearchTVShow(media.TVDB, media.Season, media.Number, appConfig.newsNabHost, appConfig.newsNabApiKey)
 		if err != nil {
 			log.WithFields(log.Fields{
-				"IMDB": episode.IMDB,
-			}).Error("Searching NZB for episode")
+				"IMDB": media.IMDB,
+			}).Error("Searching NZB for media")
 		}
 		err = json.Unmarshal([]byte(jsonResponse), &feed)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
-			}).Error("Unmarshalling JSON NZB episode")
+			}).Error("Unmarshalling JSON NZB media")
 		}
 	} else {
-		jsonResponse, err := newsnab.SearchMovie(episode.IMDB, appConfig.newsNabHost, appConfig.newsNabApiKey)
+		jsonResponse, err := newsnab.SearchMovie(media.IMDB, appConfig.newsNabHost, appConfig.newsNabApiKey)
 		if err != nil {
 			log.WithFields(log.Fields{
-				"IMDB": episode.IMDB,
-			}).Error("Searching NZB for episode")
+				"IMDB": media.IMDB,
+			}).Error("Searching NZB for media")
 		}
 		err = json.Unmarshal([]byte(jsonResponse), &feed)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
-			}).Error("Unmarshalling JSON NZB episode")
+			}).Error("Unmarshalling JSON NZB media")
 		}
 	}
 	return feed
 }
 
 func (appConfig *App) populateNzb() {
-	episodes := []Media{}
-	_ = appConfig.store.Find(&episodes, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
-	for _, episode := range episodes {
-		feed := appConfig.searchNZB(episode)
+	medias := []Media{}
+	_ = appConfig.store.Find(&medias, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
+	for _, media := range medias {
+		feed := appConfig.searchNZB(media)
 		if len(feed.Channel.Item) > 0 {
 			for _, item := range feed.Channel.Item {
 				length, err := strconv.ParseInt(item.Enclosure.Attributes.Length, 10, 64)
 				if err != nil {
 					log.WithFields(log.Fields{
 						"err": err,
-					}).Error("Converting NZB episode Length to int64")
+					}).Error("Converting NZB media Length to int64")
 				}
 				nzb := NZB{
-					ID:     episode.IMDB,
+					ID:     media.IMDB,
 					Link:   item.Link,
 					Length: length,
 					Title:  item.Title,
@@ -70,7 +70,7 @@ func (appConfig *App) populateNzb() {
 				if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 					log.WithFields(log.Fields{
 						"err": err,
-					}).Error("Inserting NZB episode into database")
+					}).Error("Inserting NZB media into database")
 				}
 			}
 		}
@@ -90,7 +90,7 @@ func (appConfig *App) createOrDownloadCachedMedia(IMDB int64, nzb NZB) error {
 		err = appConfig.store.UpdateMatching(&Media{}, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"), func(record interface{}) error {
 			update, ok := record.(*Media) // record will always be a pointer
 			if !ok {
-				return fmt.Errorf("Record isn't the correct type!  Wanted Episode, got %T", record)
+				return fmt.Errorf("Record isn't the correct type!  Wanted media, got %T", record)
 			}
 			update.DownloadID = torboxDownload.Data.UsenetDownloadID
 			return nil
@@ -118,16 +118,16 @@ func (appConfig *App) createOrDownloadCachedMedia(IMDB int64, nzb NZB) error {
 }
 
 func (appConfig *App) downloadNotOnDisk() {
-	var episodes []Media
-	_ = appConfig.store.Find(&episodes, bolthold.Where("OnDisk").Eq(false))
-	for _, episode := range episodes {
-		nzb, err := appConfig.getNzbFromDB(episode.IMDB)
+	var medias []Media
+	_ = appConfig.store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
+	for _, media := range medias {
+		nzb, err := appConfig.getNzbFromDB(media.IMDB)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
 			}).Error("Request NZB from database")
 		} else {
-			appConfig.createOrDownloadCachedMedia(episode.IMDB, nzb)
+			appConfig.createOrDownloadCachedMedia(media.IMDB, nzb)
 		}
 	}
 }
@@ -203,7 +203,7 @@ func main() {
 	//	for {
 	//		//cleanWatched(appConfig)
 	//		getNewMovies(appConfig)
-	//		//getNewEpisodes(appConfig)
+	//		//getNewmedias(appConfig)
 	//		time.Sleep(6 * time.Hour)
 	//	}
 	//}()
