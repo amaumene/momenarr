@@ -20,6 +20,7 @@ import (
 type App struct {
 	downloadDir        string
 	tempDir            string
+	dataDir            string
 	newsNabHost        string
 	newsNabApiKey      string
 	traktToken         *trakt.Token
@@ -144,7 +145,7 @@ func (appConfig *App) syncMoviesDbFromTrakt() {
 			DownloadID: 0,
 		}
 		err = appConfig.store.Insert(IMDB, movie)
-		if err != nil {
+		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 			log.WithFields(log.Fields{
 				"err": err,
 			}).Error("Inserting movie into database")
@@ -190,7 +191,7 @@ func (appConfig *App) populateNzbForMovies() {
 					Title:  item.Title,
 				}
 				err = appConfig.store.Insert(strings.TrimPrefix(item.GUID, "https://nzbs.in/details/"), nzb)
-				if err != nil {
+				if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 					log.WithFields(log.Fields{
 						"err": err,
 					}).Error("Inserting NZB movie into database")
@@ -291,8 +292,7 @@ func main() {
 	log.SetOutput(os.Stdout)
 
 	var err error
-	os.Remove("data.db")
-	appConfig.store, err = bolthold.Open("data.db", 0666, nil)
+	appConfig.store, err = bolthold.Open(appConfig.dataDir+"/data.db", 0666, nil)
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Fatal("Error opening database")
 	}

@@ -39,9 +39,16 @@ func setConfig() App {
 	}
 	// Create if it doesn't exist
 	createDir(appConfig.tempDir)
-
 	// Clean
 	cleanDir(appConfig.tempDir)
+
+	appConfig.dataDir = os.Getenv("DATA_DIR")
+	if appConfig.dataDir == "" {
+		log.WithFields(log.Fields{
+			"DATA_DIR": appConfig.dataDir,
+		}).Warning("DATA_DIR not set, using current directory")
+		appConfig.dataDir = "."
+	}
 
 	return appConfig
 }

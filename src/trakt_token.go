@@ -73,12 +73,7 @@ func saveTokenToFile(token *trakt.Token, tokenFile string) error {
 func setUpTrakt(appConfig App, traktApiKey string, traktClientSecret string) *trakt.Token {
 	trakt.Key = traktApiKey
 
-	tokenPath := os.Getenv("TOKEN_PATH")
-	if tokenPath == "" {
-		log.Printf("TOKEN_PATH not set, using current directory")
-		tokenPath = "."
-	}
-	tokenFile := tokenPath + "/token.json"
+	tokenFile := appConfig.dataDir + "/token.json"
 
 	token, err := getToken(traktClientSecret, tokenFile)
 	if err != nil {
