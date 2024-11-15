@@ -67,7 +67,19 @@ func processNotification(notification torbox.Notification, appConfig App) {
 					"err": err,
 				}).Error("Request NZB from database")
 			} else {
-				appConfig.createOrDownloadCached(movie.IMDB, nzb)
+				appConfig.createOrDownloadCachedMovie(movie.IMDB, nzb)
+			}
+		}
+		var episodes []Episode
+		_ = appConfig.store.Find(&episodes, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
+		for _, episode := range episodes {
+			nzb, err := appConfig.getNzbFromDB(episode.IMDB)
+			if err != nil {
+				log.WithFields(log.Fields{
+					"err": err,
+				}).Error("Request NZB from database")
+			} else {
+				appConfig.createOrDownloadCachedEpisode(episode.IMDB, nzb)
 			}
 		}
 	}

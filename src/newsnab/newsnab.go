@@ -6,10 +6,9 @@ import (
 	"net/http"
 )
 
-func searchTVShow(TVDB int64, showSeason int, showEpisode int, newsNabHost string, newsNabApiKey string) (string, error) {
+func SearchTVShow(TVDB int64, showSeason int64, showEpisode int64, newsNabHost string, newsNabApiKey string) (string, error) {
 	// Construct the URL with the provided arguments
 	url := fmt.Sprintf("https://%s/api?apikey=%s&t=tvsearch&tvdbid=%d&season=%d&ep=%d&o=json", newsNabHost, newsNabApiKey, TVDB, showSeason, showEpisode)
-
 	// Make the HTTP GET request
 	resp, err := http.Get(url)
 	if err != nil {
