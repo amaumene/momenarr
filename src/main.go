@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/amaumene/momenarr/newsnab"
 	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
 	"github.com/timshannon/bolthold"
@@ -9,51 +11,126 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
+	"strings"
 )
 
-//func (appConfig *App) getNextEpisodes(showProgress *trakt.WatchedProgress, item *trakt.WatchListEntry, episodeNum int64) {
-//	fileName := fmt.Sprintf("%s S%02dE%02d", item.Show.Title, showProgress.NextEpisode.Season, episodeNum)
-//	if fileExists(fileName, appConfig.downloadDir) == "" {
-//		xmlResponse, err := newsnab.searchTVShow(item.Show.TVDB, int(showProgress.NextEpisode.Season), int(episodeNum), appConfig)
-//		if err != nil {
-//			fmt.Printf("Error: %v\n", err)
-//			return
-//		}
-//
-//		var Feed newsnab.Feed
-//		err = xml.Unmarshal([]byte(xmlResponse), &Feed)
-//		if err != nil {
-//			log.WithFields(log.Fields{
-//				"err": err,
-//			}).Fatal("Error unmarshalling XML")
-//		}
-//		filteredFeed := sortNZBsShows(Feed, item.Show)
-//
-//		show := findOrCreateData(item.Show.Title + " S" + strconv.Itoa(int(showProgress.NextEpisode.Season)) + "E" + strconv.Itoa(int(episodeNum)))
-//		show.Item = append(show.Item, filteredFeed.Channel.Item...)
-//		log.WithFields(log.Fields{
-//			"name":    show.Item[0].Title,
-//			"season":  showProgress.NextEpisode.Season,
-//			"episode": episodeNum,
-//		}).Info("Going to download")
-//		UsenetCreateDownloadResponse, err := appConfig.torBoxClient.CreateUsenetDownload(show.Item[0].Enclosure.Attributes.URL, show.Item[0].Title)
-//		if err != nil {
-//			log.WithFields(log.Fields{
-//				"show": show.Item[0].Title,
-//				"err":  err,
-//			}).Fatal("Error creating transfer")
-//		}
-//		if UsenetCreateDownloadResponse.Detail == "Found cached usenet download. Using cached download." {
-//			err = downloadCachedData(UsenetCreateDownloadResponse, appConfig)
-//			if err != nil {
-//				log.WithFields(log.Fields{
-//					"show": show.Item[0].Title,
-//					"err":  err,
-//				}).Fatal("Error downloading cached data")
-//			}
-//		}
-//	}
-//}
+func (appConfig *App) searchNZB(episode Media) newsnab.Feed {
+	var feed newsnab.Feed
+	if episode.Number > 0 && episode.Season > 0 {
+		jsonResponse, err := newsnab.SearchTVShow(episode.TVDB, episode.Season, episode.Number, appConfig.newsNabHost, appConfig.newsNabApiKey)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"IMDB": episode.IMDB,
+			}).Error("Searching NZB for episode")
+		}
+		err = json.Unmarshal([]byte(jsonResponse), &feed)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Unmarshalling JSON NZB episode")
+		}
+	} else {
+		jsonResponse, err := newsnab.SearchMovie(episode.IMDB, appConfig.newsNabHost, appConfig.newsNabApiKey)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"IMDB": episode.IMDB,
+			}).Error("Searching NZB for episode")
+		}
+		err = json.Unmarshal([]byte(jsonResponse), &feed)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Unmarshalling JSON NZB episode")
+		}
+	}
+	return feed
+}
+
+func (appConfig *App) populateNzb() {
+	episodes := []Media{}
+	_ = appConfig.store.Find(&episodes, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
+	for _, episode := range episodes {
+		feed := appConfig.searchNZB(episode)
+		if len(feed.Channel.Item) > 0 {
+			for _, item := range feed.Channel.Item {
+				length, err := strconv.ParseInt(item.Enclosure.Attributes.Length, 10, 64)
+				if err != nil {
+					log.WithFields(log.Fields{
+						"err": err,
+					}).Error("Converting NZB episode Length to int64")
+				}
+				nzb := NZB{
+					ID:     episode.IMDB,
+					Link:   item.Link,
+					Length: length,
+					Title:  item.Title,
+				}
+				err = appConfig.store.Insert(strings.TrimPrefix(item.GUID, "https://nzbs.in/details/"), nzb)
+				if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
+					log.WithFields(log.Fields{
+						"err": err,
+					}).Error("Inserting NZB episode into database")
+				}
+			}
+		}
+	}
+}
+
+func (appConfig *App) createOrDownloadCachedMedia(IMDB int64, nzb NZB) error {
+	torboxDownload, err := appConfig.torBoxClient.CreateUsenetDownload(nzb.Link, nzb.Title)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"title":  nzb.Title,
+			"detail": torboxDownload.Detail,
+			"err":    err,
+		}).Error("Creating TorBox transfer")
+	}
+	if torboxDownload.Success {
+		err = appConfig.store.UpdateMatching(&Media{}, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"), func(record interface{}) error {
+			update, ok := record.(*Media) // record will always be a pointer
+			if !ok {
+				return fmt.Errorf("Record isn't the correct type!  Wanted Episode, got %T", record)
+			}
+			update.DownloadID = torboxDownload.Data.UsenetDownloadID
+			return nil
+		})
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Request NZB from database")
+		}
+		log.WithFields(log.Fields{
+			"IMDB":  IMDB,
+			"Title": nzb.Title,
+		}).Info("Download started successfully")
+	}
+	if torboxDownload.Detail == "Found cached usenet download. Using cached download." {
+		err = appConfig.downloadCachedData(torboxDownload)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"movie": nzb.Title,
+				"err":   err,
+			}).Fatal("Error downloading cached data")
+		}
+	}
+	return nil
+}
+
+func (appConfig *App) downloadNotOnDisk() {
+	var episodes []Media
+	_ = appConfig.store.Find(&episodes, bolthold.Where("OnDisk").Eq(false))
+	for _, episode := range episodes {
+		nzb, err := appConfig.getNzbFromDB(episode.IMDB)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Request NZB from database")
+		} else {
+			appConfig.createOrDownloadCachedMedia(episode.IMDB, nzb)
+		}
+	}
+}
 
 func (appConfig *App) getNzbFromDB(ID int64) (NZB, error) {
 	var nzb []NZB
@@ -116,11 +193,11 @@ func main() {
 		os.Exit(0)
 	}()
 	appConfig.syncMoviesDbFromTrakt()
-	appConfig.populateNzbForMovies()
-	appConfig.downloadMovieNotOnDisk()
 	appConfig.getNewEpisodes()
-	appConfig.populateNzbForEpisodes()
-	appConfig.downloadEpisodeNotOnDisk()
+
+	appConfig.populateNzb()
+
+	appConfig.downloadNotOnDisk()
 
 	//go func() {
 	//	for {

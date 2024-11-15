@@ -19,20 +19,13 @@ type App struct {
 	store              *bolthold.Store
 }
 
-type Movie struct {
+type Media struct {
 	IMDB       int64 `boltholdIndex:"IMDB"`
-	Title      string
-	Year       int64
-	OnDisk     bool
-	File       string
-	DownloadID int
-}
-
-type Episode struct {
 	TVDB       int64 `boltholdIndex:"TVDB"`
-	IMDB       int64 `boltholdIndex:"IMDB"`
 	Number     int64
 	Season     int64
+	Title      string
+	Year       int64
 	OnDisk     bool
 	File       string
 	DownloadID int

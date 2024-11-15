@@ -106,11 +106,13 @@ func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) e
 			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
 		}).Info("Check md5sum failed, trying again")
 		return downloadFromTorBox(UsenetDownload, appConfig)
+	} else {
+
+		log.WithFields(log.Fields{
+			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
+		}).Info("Download and md5sum check finished")
+		return nil
 	}
-	log.WithFields(log.Fields{
-		"fileName": biggestUsenetDownload[0].Files[0].ShortName,
-	}).Info("Download and md5sum check finished")
-	return nil
 }
 
 func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, appConfig App) error {

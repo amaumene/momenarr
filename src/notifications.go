@@ -58,28 +58,16 @@ func processNotification(notification torbox.Notification, appConfig App) {
 			update.Failed = true
 			return nil
 		})
-		var movies []Movie
-		_ = appConfig.store.Find(&movies, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
-		for _, movie := range movies {
-			nzb, err := appConfig.getNzbFromDB(movie.IMDB)
+		var medias []Media
+		_ = appConfig.store.Find(&medias, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
+		for _, media := range medias {
+			nzb, err := appConfig.getNzbFromDB(media.IMDB)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"err": err,
 				}).Error("Request NZB from database")
 			} else {
-				appConfig.createOrDownloadCachedMovie(movie.IMDB, nzb)
-			}
-		}
-		var episodes []Episode
-		_ = appConfig.store.Find(&episodes, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
-		for _, episode := range episodes {
-			nzb, err := appConfig.getNzbFromDB(episode.IMDB)
-			if err != nil {
-				log.WithFields(log.Fields{
-					"err": err,
-				}).Error("Request NZB from database")
-			} else {
-				appConfig.createOrDownloadCachedEpisode(episode.IMDB, nzb)
+				appConfig.createOrDownloadCachedMedia(media.IMDB, nzb)
 			}
 		}
 	}
