@@ -1,36 +1,43 @@
 package main
 
 import (
-	"fmt"
 	"github.com/jacklaaa89/trakt"
 	"github.com/jacklaaa89/trakt/sync"
 	log "github.com/sirupsen/logrus"
+	"github.com/timshannon/bolthold"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
-func cleanWatched(appConfig App) {
-	processHistoryShows(appConfig)
+func (appConfig App) cleanWatched() {
+	appConfig.processHistoryShows()
 }
 
-func processHistoryShows(appConfig App) {
+func (appConfig App) processHistoryShows() {
 	params := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
 
 	historyParams := &trakt.ListHistoryParams{
 		ListParams: params,
-		Type:       "shows",
 		EndAt:      time.Now(),
-		StartAt:    time.Now().AddDate(0, 0, -7),
+		StartAt:    time.Now().AddDate(0, 0, -5),
 	}
 	iterator := sync.History(historyParams)
 	for iterator.Next() {
 		item, err := iterator.History()
-		fmt.Printf("Processing item: %v\n", item)
 		if err != nil {
 			log.Fatalf("Error scanning item: %v", err)
 		}
-		processEpisode(appConfig, item)
+		if item.Type.String() == "movie" {
+			IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(item.Movie.IMDB), "tt"), 10, 64)
+			appConfig.removeFile(IMDB)
+		}
+		if item.Type.String() == "episode" {
+			IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(item.Show.IMDB), "tt"), 10, 64)
+			appConfig.removeFile(IMDB)
+		}
 	}
 
 	if err := iterator.Err(); err != nil {
@@ -38,16 +45,30 @@ func processHistoryShows(appConfig App) {
 	}
 }
 
-func processEpisode(appConfig App, item *trakt.History) {
-	fileName := fmt.Sprintf("%s - S%02dE%02d", item.Show.Title, item.Episode.Season, item.Episode.Number)
-	file := fileExists(fileName, appConfig.downloadDir)
-	if file != "" {
-		fmt.Printf("Deleting %s\n", file)
-		err := os.Remove(filepath.Join(appConfig.downloadDir, file))
-		if err != nil {
-			log.Errorf("Failed to delete file %s: %v", file, err)
-		} else {
-			log.Infof("Successfully deleted %s", file)
+func (appConfig App) removeFile(IMDB int64) {
+	var medias []Media
+	err := appConfig.store.Find(&medias, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"))
+	if err != nil {
+		log.Fatalf("Error finding media: %v", err)
+	}
+	for _, media := range medias {
+		if media.File != "" {
+			err = appConfig.store.DeleteMatching(&media, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"))
+			if err != nil {
+				log.WithFields(log.Fields{
+					"file": media.File,
+				}).Fatal("Deleting media in database")
+			}
+			err := os.Remove(filepath.Join(appConfig.downloadDir, media.File))
+			if err != nil {
+				log.WithFields(log.Fields{
+					"file": media.File,
+				}).Error("Deleting file")
+			} else {
+				log.WithFields(log.Fields{
+					"file": media.File,
+				}).Info("Deleting file")
+			}
 		}
 	}
 }

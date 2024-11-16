@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
+	"github.com/timshannon/bolthold"
 	"io"
 	"net/http"
 	"os"
@@ -33,7 +34,7 @@ func compareMD5sum(appConfig App, UsenetDownload []torbox.UsenetDownload) (bool,
 	return true, nil
 }
 
-func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse) error {
+func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, IMDB int64) error {
 	log.WithFields(log.Fields{
 		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
 	}).Info("Found cached usenet download")
@@ -48,7 +49,7 @@ func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.Usen
 
 		// Start the downloadFromTorBox function in a new goroutine
 		go func() {
-			err := downloadFromTorBox(UsenetDownload, appConfig)
+			err := appConfig.downloadFromTorBox(UsenetDownload, IMDB)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"name":  UsenetDownload[0].Name,
@@ -77,7 +78,7 @@ func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.Usen
 	return nil
 }
 
-func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) error {
+func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, IMDB int64) error {
 	biggestUsenetDownload, err := findBiggestFile(UsenetDownload)
 	if err != nil {
 		return err
@@ -97,20 +98,35 @@ func downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, appConfig App) e
 		log.WithFields(log.Fields{
 			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
 		}).Info("Download failed, trying again")
-		return downloadFromTorBox(UsenetDownload, appConfig)
+		return appConfig.downloadFromTorBox(UsenetDownload, IMDB)
 	}
 
-	downloadedMD5, err := compareMD5sum(appConfig, biggestUsenetDownload)
-	if downloadedMD5 == false {
+	//downloadedMD5, err := compareMD5sum(appConfig, biggestUsenetDownload)
+	//if downloadedMD5 == false {
+	downloadedFilePath := filepath.Join(appConfig.downloadDir, biggestUsenetDownload[0].Files[0].ShortName)
+	fileInfo, err := os.Stat(downloadedFilePath)
+	if biggestUsenetDownload[0].Files[0].Size != fileInfo.Size() {
 		log.WithFields(log.Fields{
 			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
-		}).Info("Check md5sum failed, trying again")
-		return downloadFromTorBox(UsenetDownload, appConfig)
+			"size":     fileInfo.Size(),
+			"expected": biggestUsenetDownload[0].Files[0].Size,
+		}).Error("Check size failed, trying again")
+		return appConfig.downloadFromTorBox(UsenetDownload, IMDB)
 	} else {
-
-		log.WithFields(log.Fields{
-			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
-		}).Info("Download and md5sum check finished")
+		err = appConfig.store.UpdateMatching(&Media{}, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"), func(record interface{}) error {
+			update, ok := record.(*Media) // record will always be a pointer
+			if !ok {
+				return fmt.Errorf("Record isn't the correct type!  Wanted media, got %T", record)
+			}
+			update.OnDisk = true
+			update.File = biggestUsenetDownload[0].Files[0].ShortName
+			return nil
+		})
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Update media path/status on database")
+		}
 		return nil
 	}
 }

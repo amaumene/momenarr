@@ -59,6 +59,6 @@ func (appConfig *App) getNewEpisodes() {
 	if err := iterator.Err(); err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
-		}).Fatal("Error iterating history")
+		}).Fatal("Error iterating watchlist")
 	}
 }

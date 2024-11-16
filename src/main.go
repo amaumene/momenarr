@@ -98,7 +98,7 @@ func (appConfig *App) createOrDownloadCachedMedia(IMDB int64, nzb NZB) error {
 		if err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
-			}).Error("Request NZB from database")
+			}).Error("Update NZB on database")
 		}
 		log.WithFields(log.Fields{
 			"IMDB":  IMDB,
@@ -106,7 +106,7 @@ func (appConfig *App) createOrDownloadCachedMedia(IMDB int64, nzb NZB) error {
 		}).Info("Download started successfully")
 	}
 	if torboxDownload.Detail == "Found cached usenet download. Using cached download." {
-		err = appConfig.downloadCachedData(torboxDownload)
+		err = appConfig.downloadCachedData(torboxDownload, IMDB)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"movie": nzb.Title,
@@ -198,6 +198,8 @@ func main() {
 	appConfig.populateNzb()
 
 	appConfig.downloadNotOnDisk()
+
+	appConfig.cleanWatched()
 
 	//go func() {
 	//	for {

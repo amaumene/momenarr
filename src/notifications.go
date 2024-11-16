@@ -28,13 +28,17 @@ func processNotification(notification torbox.Notification, appConfig App) {
 	}
 
 	if notification.Data.Title == "Usenet Download Completed" {
-		err = downloadFromTorBox(UsenetDownload, appConfig)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"id":   UsenetDownload[0].ID,
-				"name": UsenetDownload[0].Name,
-				"err":  err,
-			}).Fatal("Downloading transfer")
+		var medias []Media
+		_ = appConfig.store.Find(&medias, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
+		for _, media := range medias {
+			err = appConfig.downloadFromTorBox(UsenetDownload, media.IMDB)
+			if err != nil {
+				log.WithFields(log.Fields{
+					"id":   UsenetDownload[0].ID,
+					"name": UsenetDownload[0].Name,
+					"err":  err,
+				}).Error("Downloading transfer")
+			}
 		}
 	}
 	if notification.Data.Title == "Usenet Download Failed" {

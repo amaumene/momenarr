@@ -23,7 +23,7 @@ func (appConfig *App) syncMoviesDbFromTrakt() {
 			log.WithFields(log.Fields{
 				"item": item,
 				"err":  err,
-			}).Error("Scanning movie history")
+			}).Error("Scanning movie watchlist")
 		}
 		IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(item.Movie.IMDB), "tt"), 10, 64)
 		movie := Media{
