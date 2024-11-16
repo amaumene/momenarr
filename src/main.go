@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (appConfig *App) searchNZB(media Media) newsnab.Feed {
@@ -192,23 +193,21 @@ func main() {
 		log.Info("Server shut down successfully.")
 		os.Exit(0)
 	}()
-	appConfig.syncMoviesDbFromTrakt()
-	appConfig.getNewEpisodes()
 
-	appConfig.populateNzb()
+	go func() {
+		for {
+			appConfig.syncMoviesDbFromTrakt()
+			appConfig.getNewEpisodes()
 
-	appConfig.downloadNotOnDisk()
+			appConfig.populateNzb()
 
-	appConfig.cleanWatched()
+			appConfig.downloadNotOnDisk()
 
-	//go func() {
-	//	for {
-	//		//cleanWatched(appConfig)
-	//		getNewMovies(appConfig)
-	//		//getNewmedias(appConfig)
-	//		time.Sleep(6 * time.Hour)
-	//	}
-	//}()
+			appConfig.cleanWatched()
+
+			time.Sleep(6 * time.Hour)
+		}
+	}()
 
 	http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
 		handlePostData(w, r, appConfig)

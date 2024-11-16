@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/jacklaaa89/trakt"
+	"github.com/jacklaaa89/trakt/episode"
 	"github.com/jacklaaa89/trakt/show"
 	"github.com/jacklaaa89/trakt/sync"
 	log "github.com/sirupsen/logrus"
@@ -9,12 +10,12 @@ import (
 	"strings"
 )
 
-func (appConfig *App) syncEpisodesDbFromTrakt(show *trakt.Show, episode *trakt.Episode) {
-	IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(episode.IMDB), "tt"), 10, 64)
+func (appConfig *App) syncEpisodesDbFromTrakt(show *trakt.Show, ep *trakt.Episode) {
+	IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(ep.IMDB), "tt"), 10, 64)
 	insert := Media{
 		TVDB:   int64(show.TVDB),
-		Number: episode.Number,
-		Season: episode.Season,
+		Number: ep.Number,
+		Season: ep.Season,
 		IMDB:   IMDB,
 	}
 	err := appConfig.store.Insert(IMDB, insert)
@@ -54,6 +55,12 @@ func (appConfig *App) getNewEpisodes() {
 			}).Fatal("Error getting show progress")
 		}
 		appConfig.syncEpisodesDbFromTrakt(item.Show, showProgress.NextEpisode)
+		i := 1
+		for i < 2 {
+			nextEpisode, _ := episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
+			appConfig.syncEpisodesDbFromTrakt(item.Show, nextEpisode)
+			i++
+		}
 	}
 
 	if err := iterator.Err(); err != nil {
