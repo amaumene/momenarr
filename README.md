@@ -15,7 +15,7 @@ This is very much work in progress, probably very ugly code, I don't know that m
 It uses Trakt watchlist and also watch history. It checks periodically for any updates. It will then search your NZB indexer (newsnab) and send this NZB to TorBox. Once the download is completed on [TorBox](https://torbox.app/), it downloads the file locally. It will also periodically check for your watch history to clean up watched medias.
 
 Very simple diagram explaining how it works:
-![](Momenarr.png)
+![](momenarr.jpg)
 
 ## Requirements
 
