@@ -56,7 +56,7 @@ func (appConfig *App) getNewEpisodes() {
 		}
 		appConfig.syncEpisodesDbFromTrakt(item.Show, showProgress.NextEpisode)
 		i := 1
-		for i < 2 {
+		for i < 3 {
 			nextEpisode, _ := episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
 			appConfig.syncEpisodesDbFromTrakt(item.Show, nextEpisode)
 			i++
