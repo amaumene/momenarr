@@ -173,23 +173,14 @@ func main() {
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Fatal("Error opening database")
 	}
-
-	// Create a channel to listen for interrupt signals (e.g., SIGINT)
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, os.Interrupt)
-
-	// Run a separate goroutine to handle the shutdown signal
 	go func() {
 		<-shutdownChan
 		log.Info("Received shutdown signal, shutting down gracefully...")
-
-		// Close the database connection
 		if err := appConfig.store.Close(); err != nil {
 			log.Error("Error closing database: ", err)
 		}
-
-		// Any other cleanup tasks go here
-
 		log.Info("Server shut down successfully.")
 		os.Exit(0)
 	}()
@@ -198,13 +189,9 @@ func main() {
 		for {
 			appConfig.syncMoviesDbFromTrakt()
 			appConfig.getNewEpisodes()
-
 			appConfig.populateNzb()
-
 			appConfig.downloadNotOnDisk()
-
 			appConfig.cleanWatched()
-
 			time.Sleep(6 * time.Hour)
 		}
 	}()
@@ -214,6 +201,19 @@ func main() {
 	})
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/refresh", func(w http.ResponseWriter, r *http.Request) {
+		go func() {
+			appConfig.syncMoviesDbFromTrakt()
+			appConfig.getNewEpisodes()
+			appConfig.populateNzb()
+			appConfig.downloadNotOnDisk()
+			appConfig.cleanWatched()
+		}()
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Refresh initiated"))
 	})
 
 	port := "0.0.0.0:3000"
