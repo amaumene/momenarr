@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/md5"
 	"fmt"
 	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
@@ -13,26 +12,6 @@ import (
 	"sync"
 	"time"
 )
-
-func compareMD5sum(appConfig App, UsenetDownload []torbox.UsenetDownload) (bool, error) {
-	filePath := filepath.Join(appConfig.downloadDir, UsenetDownload[0].Files[0].ShortName)
-	file, err := os.Open(filePath)
-	if err != nil {
-		return false, err
-	}
-	defer file.Close()
-
-	hash := md5.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return false, err
-	}
-
-	md5sum := fmt.Sprintf("%x", hash.Sum(nil))
-	if md5sum != UsenetDownload[0].Files[0].MD5 {
-		return false, nil
-	}
-	return true, nil
-}
 
 func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, IMDB int64) error {
 	log.WithFields(log.Fields{
