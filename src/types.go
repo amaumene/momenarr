@@ -20,8 +20,8 @@ type App struct {
 }
 
 type Media struct {
-	IMDB       int64 `boltholdIndex:"IMDB"`
-	TVDB       int64 `boltholdIndex:"TVDB"`
+	IMDB       string `boltholdIndex:"IMDB"`
+	TVDB       int64  `boltholdIndex:"TVDB"`
 	Number     int64
 	Season     int64
 	Title      string
@@ -32,7 +32,7 @@ type Media struct {
 }
 
 type NZB struct {
-	ID     int64  `boltholdIndex:"ID"`
+	IMDB   string `boltholdIndex:"IMDB"`
 	Link   string `boltholdIndex:"Link"`
 	Length int64
 	Title  string

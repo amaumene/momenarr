@@ -62,7 +62,7 @@ func (appConfig *App) populateNzb() {
 					}).Error("Converting NZB media Length to int64")
 				}
 				nzb := NZB{
-					ID:     media.IMDB,
+					IMDB:   media.IMDB,
 					Link:   item.Link,
 					Length: length,
 					Title:  item.Title,
@@ -78,7 +78,7 @@ func (appConfig *App) populateNzb() {
 	}
 }
 
-func (appConfig *App) createOrDownloadCachedMedia(IMDB int64, nzb NZB) error {
+func (appConfig *App) createOrDownloadCachedMedia(IMDB string, nzb NZB) error {
 	torboxDownload, err := appConfig.torBoxClient.CreateUsenetDownload(nzb.Link, nzb.Title)
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -88,18 +88,19 @@ func (appConfig *App) createOrDownloadCachedMedia(IMDB int64, nzb NZB) error {
 		}).Error("Creating TorBox transfer")
 	}
 	if torboxDownload.Success {
-		err = appConfig.store.UpdateMatching(&Media{}, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"), func(record interface{}) error {
-			update, ok := record.(*Media) // record will always be a pointer
-			if !ok {
-				return fmt.Errorf("Record isn't the correct type!  Wanted media, got %T", record)
-			}
-			update.DownloadID = torboxDownload.Data.UsenetDownloadID
-			return nil
-		})
+		var media Media
+		err = appConfig.store.Get(IMDB, &media)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
-			}).Error("Update NZB on database")
+			}).Error("Failed to get media from database")
+		}
+		media.DownloadID = torboxDownload.Data.UsenetDownloadID
+		err = appConfig.store.Update(IMDB, &media)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Update media downloadID on database")
 		}
 		log.WithFields(log.Fields{
 			"IMDB":  IMDB,
@@ -133,22 +134,22 @@ func (appConfig *App) downloadNotOnDisk() {
 	}
 }
 
-func (appConfig *App) getNzbFromDB(ID int64) (NZB, error) {
+func (appConfig *App) getNzbFromDB(IMDB string) (NZB, error) {
 	var nzb []NZB
-	err := appConfig.store.Find(&nzb, bolthold.Where("ID").Eq(ID).And("Title").
+	err := appConfig.store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
 		RegExp(regexp.MustCompile("(?i)remux")).
 		And("Failed").Eq(false).
-		SortBy("Length").Reverse().Limit(1).Index("ID"))
+		SortBy("Length").Reverse().Limit(1).Index("IMDB"))
 	if err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("Request NZB from database")
 	}
 	if len(nzb) == 0 {
-		err = appConfig.store.Find(&nzb, bolthold.Where("ID").Eq(ID).And("Title").
+		err = appConfig.store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
 			RegExp(regexp.MustCompile("(?i)web-dl")).
 			And("Failed").Eq(false).
-			SortBy("Length").Reverse().Limit(1).Index("ID"))
+			SortBy("Length").Reverse().Limit(1).Index("IMDB"))
 		if err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
@@ -158,7 +159,7 @@ func (appConfig *App) getNzbFromDB(ID int64) (NZB, error) {
 	if len(nzb) > 0 {
 		return nzb[0], nil
 	}
-	return NZB{}, fmt.Errorf("No NZB found for %d", ID)
+	return NZB{}, fmt.Errorf("No NZB found for %d", IMDB)
 }
 
 func main() {

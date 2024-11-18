@@ -1,14 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"github.com/jacklaaa89/trakt"
 	"github.com/jacklaaa89/trakt/sync"
 	log "github.com/sirupsen/logrus"
-	"github.com/timshannon/bolthold"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -31,12 +29,12 @@ func (appConfig App) processHistoryShows() {
 			log.Fatalf("Error scanning item: %v", err)
 		}
 		if item.Type.String() == "movie" {
-			IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(item.Movie.IMDB), "tt"), 10, 64)
-			appConfig.removeFile(IMDB)
+			appConfig.removeFile(string(item.Movie.IMDB))
 		}
 		if item.Type.String() == "episode" {
-			IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(item.Show.IMDB), "tt"), 10, 64)
-			appConfig.removeFile(IMDB)
+			fmt.Println(item.Show.IMDB)
+			fmt.Println(item.Show.MediaIDs)
+			appConfig.removeFile(string(item.Show.IMDB))
 		}
 	}
 
@@ -45,30 +43,28 @@ func (appConfig App) processHistoryShows() {
 	}
 }
 
-func (appConfig App) removeFile(IMDB int64) {
-	var medias []Media
-	err := appConfig.store.Find(&medias, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"))
+func (appConfig App) removeFile(IMDB string) {
+	var media Media
+	err := appConfig.store.Get(IMDB, &media)
 	if err != nil {
 		log.Fatalf("Error finding media: %v", err)
 	}
-	for _, media := range medias {
-		if media.File != "" {
-			err = appConfig.store.DeleteMatching(&media, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"))
-			if err != nil {
-				log.WithFields(log.Fields{
-					"file": media.File,
-				}).Fatal("Deleting media in database")
-			}
-			err := os.Remove(filepath.Join(appConfig.downloadDir, media.File))
-			if err != nil {
-				log.WithFields(log.Fields{
-					"file": media.File,
-				}).Error("Deleting file")
-			} else {
-				log.WithFields(log.Fields{
-					"file": media.File,
-				}).Info("Deleting file")
-			}
+	if len(media.File) > 0 {
+		err = appConfig.store.Delete(IMDB, &media)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"file": media.File,
+			}).Fatal("Deleting media in database")
+		}
+		err := os.Remove(filepath.Join(appConfig.downloadDir, media.File))
+		if err != nil {
+			log.WithFields(log.Fields{
+				"file": media.File,
+			}).Error("Deleting file")
+		} else {
+			log.WithFields(log.Fields{
+				"file": media.File,
+			}).Info("Deleting file")
 		}
 	}
 }

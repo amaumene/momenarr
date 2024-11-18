@@ -6,19 +6,16 @@ import (
 	"github.com/jacklaaa89/trakt/show"
 	"github.com/jacklaaa89/trakt/sync"
 	log "github.com/sirupsen/logrus"
-	"strconv"
-	"strings"
 )
 
 func (appConfig *App) syncEpisodesDbFromTrakt(show *trakt.Show, ep *trakt.Episode) {
-	IMDB, _ := strconv.ParseInt(strings.TrimPrefix(string(ep.IMDB), "tt"), 10, 64)
 	insert := Media{
 		TVDB:   int64(show.TVDB),
 		Number: ep.Number,
 		Season: ep.Season,
-		IMDB:   IMDB,
+		IMDB:   string(ep.IMDB),
 	}
-	err := appConfig.store.Insert(IMDB, insert)
+	err := appConfig.store.Insert(ep.IMDB, insert)
 	if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 		log.WithFields(log.Fields{
 			"err": err,

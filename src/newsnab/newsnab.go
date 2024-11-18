@@ -30,9 +30,11 @@ func SearchTVShow(TVDB int64, showSeason int64, showEpisode int64, newsNabHost s
 	return string(body), nil
 }
 
-func SearchMovie(IMDB int64, newsNabHost string, newsNabApiKey string) (string, error) {
+func SearchMovie(IMDB string, newsNabHost string, newsNabApiKey string) (string, error) {
+	nzbIMDB := IMDB[2:]
+	fmt.Printf("IMDB: %s\n", nzbIMDB)
 	// Construct the URL with the provided arguments
-	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%d&o=json", newsNabHost, newsNabApiKey, IMDB)
+	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%d&o=json", newsNabHost, newsNabApiKey, nzbIMDB)
 	// Make the HTTP GET request
 	resp, err := http.Get(url)
 	if err != nil {

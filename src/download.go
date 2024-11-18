@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
-	"github.com/timshannon/bolthold"
 	"io"
 	"net/http"
 	"os"
@@ -13,7 +12,7 @@ import (
 	"time"
 )
 
-func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, IMDB int64) error {
+func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, IMDB string) error {
 	log.WithFields(log.Fields{
 		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
 	}).Info("Found cached usenet download")
@@ -38,14 +37,6 @@ func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.Usen
 				log.WithFields(log.Fields{
 					"name": UsenetDownload[0].Name,
 				}).Info("Download from TorBox complete")
-				// Optionally, you can proceed with further actions like deleting the usenet download
-				err = appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
-				if err != nil {
-					log.WithFields(log.Fields{
-						"name":  UsenetDownload[0].Name,
-						"error": err,
-					}).Error("Failed to delete the usenet download")
-				}
 			}
 		}()
 
@@ -57,7 +48,7 @@ func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.Usen
 	return nil
 }
 
-func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, IMDB int64) error {
+func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, IMDB string) error {
 	biggestUsenetDownload, err := findBiggestFile(UsenetDownload)
 	if err != nil {
 		return err
@@ -79,9 +70,6 @@ func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, 
 		}).Info("Download failed, trying again")
 		return appConfig.downloadFromTorBox(UsenetDownload, IMDB)
 	}
-
-	//downloadedMD5, err := compareMD5sum(appConfig, biggestUsenetDownload)
-	//if downloadedMD5 == false {
 	downloadedFilePath := filepath.Join(appConfig.downloadDir, biggestUsenetDownload[0].Files[0].ShortName)
 	fileInfo, err := os.Stat(downloadedFilePath)
 	if biggestUsenetDownload[0].Files[0].Size != fileInfo.Size() {
@@ -92,19 +80,27 @@ func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, 
 		}).Error("Check size failed, trying again")
 		return appConfig.downloadFromTorBox(UsenetDownload, IMDB)
 	} else {
-		err = appConfig.store.UpdateMatching(&Media{}, bolthold.Where("IMDB").Eq(IMDB).Index("IMDB"), func(record interface{}) error {
-			update, ok := record.(*Media) // record will always be a pointer
-			if !ok {
-				return fmt.Errorf("Record isn't the correct type!  Wanted media, got %T", record)
-			}
-			update.OnDisk = true
-			update.File = biggestUsenetDownload[0].Files[0].ShortName
-			return nil
-		})
+		var media Media
+		err = appConfig.store.Get(IMDB, &media)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Failed to get media from database")
+		}
+		media.File = biggestUsenetDownload[0].Files[0].ShortName
+		media.OnDisk = true
+		err = appConfig.store.Update(IMDB, &media)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
 			}).Error("Update media path/status on database")
+		}
+		err = appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+		if err != nil {
+			log.WithFields(log.Fields{
+				"name":  UsenetDownload[0].Name,
+				"error": err,
+			}).Error("Failed to delete the usenet download")
 		}
 		return nil
 	}
