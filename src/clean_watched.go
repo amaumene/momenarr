@@ -47,7 +47,7 @@ func (appConfig App) removeFile(IMDB string) {
 	var media Media
 	err := appConfig.store.Get(IMDB, &media)
 	if err != nil {
-		log.Fatalf("Error finding media: %v", err)
+		log.Infof("Error finding media: %v", err)
 	}
 	if len(media.File) > 0 {
 		err = appConfig.store.Delete(IMDB, &media)
