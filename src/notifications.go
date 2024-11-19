@@ -3,70 +3,56 @@ package main
 import (
 	"fmt"
 	"github.com/amaumene/momenarr/torbox"
-	log "github.com/sirupsen/logrus"
 	"github.com/timshannon/bolthold"
 	"regexp"
 )
 
-func processNotification(notification torbox.Notification, appConfig App) {
+func processNotification(notification torbox.Notification, appConfig App) error {
 	extractedString, err := extractString(notification.Data.Message)
 	if err != nil {
-		log.WithFields(log.Fields{
-			"message": notification.Data.Message,
-			"err":     err,
-		}).Info("Extracting string")
-		return
+		return fmt.Errorf("extracting string from notification: %v", err)
 	}
 
 	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByName(extractedString)
 	if err != nil {
-		log.WithFields(log.Fields{
-			"string": extractedString,
-			"err":    err,
-		}).Info("Finding download")
-		return
+		return fmt.Errorf("finding download by name: %v", err)
 	}
 
 	switch notification.Data.Title {
 	case "Usenet Download Completed":
-		handleDownloadCompleted(appConfig, UsenetDownload)
+		err = handleDownloadCompleted(appConfig, UsenetDownload)
+		if err != nil {
+			return fmt.Errorf("handling download completed: %v", err)
+		}
 	case "Usenet Download Failed":
-		handleDownloadFailed(appConfig, UsenetDownload, extractedString)
+		err = handleDownloadFailed(appConfig, UsenetDownload, extractedString)
+		if err != nil {
+			return fmt.Errorf("handling download failed: %v", err)
+		}
 	}
+	return nil
 }
 
-func handleDownloadCompleted(appConfig App, UsenetDownload []torbox.UsenetDownload) {
+func handleDownloadCompleted(appConfig App, UsenetDownload []torbox.UsenetDownload) error {
 	var medias []Media
 	err := appConfig.store.Find(&medias, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
 	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Error("Finding media in database")
-		return
+		return fmt.Errorf("finding media in database: %v", err)
 	}
 
 	for _, media := range medias {
 		err = appConfig.downloadFromTorBox(UsenetDownload, media.IMDB)
 		if err != nil {
-			log.WithFields(log.Fields{
-				"id":   UsenetDownload[0].ID,
-				"name": UsenetDownload[0].Name,
-				"err":  err,
-			}).Error("Downloading transfer")
+			return fmt.Errorf("downloading media from TorBox: %v", err)
 		}
 	}
+	return nil
 }
 
-func handleDownloadFailed(appConfig App, UsenetDownload []torbox.UsenetDownload, extractedString string) {
-	log.WithFields(log.Fields{
-		"id":   UsenetDownload[0].ID,
-		"name": UsenetDownload[0].Name,
-	}).Warning("Usenet download failed")
-
+func handleDownloadFailed(appConfig App, UsenetDownload []torbox.UsenetDownload, extractedString string) error {
 	err := appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
 	if err != nil {
-		log.WithFields(log.Fields{
-			"id":  UsenetDownload[0].ID,
-			"err": err,
-		}).Error("Deleting failed transfer")
+		return fmt.Errorf("deleting transfer: %v", err)
 	}
 
 	err = appConfig.store.UpdateMatching(&NZB{}, bolthold.Where("Title").Eq(extractedString), func(record interface{}) error {
@@ -78,24 +64,26 @@ func handleDownloadFailed(appConfig App, UsenetDownload []torbox.UsenetDownload,
 		return nil
 	})
 	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Error("Updating NZB status in database")
+		return fmt.Errorf("updating NZB record: %v", err)
 	}
 
 	var medias []Media
 	err = appConfig.store.Find(&medias, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
 	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Error("Finding media in database")
-		return
+		return fmt.Errorf("finding media in database: %v", err)
 	}
 
 	for _, media := range medias {
 		nzb, err := appConfig.getNzbFromDB(media.IMDB)
 		if err != nil {
-			log.WithFields(log.Fields{"err": err}).Error("Requesting NZB from database")
+			return fmt.Errorf("getting NZB from database: %v", err)
 		} else {
-			appConfig.createOrDownloadCachedMedia(media.IMDB, nzb)
+			if err := appConfig.createOrDownloadCachedMedia(media.IMDB, nzb); err != nil {
+				return fmt.Errorf("creating or downloading cached media: %v", err)
+			}
 		}
 	}
+	return nil
 }
 
 func extractString(message string) (string, error) {

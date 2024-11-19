@@ -1,11 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"github.com/jacklaaa89/trakt"
 	"github.com/jacklaaa89/trakt/episode"
 	"github.com/jacklaaa89/trakt/show"
 	"github.com/jacklaaa89/trakt/sync"
-	log "github.com/sirupsen/logrus"
 )
 
 func (appConfig *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
@@ -17,13 +17,12 @@ func (appConfig *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error
 	}
 	err := appConfig.store.Insert(ep.IMDB, media)
 	if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
-		log.WithFields(log.Fields{"err": err}).Error("Inserting episode into database")
-		return err
+		return fmt.Errorf("inserting episode into database: %v", err)
 	}
 	return nil
 }
 
-func (appConfig *App) getNewEpisodes() error {
+func (appConfig *App) syncEpisodesFromTrakt() error {
 	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
 	watchListParams := &trakt.ListWatchListParams{
 		ListParams: tokenParams,
@@ -34,8 +33,7 @@ func (appConfig *App) getNewEpisodes() error {
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
-			log.WithFields(log.Fields{"item": item, "err": err}).Error("Error scanning item")
-			return err
+			return fmt.Errorf("scanning episode item: %v", err)
 		}
 
 		progressParams := &trakt.ProgressParams{
@@ -43,8 +41,7 @@ func (appConfig *App) getNewEpisodes() error {
 		}
 		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
 		if err != nil {
-			log.WithFields(log.Fields{"show": item.Show.Title, "err": err}).Error("Error getting show progress")
-			return err
+			return fmt.Errorf("getting show progress: %v", err)
 		}
 
 		if err := appConfig.syncEpisodeToDB(item.Show, showProgress.NextEpisode); err != nil {
@@ -54,8 +51,7 @@ func (appConfig *App) getNewEpisodes() error {
 		for i := 1; i < 3; i++ {
 			nextEpisode, err := episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
 			if err != nil {
-				log.WithFields(log.Fields{"show": item.Show.Title, "err": err}).Error("Error getting next episode")
-				return err
+				return fmt.Errorf("getting next episode from database: %v", err)
 			}
 			if err := appConfig.syncEpisodeToDB(item.Show, nextEpisode); err != nil {
 				return err
@@ -64,8 +60,7 @@ func (appConfig *App) getNewEpisodes() error {
 	}
 
 	if err := iterator.Err(); err != nil {
-		log.WithFields(log.Fields{"err": err}).Error("Error iterating watchlist")
-		return err
+		return fmt.Errorf("iterating episode watchlist: %v", err)
 	}
 	return nil
 }

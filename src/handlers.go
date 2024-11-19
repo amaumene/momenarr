@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"github.com/amaumene/momenarr/torbox"
+	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 )
@@ -19,7 +20,9 @@ func handleAPIRequests(appConfig *App) {
 			appConfig.runTasks()
 		}()
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Refresh initiated"))
+		if _, err := w.Write([]byte("Refresh initiated")); err != nil {
+			log.WithFields(log.Fields{"err": err}).Error("writing refresh response")
+		}
 	})
 }
 
@@ -34,7 +37,11 @@ func handlePostData(w http.ResponseWriter, r *http.Request, appConfig App) {
 		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
 		return
 	}
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			log.WithFields(log.Fields{"err": err}).Error("failed to close request body")
+		}
+	}()
 
 	var notification torbox.Notification
 	err = json.Unmarshal(body, &notification)
@@ -43,9 +50,16 @@ func handlePostData(w http.ResponseWriter, r *http.Request, appConfig App) {
 		return
 	}
 
-	go processNotification(notification, appConfig)
+	go func() {
+		err := processNotification(notification, appConfig)
+		if err != nil {
+			log.WithFields(log.Fields{"err": err}).Error("processing notification")
+		}
+	}()
 
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"message": "Data received and processing started"}`))
+	if _, err := w.Write([]byte(`{"message": "Data received and processing started"}`)); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("writing response")
+	}
 }

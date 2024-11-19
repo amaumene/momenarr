@@ -1,12 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"github.com/jacklaaa89/trakt"
 	"github.com/jacklaaa89/trakt/sync"
-	log "github.com/sirupsen/logrus"
 )
 
-func (appConfig *App) syncMoviesDbFromTrakt() error {
+func (appConfig *App) syncMoviesFromTrakt() error {
 	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
 
 	watchListParams := &trakt.ListWatchListParams{
@@ -18,11 +18,7 @@ func (appConfig *App) syncMoviesDbFromTrakt() error {
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
-			log.WithFields(log.Fields{
-				"item": item,
-				"err":  err,
-			}).Error("Scanning movie watchlist")
-			continue
+			return fmt.Errorf("scanning movice item: %v", err)
 		}
 
 		movie := Media{
@@ -35,19 +31,11 @@ func (appConfig *App) syncMoviesDbFromTrakt() error {
 		}
 		err = appConfig.store.Insert(string(item.Movie.IMDB), movie)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
-			log.WithFields(log.Fields{
-				"err": err,
-			}).Error("Inserting movie into database")
-			return err
+			return fmt.Errorf("scanning movie item: %v", err)
 		}
 	}
-
 	if err := iterator.Err(); err != nil {
-		log.WithFields(log.Fields{
-			"err": err,
-		}).Error("Iterating movie history")
-		return err
+		return fmt.Errorf("iterating movie watchlist: %v", err)
 	}
-
 	return nil
 }

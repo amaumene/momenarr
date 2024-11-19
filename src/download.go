@@ -12,39 +12,19 @@ import (
 	"time"
 )
 
-func (appConfig *App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, IMDB string) error {
-	log.WithFields(log.Fields{
-		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
-	}).Info("Found cached usenet download")
-
-	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
-	if err != nil {
-		return err
-	}
-
-	if UsenetDownload[0].Cached {
-		log.WithFields(log.Fields{
-			"name": UsenetDownload[0].Name,
-		}).Info("Starting download from cached data")
-
-		go func() {
-			if err := appConfig.downloadFromTorBox(UsenetDownload, IMDB); err != nil {
-				log.WithFields(log.Fields{
-					"name":  UsenetDownload[0].Name,
-					"error": err,
-				}).Error("Failed to download from TorBox")
-			} else {
-				log.WithFields(log.Fields{
-					"name": UsenetDownload[0].Name,
-				}).Info("Download from TorBox complete")
+func findBiggestFile(downloads []torbox.UsenetDownload) ([]torbox.UsenetDownload, error) {
+	for _, download := range downloads {
+		largestFile := download.Files[0]
+		for _, file := range download.Files {
+			if file.Size > largestFile.Size {
+				largestFile = file
 			}
-		}()
-		return nil
+		}
+		filteredDownload := []torbox.UsenetDownload{download}
+		filteredDownload[0].Files = []torbox.UsenetDownloadFile{largestFile}
+		return filteredDownload, nil
 	}
-	log.WithFields(log.Fields{
-		"name": UsenetDownload[0].Name,
-	}).Info("Not really in cache, skipping and hoping to get a notification")
-	return nil
+	return nil, fmt.Errorf("cannot find biggest file in download")
 }
 
 func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, IMDB string) error {
@@ -144,7 +124,9 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 			}
 
 			if err := fetchFileChunk(httpClient, resp.Request.URL.String(), start, end, tempFile, &mu, &totalDownloaded); err != nil {
-				log.Println("Error downloading chunk:", err)
+				log.WithFields(log.Fields{
+					"err": err,
+				}).Error("downloading chunk")
 			}
 		}(i)
 	}
@@ -166,7 +148,11 @@ func fetchFileChunk(httpClient *http.Client, url string, start, end int64, tempF
 		if err := fetchChunkWithRetry(httpClient, url, start, end, tempFile, mu, totalDownloaded); err == nil {
 			return nil
 		} else if attempt < maxRetries {
-			fmt.Printf("Error downloading chunk (attempt %d/%d). Retrying in %v...\n", attempt, maxRetries, retryDelay)
+			log.WithFields(log.Fields{
+				"attempt":    attempt,
+				"maxRetries": maxRetries,
+				"retryDelay": retryDelay,
+			}).Error("downloading chunk")
 			time.Sleep(retryDelay)
 		} else {
 			return fmt.Errorf("error downloading chunk after %d attempts", maxRetries)

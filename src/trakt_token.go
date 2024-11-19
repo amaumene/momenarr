@@ -21,7 +21,11 @@ func loadTokenFromFile(tokenFile string) (*trakt.Token, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error opening token file: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			err = fmt.Errorf("error closing the file: %v", err)
+		}
+	}()
 
 	var token trakt.Token
 	decoder := json.NewDecoder(file)
@@ -61,7 +65,11 @@ func saveTokenToFile(token *trakt.Token, tokenFile string) error {
 	if err != nil {
 		return fmt.Errorf("error creating token file: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			err = fmt.Errorf("error closing the file: %v", err)
+		}
+	}()
 
 	encoder := json.NewEncoder(file)
 	if err := encoder.Encode(token); err != nil {
