@@ -112,19 +112,26 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 	if err != nil {
 		return fmt.Errorf("failed to download file content: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			err = fmt.Errorf("closing response body: %s", closeErr)
+		}
+	}()
 
 	tempFile, err := os.CreateTemp(appConfig.tempDir, "tempfile-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file: %v", err)
 	}
-	defer tempFile.Close()
+	defer func() {
+		if closeErr := tempFile.Close(); closeErr != nil {
+			err = fmt.Errorf("closing temporary file: %s", closeErr)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var totalDownloaded int64
 	chunkSize := int64(1073741824) // 1GiB chunk
-	startTime := time.Now()
 
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
@@ -136,7 +143,7 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 				end = usenetDownload[0].Files[0].Size
 			}
 
-			if err := fetchFileChunk(httpClient, resp.Request.URL.String(), start, end, tempFile, &mu, &totalDownloaded, startTime, usenetDownload[0].Files[0].ShortName, usenetDownload[0].Files[0].Size); err != nil {
+			if err := fetchFileChunk(httpClient, resp.Request.URL.String(), start, end, tempFile, &mu, &totalDownloaded); err != nil {
 				log.Println("Error downloading chunk:", err)
 			}
 		}(i)
@@ -151,12 +158,12 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 	return nil
 }
 
-func fetchFileChunk(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded *int64, startTime time.Time, shortName string, totalSize int64) error {
+func fetchFileChunk(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded *int64) error {
 	const maxRetries = 300
 	const retryDelay = 10 * time.Second
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if err := fetchChunkWithRetry(httpClient, url, start, end, tempFile, mu, totalDownloaded, startTime, shortName, totalSize); err == nil {
+		if err := fetchChunkWithRetry(httpClient, url, start, end, tempFile, mu, totalDownloaded); err == nil {
 			return nil
 		} else if attempt < maxRetries {
 			fmt.Printf("Error downloading chunk (attempt %d/%d). Retrying in %v...\n", attempt, maxRetries, retryDelay)
@@ -168,7 +175,7 @@ func fetchFileChunk(httpClient *http.Client, url string, start, end int64, tempF
 	return nil
 }
 
-func fetchChunkWithRetry(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded *int64, startTime time.Time, shortName string, totalSize int64) error {
+func fetchChunkWithRetry(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded *int64) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("error creating request: %v", err)
@@ -178,7 +185,11 @@ func fetchChunkWithRetry(httpClient *http.Client, url string, start, end int64, 
 	if err != nil {
 		return fmt.Errorf("error performing request: %v", err)
 	}
-	defer partResp.Body.Close()
+	defer func() {
+		if closeErr := partResp.Body.Close(); closeErr != nil {
+			err = fmt.Errorf("closing response body: %s", closeErr)
+		}
+	}()
 
 	if partResp.StatusCode < 200 || partResp.StatusCode >= 300 {
 		return fmt.Errorf("error: received non-success status code %d", partResp.StatusCode)
