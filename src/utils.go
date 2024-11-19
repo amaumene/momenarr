@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
-	"github.com/timshannon/bolthold"
 	"os"
 	"path/filepath"
-	"regexp"
 )
 
 func createDir(dir string) {
@@ -76,28 +74,4 @@ func (appConfig *App) createOrDownloadCachedMedia(IMDB string, nzb NZB) error {
 		}
 	}
 	return nil
-}
-
-func (appConfig *App) getNzbFromDB(IMDB string) (NZB, error) {
-	var nzb []NZB
-	err := appConfig.store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
-		RegExp(regexp.MustCompile("(?i)remux")).
-		And("Failed").Eq(false).
-		SortBy("Length").Reverse().Limit(1).Index("IMDB"))
-	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Error("Request NZB from database")
-	}
-	if len(nzb) == 0 {
-		err = appConfig.store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
-			RegExp(regexp.MustCompile("(?i)web-dl")).
-			And("Failed").Eq(false).
-			SortBy("Length").Reverse().Limit(1).Index("IMDB"))
-		if err != nil {
-			log.WithFields(log.Fields{"err": err}).Error("Request NZB from database")
-		}
-	}
-	if len(nzb) > 0 {
-		return nzb[0], nil
-	}
-	return NZB{}, fmt.Errorf("No NZB found for %d", IMDB)
 }

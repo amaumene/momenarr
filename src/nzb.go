@@ -5,9 +5,34 @@ import (
 	"fmt"
 	"github.com/amaumene/momenarr/newsnab"
 	"github.com/timshannon/bolthold"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+func (appConfig *App) getNzbFromDB(IMDB string) (NZB, error) {
+	var nzb []NZB
+	err := appConfig.store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
+		RegExp(regexp.MustCompile("(?i)remux")).
+		And("Failed").Eq(false).
+		SortBy("Length").Reverse().Limit(1).Index("IMDB"))
+	if err != nil {
+		return NZB{}, fmt.Errorf("request NZB remux from database: %s", err)
+	}
+	if len(nzb) == 0 {
+		err = appConfig.store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
+			RegExp(regexp.MustCompile("(?i)web-dl")).
+			And("Failed").Eq(false).
+			SortBy("Length").Reverse().Limit(1).Index("IMDB"))
+		if err != nil {
+			return NZB{}, fmt.Errorf("request NZB web-dl from database: %s", err)
+		}
+	}
+	if len(nzb) > 0 {
+		return nzb[0], nil
+	}
+	return NZB{}, fmt.Errorf("no NZB found for %s", IMDB)
+}
 
 func (appConfig *App) searchNZB(media Media) (newsnab.Feed, error) {
 	var feed newsnab.Feed
