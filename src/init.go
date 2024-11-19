@@ -5,8 +5,9 @@ import (
 	"os"
 )
 
-func setConfig() App {
-	var appConfig App
+func setConfig() *App {
+
+	appConfig := new(App)
 
 	appConfig.newsNabApiKey = os.Getenv("NEWSNAB_API_KEY")
 	if appConfig.newsNabApiKey == "" {

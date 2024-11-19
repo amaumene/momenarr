@@ -70,7 +70,7 @@ func saveTokenToFile(token *trakt.Token, tokenFile string) error {
 	return nil
 }
 
-func setUpTrakt(appConfig App, traktApiKey string, traktClientSecret string) *trakt.Token {
+func setUpTrakt(appConfig *App, traktApiKey string, traktClientSecret string) *trakt.Token {
 	trakt.Key = traktApiKey
 
 	tokenFile := appConfig.dataDir + "/token.json"

@@ -61,9 +61,12 @@ func (appConfig *App) insertNZBItems(media Media, items []newsnab.Item) {
 	}
 }
 
-func (appConfig *App) populateNzb() {
+func (appConfig *App) populateNZB() error {
 	var medias []Media
-	_ = appConfig.store.Find(&medias, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
+	err := appConfig.store.Find(&medias, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
+	if err != nil {
+		return err
+	}
 
 	for _, media := range medias {
 		feed := appConfig.searchNZB(media)
@@ -71,23 +74,31 @@ func (appConfig *App) populateNzb() {
 			appConfig.insertNZBItems(media, feed.Channel.Item)
 		}
 	}
+	return nil
 }
 
-func (appConfig *App) downloadNotOnDisk() {
+func (appConfig *App) downloadNotOnDisk() error {
 	var medias []Media
-	_ = appConfig.store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
+	err := appConfig.store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
+	if err != nil {
+		return fmt.Errorf("finding media not on disk: %s", err)
+	}
 
 	for _, media := range medias {
 		nzb, err := appConfig.getNzbFromDB(media.IMDB)
 		if err != nil {
-			log.WithFields(log.Fields{"err": err}).Error("Request NZB from database")
+			log.WithFields(log.Fields{"err": err}).Error("request NZB from database")
 			continue
 		}
-		appConfig.createOrDownloadCachedMedia(media.IMDB, nzb)
+		err = appConfig.createOrDownloadCachedMedia(media.IMDB, nzb)
+		if err != nil {
+			return fmt.Errorf("creating or downloading cached media: %s", err)
+		}
 	}
+	return nil
 }
 
-func handleShutdown(appConfig App, shutdownChan chan os.Signal) {
+func handleShutdown(appConfig *App, shutdownChan chan os.Signal) {
 	<-shutdownChan
 	log.Info("Received shutdown signal, shutting down gracefully...")
 	if err := appConfig.store.Close(); err != nil {
@@ -97,20 +108,28 @@ func handleShutdown(appConfig App, shutdownChan chan os.Signal) {
 	os.Exit(0)
 }
 
-func startBackgroundTasks(appConfig App) {
+func startBackgroundTasks(appConfig *App) {
 	for {
-		appConfig.syncMoviesDbFromTrakt()
-		appConfig.getNewEpisodes()
-		appConfig.populateNzb()
+		if err := appConfig.syncMoviesDbFromTrakt(); err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Error syncing movies from Trakt")
+		}
+		if err := appConfig.getNewEpisodes(); err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("Error syncing episodes from Trakt")
+		}
+		appConfig.populateNZB()
 		appConfig.downloadNotOnDisk()
 		appConfig.cleanWatched()
 		time.Sleep(6 * time.Hour)
 	}
 }
 
-func handleAPIRequests(appConfig App) {
+func handleAPIRequests(appConfig *App) {
 	http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
-		handlePostData(w, r, appConfig)
+		handlePostData(w, r, *appConfig)
 	})
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -119,7 +138,7 @@ func handleAPIRequests(appConfig App) {
 		go func() {
 			appConfig.syncMoviesDbFromTrakt()
 			appConfig.getNewEpisodes()
-			appConfig.populateNzb()
+			appConfig.populateNZB()
 			appConfig.downloadNotOnDisk()
 			appConfig.cleanWatched()
 		}()
