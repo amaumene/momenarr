@@ -39,17 +39,15 @@ func (appConfig *App) downloadCachedData(UsenetCreateDownloadResponse torbox.Use
 				}).Info("Download from TorBox complete")
 			}
 		}()
-
 		return nil
 	}
-
 	log.WithFields(log.Fields{
 		"name": UsenetDownload[0].Name,
 	}).Info("Not really in cache, skipping and hoping to get a notification")
 	return nil
 }
 
-func (appConfig *App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, IMDB string) error {
+func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, IMDB string) error {
 	biggestUsenetDownload, err := findBiggestFile(UsenetDownload)
 	if err != nil {
 		return err
@@ -99,18 +97,16 @@ func (appConfig *App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload,
 		log.WithFields(log.Fields{"err": err}).Error("Failed to update media path/status in database")
 		return err
 	}
-
 	if err := appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete"); err != nil {
 		log.WithFields(log.Fields{
 			"name":  UsenetDownload[0].Name,
 			"error": err,
 		}).Error("Failed to delete the usenet download")
 	}
-
 	return nil
 }
 
-func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, appConfig *App) error {
+func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, appConfig App) error {
 	httpClient := &http.Client{}
 	resp, err := httpClient.Get(fileLink)
 	if err != nil {
@@ -152,7 +148,6 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 	if err := os.Rename(tempFile.Name(), finalFilePath); err != nil {
 		return err
 	}
-
 	return nil
 }
 

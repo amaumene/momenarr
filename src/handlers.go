@@ -7,6 +7,22 @@ import (
 	"net/http"
 )
 
+func handleAPIRequests(appConfig *App) {
+	http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
+		handlePostData(w, r, *appConfig)
+	})
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	http.HandleFunc("/refresh", func(w http.ResponseWriter, r *http.Request) {
+		go func() {
+			appConfig.runTasks()
+		}()
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Refresh initiated"))
+	})
+}
+
 func handlePostData(w http.ResponseWriter, r *http.Request, appConfig App) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
