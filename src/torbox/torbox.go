@@ -33,7 +33,7 @@ func (pm *TorBox) createTorBoxURL(urlPath string) (url.URL, error) {
 	return *u, nil
 }
 
-func (pm *TorBox) createTorBoxURLrequestDL(urlPath string, usenet_id int, file_id int) (url.URL, error) {
+func (pm *TorBox) createTorBoxURLrequestDL(urlPath string, usenetId int, fileId int) (url.URL, error) {
 	u, err := url.Parse("https://api.torbox.app/v1/api")
 	if err != nil {
 		return *u, err
@@ -41,8 +41,8 @@ func (pm *TorBox) createTorBoxURLrequestDL(urlPath string, usenet_id int, file_i
 	u.Path = path.Join(u.Path, urlPath)
 	q := u.Query()
 	q.Set("token", pm.APIKey)
-	q.Set("usenet_id", strconv.Itoa(usenet_id))
-	q.Set("file_id", strconv.Itoa(file_id))
+	q.Set("usenet_id", strconv.Itoa(usenetId))
+	q.Set("file_id", strconv.Itoa(fileId))
 	u.RawQuery = q.Encode()
 	return *u, nil
 }
