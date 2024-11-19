@@ -17,9 +17,9 @@ func processNotification(notification torbox.Notification, appConfig App) {
 		}).Info("Extracting string")
 		return
 	}
+
 	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByName(extractedString)
 	if err != nil {
-		log.Printf("Error finding download: %v\n", err)
 		log.WithFields(log.Fields{
 			"string": extractedString,
 			"err":    err,
@@ -27,55 +27,75 @@ func processNotification(notification torbox.Notification, appConfig App) {
 		return
 	}
 
-	if notification.Data.Title == "Usenet Download Completed" {
-		var medias []Media
-		_ = appConfig.store.Find(&medias, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
-		for _, media := range medias {
-			err = appConfig.downloadFromTorBox(UsenetDownload, media.IMDB)
-			if err != nil {
-				log.WithFields(log.Fields{
-					"id":   UsenetDownload[0].ID,
-					"name": UsenetDownload[0].Name,
-					"err":  err,
-				}).Error("Downloading transfer")
-			}
-		}
+	switch notification.Data.Title {
+	case "Usenet Download Completed":
+		handleDownloadCompleted(appConfig, UsenetDownload)
+	case "Usenet Download Failed":
+		handleDownloadFailed(appConfig, UsenetDownload, extractedString)
 	}
-	if notification.Data.Title == "Usenet Download Failed" {
-		log.WithFields(log.Fields{
-			"id":   UsenetDownload[0].ID,
-			"name": UsenetDownload[0].Name,
-			"err":  err,
-		}).Warning("Usenet download failed")
-		err = appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+}
+
+func handleDownloadCompleted(appConfig App, UsenetDownload []torbox.UsenetDownload) {
+	var medias []Media
+	err := appConfig.store.Find(&medias, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
+	if err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("Finding media in database")
+		return
+	}
+
+	for _, media := range medias {
+		err = appConfig.downloadFromTorBox(UsenetDownload, media.IMDB)
 		if err != nil {
 			log.WithFields(log.Fields{
-				"id":  UsenetDownload[0].ID,
-				"err": err,
-			}).Error("Deleting failed transfer")
-		}
-		err = appConfig.store.UpdateMatching(&NZB{}, bolthold.Where("Title").Eq(extractedString), func(record interface{}) error {
-			update, ok := record.(*NZB) // record will always be a pointer
-			if !ok {
-				return fmt.Errorf("Record isn't the correct type!  Wanted NZB, got %T", record)
-			}
-			update.Failed = true
-			return nil
-		})
-		var medias []Media
-		_ = appConfig.store.Find(&medias, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
-		for _, media := range medias {
-			nzb, err := appConfig.getNzbFromDB(media.IMDB)
-			if err != nil {
-				log.WithFields(log.Fields{
-					"err": err,
-				}).Error("Request NZB from database")
-			} else {
-				appConfig.createOrDownloadCachedMedia(media.IMDB, nzb)
-			}
+				"id":   UsenetDownload[0].ID,
+				"name": UsenetDownload[0].Name,
+				"err":  err,
+			}).Error("Downloading transfer")
 		}
 	}
-	return
+}
+
+func handleDownloadFailed(appConfig App, UsenetDownload []torbox.UsenetDownload, extractedString string) {
+	log.WithFields(log.Fields{
+		"id":   UsenetDownload[0].ID,
+		"name": UsenetDownload[0].Name,
+	}).Warning("Usenet download failed")
+
+	err := appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
+	if err != nil {
+		log.WithFields(log.Fields{
+			"id":  UsenetDownload[0].ID,
+			"err": err,
+		}).Error("Deleting failed transfer")
+	}
+
+	err = appConfig.store.UpdateMatching(&NZB{}, bolthold.Where("Title").Eq(extractedString), func(record interface{}) error {
+		update, ok := record.(*NZB)
+		if !ok {
+			return fmt.Errorf("record isn't the correct type! Wanted NZB, got %T", record)
+		}
+		update.Failed = true
+		return nil
+	})
+	if err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("Updating NZB status in database")
+	}
+
+	var medias []Media
+	err = appConfig.store.Find(&medias, bolthold.Where("DownloadID").Eq(UsenetDownload[0].ID))
+	if err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("Finding media in database")
+		return
+	}
+
+	for _, media := range medias {
+		nzb, err := appConfig.getNzbFromDB(media.IMDB)
+		if err != nil {
+			log.WithFields(log.Fields{"err": err}).Error("Requesting NZB from database")
+		} else {
+			appConfig.createOrDownloadCachedMedia(media.IMDB, nzb)
+		}
+	}
 }
 
 func extractString(message string) (string, error) {

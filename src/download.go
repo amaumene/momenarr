@@ -12,23 +12,23 @@ import (
 	"time"
 )
 
-func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, IMDB string) error {
+func (appConfig *App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, IMDB string) error {
 	log.WithFields(log.Fields{
 		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
 	}).Info("Found cached usenet download")
+
 	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
 	if err != nil {
 		return err
 	}
+
 	if UsenetDownload[0].Cached {
 		log.WithFields(log.Fields{
 			"name": UsenetDownload[0].Name,
 		}).Info("Starting download from cached data")
 
-		// Start the downloadFromTorBox function in a new goroutine
 		go func() {
-			err := appConfig.downloadFromTorBox(UsenetDownload, IMDB)
-			if err != nil {
+			if err := appConfig.downloadFromTorBox(UsenetDownload, IMDB); err != nil {
 				log.WithFields(log.Fields{
 					"name":  UsenetDownload[0].Name,
 					"error": err,
@@ -42,13 +42,14 @@ func (appConfig App) downloadCachedData(UsenetCreateDownloadResponse torbox.Usen
 
 		return nil
 	}
+
 	log.WithFields(log.Fields{
 		"name": UsenetDownload[0].Name,
 	}).Info("Not really in cache, skipping and hoping to get a notification")
 	return nil
 }
 
-func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, IMDB string) error {
+func (appConfig *App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, IMDB string) error {
 	biggestUsenetDownload, err := findBiggestFile(UsenetDownload)
 	if err != nil {
 		return err
@@ -63,15 +64,19 @@ func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, 
 		return err
 	}
 
-	err = downloadUsingHTTP(fileLink, biggestUsenetDownload, appConfig)
-	if err != nil {
+	if err := downloadUsingHTTP(fileLink, biggestUsenetDownload, appConfig); err != nil {
 		log.WithFields(log.Fields{
 			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
 		}).Info("Download failed, trying again")
 		return appConfig.downloadFromTorBox(UsenetDownload, IMDB)
 	}
+
 	downloadedFilePath := filepath.Join(appConfig.downloadDir, biggestUsenetDownload[0].Files[0].ShortName)
 	fileInfo, err := os.Stat(downloadedFilePath)
+	if err != nil {
+		return err
+	}
+
 	if biggestUsenetDownload[0].Files[0].Size != fileInfo.Size() {
 		log.WithFields(log.Fields{
 			"fileName": biggestUsenetDownload[0].Files[0].ShortName,
@@ -79,34 +84,33 @@ func (appConfig App) downloadFromTorBox(UsenetDownload []torbox.UsenetDownload, 
 			"expected": biggestUsenetDownload[0].Files[0].Size,
 		}).Error("Check size failed, trying again")
 		return appConfig.downloadFromTorBox(UsenetDownload, IMDB)
-	} else {
-		var media Media
-		err = appConfig.store.Get(IMDB, &media)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"err": err,
-			}).Error("Failed to get media from database")
-		}
-		media.File = biggestUsenetDownload[0].Files[0].ShortName
-		media.OnDisk = true
-		err = appConfig.store.Update(IMDB, &media)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"err": err,
-			}).Error("Update media path/status on database")
-		}
-		err = appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete")
-		if err != nil {
-			log.WithFields(log.Fields{
-				"name":  UsenetDownload[0].Name,
-				"error": err,
-			}).Error("Failed to delete the usenet download")
-		}
-		return nil
 	}
+
+	var media Media
+	if err := appConfig.store.Get(IMDB, &media); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("Failed to get media from database")
+		return err
+	}
+
+	media.File = biggestUsenetDownload[0].Files[0].ShortName
+	media.OnDisk = true
+
+	if err := appConfig.store.Update(IMDB, &media); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("Failed to update media path/status in database")
+		return err
+	}
+
+	if err := appConfig.torBoxClient.ControlUsenetDownload(UsenetDownload[0].ID, "delete"); err != nil {
+		log.WithFields(log.Fields{
+			"name":  UsenetDownload[0].Name,
+			"error": err,
+		}).Error("Failed to delete the usenet download")
+	}
+
+	return nil
 }
 
-func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, appConfig App) error {
+func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, appConfig *App) error {
 	httpClient := &http.Client{}
 	resp, err := httpClient.Get(fileLink)
 	if err != nil {
@@ -136,7 +140,7 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 				end = usenetDownload[0].Files[0].Size
 			}
 
-			if err := fetchFileChunk(httpClient, resp.Request.URL.String(), start, end, tempFile, &mu, totalDownloaded, startTime, usenetDownload[0].Files[0].ShortName, usenetDownload[0].Files[0].Size); err != nil {
+			if err := fetchFileChunk(httpClient, resp.Request.URL.String(), start, end, tempFile, &mu, &totalDownloaded, startTime, usenetDownload[0].Files[0].ShortName, usenetDownload[0].Files[0].Size); err != nil {
 				log.Println("Error downloading chunk:", err)
 			}
 		}(i)
@@ -152,23 +156,18 @@ func downloadUsingHTTP(fileLink string, usenetDownload []torbox.UsenetDownload, 
 	return nil
 }
 
-func fetchFileChunk(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded int64, startTime time.Time, shortName string, totalSize int64) error {
+func fetchFileChunk(httpClient *http.Client, url string, start, end int64, tempFile *os.File, mu *sync.Mutex, totalDownloaded *int64, startTime time.Time, shortName string, totalSize int64) error {
 	const maxRetries = 300
 	const retryDelay = 10 * time.Second
 
-	var localErr error
-
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		localErr = fetchChunkWithRetry(httpClient, url, start, end, tempFile, mu, &totalDownloaded, startTime, shortName, totalSize)
-		if localErr == nil {
+		if err := fetchChunkWithRetry(httpClient, url, start, end, tempFile, mu, totalDownloaded, startTime, shortName, totalSize); err == nil {
 			return nil
-		}
-
-		if attempt < maxRetries {
-			fmt.Printf("Error downloading chunk (attempt %d/%d): %v. Retrying in %v...\n", attempt, maxRetries, localErr, retryDelay)
+		} else if attempt < maxRetries {
+			fmt.Printf("Error downloading chunk (attempt %d/%d). Retrying in %v...\n", attempt, maxRetries, retryDelay)
 			time.Sleep(retryDelay)
 		} else {
-			return fmt.Errorf("error downloading chunk after %d attempts: %v", maxRetries, localErr)
+			return fmt.Errorf("error downloading chunk after %d attempts", maxRetries)
 		}
 	}
 	return nil
@@ -186,7 +185,6 @@ func fetchChunkWithRetry(httpClient *http.Client, url string, start, end int64, 
 	}
 	defer partResp.Body.Close()
 
-	// Check for non-success status code
 	if partResp.StatusCode < 200 || partResp.StatusCode >= 300 {
 		return fmt.Errorf("error: received non-success status code %d", partResp.StatusCode)
 	}
@@ -203,16 +201,11 @@ func fetchChunkWithRetry(httpClient *http.Client, url string, start, end int64, 
 			start += int64(n)
 			*totalDownloaded += int64(n)
 			mu.Unlock()
-			// Print progress outside of the lock to reduce lock contention
-			//elapsedTime := time.Since(startTime).Seconds()
-			//speed := float64(*totalDownloaded) / elapsedTime / 1024 // speed in KB/s
-			//fmt.Printf("\rDownloading %s... %.2f%% complete, Speed: %.2f KB/s", shortName, float64(*totalDownloaded)/float64(totalSize)*100, speed)
 		}
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
-			// Retry the current chunk due to an error
 			return fmt.Errorf("error reading response body: %v", err)
 		}
 	}

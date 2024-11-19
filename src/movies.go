@@ -6,7 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (appConfig *App) syncMoviesDbFromTrakt() {
+func (appConfig *App) syncMoviesDbFromTrakt() error {
 	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
 
 	watchListParams := &trakt.ListWatchListParams{
@@ -22,7 +22,9 @@ func (appConfig *App) syncMoviesDbFromTrakt() {
 				"item": item,
 				"err":  err,
 			}).Error("Scanning movie watchlist")
+			continue
 		}
+
 		movie := Media{
 			IMDB:       string(item.Movie.IMDB),
 			Title:      item.Movie.Title,
@@ -36,11 +38,16 @@ func (appConfig *App) syncMoviesDbFromTrakt() {
 			log.WithFields(log.Fields{
 				"err": err,
 			}).Error("Inserting movie into database")
+			return err
 		}
 	}
+
 	if err := iterator.Err(); err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("Iterating movie history")
+		return err
 	}
+
+	return nil
 }
