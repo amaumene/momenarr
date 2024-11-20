@@ -61,10 +61,10 @@ func getEnvTrakt() (string, string) {
 }
 
 func setNZBGet() *nzbget.NZBGet {
-	nzbgetHost := os.Getenv("NZBGET_HOST")
-	if nzbgetHost == "" {
+	nzbgetURL := os.Getenv("NZBGET_URL")
+	if nzbgetURL == "" {
 		log.WithFields(log.Fields{
-			"NZBGET_HOST": nzbgetHost,
+			"NZBGET_URL": nzbgetURL,
 		}).Fatal("Environment variable missing")
 	}
 	nzbgetUser := os.Getenv("NZBGET_USER")
@@ -80,7 +80,7 @@ func setNZBGet() *nzbget.NZBGet {
 		}).Fatal("Environment variable missing")
 	}
 	nzbget := nzbget.New(&nzbget.Config{
-		URL:  "https://" + nzbgetHost,
+		URL:  nzbgetURL,
 		User: nzbgetUser,
 		Pass: nzbgetPass,
 	})

@@ -36,7 +36,7 @@ func (appConfig *App) createDownload(IMDB string, nzb NZB) error {
 	}
 	media.downloadID = downloadID
 	if err = appConfig.store.Update(IMDB, &media); err != nil {
-		return fmt.Errorf("update NZBName on database: %s", err)
+		return fmt.Errorf("update downloadID on database: %s", err)
 	}
 	log.WithFields(log.Fields{
 		"IMDB":  IMDB,
