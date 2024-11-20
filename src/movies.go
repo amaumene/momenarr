@@ -22,12 +22,10 @@ func (appConfig *App) syncMoviesFromTrakt() error {
 		}
 
 		movie := Media{
-			IMDB:       string(item.Movie.IMDB),
-			Title:      item.Movie.Title,
-			Year:       item.Movie.Year,
-			OnDisk:     false,
-			File:       "",
-			DownloadID: 0,
+			IMDB:   string(item.Movie.IMDB),
+			Title:  item.Movie.Title,
+			Year:   item.Movie.Year,
+			OnDisk: false,
 		}
 		err = appConfig.store.Insert(string(item.Movie.IMDB), movie)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {

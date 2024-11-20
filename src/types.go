@@ -1,22 +1,20 @@
 package main
 
 import (
-	"github.com/amaumene/momenarr/torbox"
 	"github.com/jacklaaa89/trakt"
 	"github.com/timshannon/bolthold"
+	"golift.io/nzbget"
 )
 
 type App struct {
-	downloadDir        string
-	tempDir            string
-	dataDir            string
-	newsNabHost        string
-	newsNabApiKey      string
-	traktToken         *trakt.Token
-	torBoxClient       torbox.TorBox
-	torBoxMoviesFolder string
-	torBoxShowsFolder  string
-	store              *bolthold.Store
+	downloadDir   string
+	tempDir       string
+	dataDir       string
+	newsNabHost   string
+	newsNabApiKey string
+	traktToken    *trakt.Token
+	store         *bolthold.Store
+	nzbget        *nzbget.NZBGet
 }
 
 type Media struct {
@@ -28,7 +26,7 @@ type Media struct {
 	Year       int64
 	OnDisk     bool
 	File       string
-	DownloadID int
+	downloadID int64
 }
 
 type NZB struct {
@@ -37,4 +35,12 @@ type NZB struct {
 	Length int64
 	Title  string
 	Failed bool
+}
+
+type Notification struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Status   string `json:"status"`
+	IMDB     string `json:"imdb"`
+	Dir      string `json:"dir"`
 }

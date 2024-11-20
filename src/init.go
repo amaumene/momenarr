@@ -2,26 +2,13 @@ package main
 
 import (
 	log "github.com/sirupsen/logrus"
+	"golift.io/nzbget"
 	"os"
-	"path/filepath"
 )
 
 func createDir(dir string) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Fatalf("Failed to create directory %s: %v", dir, err)
-	}
-}
-
-func cleanDir(tempDir string) {
-	files, err := os.ReadDir(tempDir)
-	if err != nil {
-		log.Fatalf("Failed to read temp directory: %v", err)
-	}
-
-	for _, file := range files {
-		if err := os.RemoveAll(filepath.Join(tempDir, file.Name())); err != nil {
-			log.Printf("Failed to remove file %s: %v", file.Name(), err)
-		}
 	}
 }
 
@@ -50,17 +37,6 @@ func setConfig() *App {
 	// Create if it doesn't exist
 	createDir(appConfig.downloadDir)
 
-	appConfig.tempDir = os.Getenv("TEMP_DIR")
-	if appConfig.tempDir == "" {
-		log.WithFields(log.Fields{
-			"TEMP_DIR": appConfig.tempDir,
-		}).Fatal("Environment variable missing")
-	}
-	// Create if it doesn't exist
-	createDir(appConfig.tempDir)
-	// Clean
-	cleanDir(appConfig.tempDir)
-
 	appConfig.dataDir = os.Getenv("DATA_DIR")
 	if appConfig.dataDir == "" {
 		log.WithFields(log.Fields{
@@ -84,13 +60,29 @@ func getEnvTrakt() (string, string) {
 	return traktApiKey, traktClientSecret
 }
 
-func getEnvTorBox() string {
-	TorBoxApiKey := os.Getenv("TORBOX_API_KEY")
-
-	if TorBoxApiKey == "" {
+func setNZBGet() *nzbget.NZBGet {
+	nzbgetHost := os.Getenv("NZBGET_HOST")
+	if nzbgetHost == "" {
 		log.WithFields(log.Fields{
-			"TORBOX_API_KEY": TorBoxApiKey,
+			"NZBGET_HOST": nzbgetHost,
 		}).Fatal("Environment variable missing")
 	}
-	return TorBoxApiKey
+	nzbgetUser := os.Getenv("NZBGET_USER")
+	if nzbgetUser == "" {
+		log.WithFields(log.Fields{
+			"NZBGET_USER": nzbgetUser,
+		}).Fatal("Environment variable missing")
+	}
+	nzbgetPass := os.Getenv("NZBGET_PASS")
+	if nzbgetPass == "" {
+		log.WithFields(log.Fields{
+			"NZBGET_PASS": nzbgetPass,
+		}).Fatal("Environment variable missing")
+	}
+	nzbget := nzbget.New(&nzbget.Config{
+		URL:  "https://" + nzbgetHost,
+		User: nzbgetUser,
+		Pass: nzbgetPass,
+	})
+	return nzbget
 }

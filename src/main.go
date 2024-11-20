@@ -2,78 +2,56 @@ package main
 
 import (
 	"fmt"
-	"github.com/amaumene/momenarr/torbox"
 	log "github.com/sirupsen/logrus"
 	"github.com/timshannon/bolthold"
+	"golift.io/nzbget"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 )
 
-func (appConfig *App) downloadCachedData(UsenetCreateDownloadResponse torbox.UsenetCreateDownloadResponse, IMDB string) error {
-	log.WithFields(log.Fields{
-		"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
-	}).Info("Found cached usenet download")
-
-	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
-	if err != nil {
-		log.WithFields(log.Fields{
-			"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
-		}).Error("Link not found")
-		return appConfig.downloadCachedData(UsenetCreateDownloadResponse, IMDB)
+func (appConfig *App) createDownload(IMDB string, nzb NZB) error {
+	parameters := []nzbget.Parameter{}
+	parameters = append(parameters,
+		nzbget.Parameter{
+			Name:  "IMDB",
+			Value: IMDB,
+		})
+	input := nzbget.AppendInput{
+		Filename:   nzb.Title + ".nzb",
+		Content:    nzb.Link,
+		Category:   "momenarr",
+		DupeMode:   "score",
+		Parameters: toPointerSlice(parameters),
 	}
-
-	if UsenetDownload[0].Cached {
-		log.WithFields(log.Fields{
-			"name": UsenetDownload[0].Name,
-		}).Info("Starting download from cached data")
-
-		go func() {
-			if err := appConfig.downloadFromTorBox(UsenetDownload, IMDB); err != nil {
-				log.WithFields(log.Fields{
-					"name":  UsenetDownload[0].Name,
-					"error": err,
-				}).Error("Failed to download from TorBox")
-			} else {
-				log.WithFields(log.Fields{
-					"name": UsenetDownload[0].Name,
-				}).Info("Download from TorBox complete")
-			}
-		}()
-		return nil
+	fmt.Println(input)
+	downloadID, err := appConfig.nzbget.Append(&input)
+	if err != nil && downloadID > 0 {
+		return fmt.Errorf("creating NZBGet transfer: %s", err)
+	}
+	var media Media
+	if err = appConfig.store.Get(IMDB, &media); err != nil {
+		return fmt.Errorf("get media from database: %s", err)
+	}
+	media.downloadID = downloadID
+	if err = appConfig.store.Update(IMDB, &media); err != nil {
+		return fmt.Errorf("update NZBName on database: %s", err)
 	}
 	log.WithFields(log.Fields{
-		"name": UsenetDownload[0].Name,
-	}).Info("Not really in cache, skipping and hoping to get a notification")
+		"IMDB":  IMDB,
+		"Title": nzb.Title,
+	}).Info("Download started successfully")
+
 	return nil
 }
 
-func (appConfig *App) createOrDownloadCachedMedia(IMDB string, nzb NZB) error {
-	torboxDownload, err := appConfig.torBoxClient.CreateUsenetDownload(nzb.Link, nzb.Title)
-	if err != nil {
-		return fmt.Errorf("creating TorBox transfer: %s", err)
+func toPointerSlice(parameters []nzbget.Parameter) []*nzbget.Parameter {
+	ptrSlice := make([]*nzbget.Parameter, len(parameters))
+	for i := range parameters {
+		ptrSlice[i] = &parameters[i]
 	}
-	if torboxDownload.Success {
-		var media Media
-		if err = appConfig.store.Get(IMDB, &media); err != nil {
-			return fmt.Errorf("get media from database: %s", err)
-		}
-		media.DownloadID = torboxDownload.Data.UsenetDownloadID
-		if err = appConfig.store.Update(IMDB, &media); err != nil {
-			return fmt.Errorf("update DownloadID on database: %s", err)
-		}
-		log.WithFields(log.Fields{
-			"IMDB":  IMDB,
-			"Title": nzb.Title,
-		}).Info("Download started successfully")
-	}
-	if torboxDownload.Detail == "Found cached usenet download. Using cached download." {
-		if err = appConfig.downloadCachedData(torboxDownload, IMDB); err != nil {
-			return fmt.Errorf("downloading cached data: %s", err)
-		}
-	}
-	return nil
+	return ptrSlice
 }
 
 func (appConfig *App) downloadNotOnDisk() error {
@@ -88,7 +66,7 @@ func (appConfig *App) downloadNotOnDisk() error {
 		if err != nil {
 			return fmt.Errorf("getting NZB from database: %s", err)
 		}
-		err = appConfig.createOrDownloadCachedMedia(media.IMDB, nzb)
+		err = appConfig.createDownload(media.IMDB, nzb)
 		if err != nil {
 			return fmt.Errorf("creating or downloading cached media: %s", err)
 		}
@@ -145,11 +123,11 @@ func handleShutdown(appConfig *App, shutdownChan chan os.Signal) {
 }
 
 func main() {
+	log.SetOutput(os.Stdout)
 	appConfig := setConfig()
 	traktApiKey, traktClientSecret := getEnvTrakt()
 	appConfig.traktToken = appConfig.setUpTrakt(traktApiKey, traktClientSecret)
-	appConfig.torBoxClient = torbox.NewTorBoxClient(getEnvTorBox())
-	log.SetOutput(os.Stdout)
+	appConfig.nzbget = setNZBGet()
 
 	var err error
 	appConfig.store, err = bolthold.Open(appConfig.dataDir+"/data.db", 0666, nil)
