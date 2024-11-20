@@ -18,6 +18,9 @@ func (appConfig *App) downloadCachedData(UsenetCreateDownloadResponse torbox.Use
 
 	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
 	if err != nil {
+		log.WithFields(log.Fields{
+			"id": UsenetCreateDownloadResponse.Data.UsenetDownloadID,
+		}).Error("Link not found")
 		return appConfig.downloadCachedData(UsenetCreateDownloadResponse, IMDB)
 	}
 
