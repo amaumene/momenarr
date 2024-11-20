@@ -18,7 +18,7 @@ func (appConfig *App) downloadCachedData(UsenetCreateDownloadResponse torbox.Use
 
 	UsenetDownload, err := appConfig.torBoxClient.FindDownloadByID(UsenetCreateDownloadResponse.Data.UsenetDownloadID)
 	if err != nil {
-		return err
+		return appConfig.downloadCachedData(UsenetCreateDownloadResponse, IMDB)
 	}
 
 	if UsenetDownload[0].Cached {
