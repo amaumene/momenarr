@@ -29,6 +29,11 @@ type Media struct {
 	downloadID int64
 }
 
+type Show struct {
+	IMDB  string `boltholdIndex:"IMDB"`
+	Title string
+}
+
 type NZB struct {
 	IMDB   string `boltholdIndex:"IMDB"`
 	Link   string `boltholdIndex:"Link"`

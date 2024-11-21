@@ -5,7 +5,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/timshannon/bolthold"
 	"golift.io/nzbget"
-	"net/http"
 	"os"
 	"os/signal"
 	"time"
@@ -25,7 +24,6 @@ func (appConfig *App) createDownload(IMDB string, nzb NZB) error {
 		DupeMode:   "score",
 		Parameters: toPointerSlice(parameters),
 	}
-	fmt.Println(input)
 	downloadID, err := appConfig.nzbget.Append(&input)
 	if err != nil && downloadID > 0 {
 		return fmt.Errorf("creating NZBGet transfer: %s", err)
@@ -94,15 +92,15 @@ func (appConfig *App) runTasks() {
 			"err": err,
 		}).Error("populating NZB")
 	}
-	if err := appConfig.downloadNotOnDisk(); err != nil {
-		log.WithFields(log.Fields{
-			"err": err,
-		}).Error("downloading on disk")
-	}
-	err := appConfig.cleanWatched()
-	if err != nil {
-		log.Error("Error cleaning watched: %v", err)
-	}
+	//if err := appConfig.downloadNotOnDisk(); err != nil {
+	//	log.WithFields(log.Fields{
+	//		"err": err,
+	//	}).Error("downloading on disk")
+	//}
+	//err := appConfig.cleanWatched()
+	//if err != nil {
+	//	log.Error("Error cleaning watched: %v", err)
+	//}
 }
 
 func startBackgroundTasks(appConfig *App) {
@@ -142,8 +140,4 @@ func main() {
 	go startBackgroundTasks(appConfig)
 
 	handleAPIRequests(appConfig)
-
-	port := "0.0.0.0:3000"
-	fmt.Printf("Server is running on port %s\n", port)
-	log.Fatal(http.ListenAndServe(port, nil))
 }

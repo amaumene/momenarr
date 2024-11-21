@@ -8,6 +8,19 @@ import (
 	"github.com/jacklaaa89/trakt/sync"
 )
 
+func (appConfig *App) syncShowToDB(show *trakt.Show) error {
+	insert := Show{
+		IMDB:  string(show.IMDB),
+		Title: show.Title,
+	}
+	fmt.Printf("Inserting show %s into database\n", show.Title)
+	err := appConfig.store.Insert(show.IMDB, insert)
+	if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
+		return fmt.Errorf("inserting show into database: %v", err)
+	}
+	return nil
+}
+
 func (appConfig *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
 	media := Media{
 		TVDB:   int64(show.TVDB),
@@ -19,6 +32,7 @@ func (appConfig *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error
 	if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 		return fmt.Errorf("inserting episode into database: %v", err)
 	}
+	appConfig.syncShowToDB(show)
 	return nil
 }
 

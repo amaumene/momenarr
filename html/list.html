@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Monitored Shows</title>
+</head>
+<body>
+<h1>Monitored Shows</h1>
+<ul>
+    {{range .Shows}}
+    <li>{{.Title}} ({{.IMDB}})</li>
+    {{end}}
+</ul>
+</body>
+</html>
