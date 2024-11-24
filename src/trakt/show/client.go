@@ -4,7 +4,7 @@ package show
 import (
 	"net/http"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // client represents a show client which can retrieve details about shows.

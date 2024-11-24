@@ -3,7 +3,7 @@ package sync
 import (
 	"net/http"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // client represents a sync client which gives us access to functions to sync
@@ -251,7 +251,16 @@ func (c *client) History(params *trakt.ListHistoryParams) *trakt.HistoryIterator
 	return &trakt.HistoryIterator{Iterator: c.b.NewIterator(http.MethodGet, path, params)}
 }
 
-// AddToHistory adds items to a user's watch history. Accepts shows, seasons, episodes and movies.
+func Favorites(params *trakt.ListFavoritesParams) *trakt.FavoritesEntryIterator {
+	return getC().Favorites(params)
+}
+
+func (c *client) Favorites(params *trakt.ListFavoritesParams) *trakt.FavoritesEntryIterator {
+	path := trakt.FormatURLPath("/sync/favorites/%s", params.Type)
+	return &trakt.FavoritesEntryIterator{Iterator: c.b.NewIterator(http.MethodGet, path, params)}
+}
+
+// AddToHistory adds items to a us watch history. Accepts shows, seasons, episodes and movies.
 // If only a show is passed, all episodes for the show will be added. If seasons are specified, only episodes
 // in those seasons will be added.
 //

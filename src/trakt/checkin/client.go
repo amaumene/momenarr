@@ -10,7 +10,7 @@ package checkin
 import (
 	"net/http"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // client represents a client which can be used to perform checkin requests.

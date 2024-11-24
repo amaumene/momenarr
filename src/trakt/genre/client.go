@@ -4,7 +4,7 @@ package genre
 import (
 	"net/http"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // client the genre client.

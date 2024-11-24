@@ -4,7 +4,7 @@ package episode
 import (
 	"net/http"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // client is a representation of a episode client, capable of

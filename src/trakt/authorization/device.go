@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // client the authorization client which is used for requests.

@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/jacklaaa89/trakt"
-	"github.com/jacklaaa89/trakt/sync"
+	"github.com/amaumene/momenarr/trakt"
+	"github.com/amaumene/momenarr/trakt/sync"
 )
 
 func (appConfig *App) syncMoviesFromTrakt() error {

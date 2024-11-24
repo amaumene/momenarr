@@ -3,7 +3,7 @@ package calendar
 import (
 	"net/http"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // mediaType represents the available media types

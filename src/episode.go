@@ -2,24 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/jacklaaa89/trakt"
-	"github.com/jacklaaa89/trakt/episode"
-	"github.com/jacklaaa89/trakt/show"
-	"github.com/jacklaaa89/trakt/sync"
+	"github.com/amaumene/momenarr/trakt"
+	"github.com/amaumene/momenarr/trakt/episode"
+	"github.com/amaumene/momenarr/trakt/show"
+	"github.com/amaumene/momenarr/trakt/sync"
 )
-
-func (appConfig *App) syncShowToDB(show *trakt.Show) error {
-	insert := Show{
-		IMDB:  string(show.IMDB),
-		Title: show.Title,
-	}
-	fmt.Printf("Inserting show %s into database\n", show.Title)
-	err := appConfig.store.Insert(show.IMDB, insert)
-	if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
-		return fmt.Errorf("inserting show into database: %v", err)
-	}
-	return nil
-}
 
 func (appConfig *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
 	media := Media{
@@ -32,24 +19,20 @@ func (appConfig *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error
 	if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 		return fmt.Errorf("inserting episode into database: %v", err)
 	}
-	appConfig.syncShowToDB(show)
 	return nil
 }
 
 func (appConfig *App) syncEpisodesFromTrakt() error {
 	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
-	watchListParams := &trakt.ListWatchListParams{
+	params := &trakt.ListFavoritesParams{
 		ListParams: tokenParams,
-		Type:       "show",
 	}
-	iterator := sync.WatchList(watchListParams)
-
+	iterator := sync.Favorites(params)
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
 			return fmt.Errorf("scanning episode item: %v", err)
 		}
-
 		progressParams := &trakt.ProgressParams{
 			Params: trakt.Params{OAuth: appConfig.traktToken.AccessToken},
 		}
@@ -57,12 +40,7 @@ func (appConfig *App) syncEpisodesFromTrakt() error {
 		if err != nil {
 			return fmt.Errorf("getting show progress: %v", err)
 		}
-
-		if err := appConfig.syncEpisodeToDB(item.Show, showProgress.NextEpisode); err != nil {
-			return err
-		}
-
-		for i := 1; i < 3; i++ {
+		for i := 0; i < 3; i++ {
 			nextEpisode, err := episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
 			if err != nil {
 				return fmt.Errorf("getting next episode from database: %v", err)

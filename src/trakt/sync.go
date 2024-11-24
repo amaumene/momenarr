@@ -88,6 +88,13 @@ type ListHistoryParams struct {
 	Extended ExtendedType `url:"extended" json:"-"`
 }
 
+type ListFavoritesParams struct {
+	ListParams
+
+	Type Type     `json:"-" url:"-"`
+	ID   SearchID `json:"-" url:"-"`
+}
+
 // Metadata to assign to the collection object.
 type Metadata struct {
 	Type          MediaType  `json:"media_type,omitempty"`
@@ -492,7 +499,25 @@ type History struct {
 	WatchedAt time.Time `json:"watched_at"`
 }
 
+type FavoritesEntry struct {
+	topLevelMediaElement
+
+	Rank     int64     `json:"rank"`
+	ID       int64     `json:"id"`
+	ListedAt time.Time `json:"watched_at"`
+	Notes    string    `json:"notes"`
+}
+
 type HistoryIterator struct{ Iterator }
+
+type FavoritesIterator struct{ Iterator }
+
+type FavoritesEntryIterator struct{ Iterator }
+
+func (w *FavoritesEntryIterator) Entry() (*FavoritesEntry, error) {
+	rcv := &FavoritesEntry{}
+	return rcv, w.Scan(rcv)
+}
 
 func (h *HistoryIterator) History() (*History, error) {
 	rcv := &History{}

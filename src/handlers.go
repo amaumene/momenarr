@@ -1,148 +1,55 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/amaumene/momenarr/trakt"
-	"github.com/amaumene/momenarr/trakt/search"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/template/html/v2"
 	log "github.com/sirupsen/logrus"
-	"github.com/timshannon/bolthold"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 )
 
-func (appConfig *App) searchShow(showName string) ([]*trakt.Show, error) {
-	params := &trakt.SearchQueryParams{
-		Query: showName,
-		//Type:  "show",
-	}
-	fmt.Printf("Searching for show: %+v\n", params)
-	results := search.TextQuery(params)
-	var shows []*trakt.Show
-	for results.Next() {
-		var result trakt.Show
-		err := results.Scan(&result)
-		if err != nil {
-			return nil, fmt.Errorf("error getting search result entry: %v", err)
-		}
-		shows = append(shows, &result)
-	}
-
-	if err := results.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating search results: %v", err)
-	}
-
-	return shows, nil
-}
-
-func (appConfig *App) addShowToCollection(show *trakt.Show) error {
-	insert := Show{
-		IMDB:  string(show.IMDB),
-		Title: show.Title,
-	}
-	err := appConfig.store.Insert(show.IMDB, insert)
-	if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
-		return fmt.Errorf("inserting show into database: %v", err)
-	}
-	return nil
-}
-
-func (appConfig *App) addMonitored(c *fiber.Ctx) error {
-	if c.Method() == fiber.MethodGet {
-		if err := c.Render("add", fiber.Map{}); err != nil {
-			return c.Status(fiber.StatusInternalServerError).SendString("Failed to parse template")
-		}
-	}
-
-	if c.Method() == fiber.MethodPost {
-		showName := c.FormValue("show")
-		if showName == "" {
-			return c.Status(fiber.StatusBadRequest).SendString("Show name is required")
-		}
-
-		// Search for the show using Trakt API
-		show, err := appConfig.searchShow(showName)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).SendString(fmt.Sprintf("Failed to search show: %v", err))
-		}
-		fmt.Printf("Found show: %+v\n", show)
-
-		// Add the show to the collection
-		//err = appConfig.addShowToCollection(show)
-		//if err != nil {
-		//	return c.Status(fiber.StatusInternalServerError).SendString(fmt.Sprintf("Failed to add show to collection: %v", err))
-		//}
-
-		return c.Redirect("/list")
-	}
-	return nil
-}
-
-func (appConfig *App) listMonitored(c *fiber.Ctx) error {
-	var shows []Show
-	err := appConfig.store.Find(&shows, &bolthold.Query{})
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to retrieve shows")
-	}
-
-	if err := c.Render("list", fiber.Map{
-		"Shows": shows,
-	}); err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to parse template")
-	}
-	return nil
-}
-
 func handleAPIRequests(appConfig *App) {
-	engine := html.New("./html", ".html")
-	engine.Reload(true) // Optional. Default: false
-	engine.Debug(true)  // Optional. Default: false
-	app := fiber.New(fiber.Config{
-		Views: engine,
+	http.HandleFunc("/api/notify", func(w http.ResponseWriter, r *http.Request) {
+		handlePostData(w, r, *appConfig)
 	})
-	app.Post("/api/notify", func(c *fiber.Ctx) error {
-		return handlePostData(c, *appConfig)
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	})
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusOK)
-	})
-	app.Get("/list", func(c *fiber.Ctx) error {
-		return appConfig.listMonitored(c)
-	})
-	app.Get("/add", func(c *fiber.Ctx) error {
-		return appConfig.addMonitored(c)
-	})
-	app.Post("/add", func(c *fiber.Ctx) error {
-		return appConfig.addMonitored(c)
-	})
-	app.Get("/refresh", func(c *fiber.Ctx) error {
+	http.HandleFunc("/refresh", func(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			appConfig.runTasks()
 		}()
-		return c.SendString("Refresh initiated")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("Refresh initiated")); err != nil {
+			log.WithFields(log.Fields{"err": err}).Error("writing refresh response")
+		}
 	})
-
-	app.Listen(":3000")
 }
 
-func handlePostData(c *fiber.Ctx, appConfig App) error {
-	if c.Method() != fiber.MethodPost {
-		return c.Status(fiber.StatusMethodNotAllowed).SendString("Invalid request method")
+func handlePostData(w http.ResponseWriter, r *http.Request, appConfig App) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
 	}
 
-	body, err := io.ReadAll(bytes.NewReader(c.Body()))
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to read request body")
+		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		return
 	}
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			log.WithFields(log.Fields{"err": err}).Error("failed to close request body")
+		}
+	}()
 
 	var notification Notification
 	err = json.Unmarshal(body, &notification)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("Failed to parse JSON")
+		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
+		return
 	}
 	go func() {
 		err := processNotification(notification, appConfig)
@@ -151,7 +58,11 @@ func handlePostData(c *fiber.Ctx, appConfig App) error {
 		}
 	}()
 
-	return c.JSON(fiber.Map{"message": "Data received and processing started"})
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write([]byte(`{"message": "Data received and processing started"}`)); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("writing response")
+	}
 }
 
 func processNotification(notification Notification, appConfig App) error {

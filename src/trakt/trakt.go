@@ -279,7 +279,7 @@ func (s *backendImplementation) call(method, path, key string, params ParamsCont
 // unmarshalling the response into v.
 func (s *backendImplementation) callRaw(method, path, key string, params ParamsContainer, v, h interface{}) error {
 	rv := reflect.ValueOf(params)
-	if !rv.IsValid() || rv.IsNil() {
+	if !rv.IsValid() || (rv.Kind() == reflect.Ptr && rv.IsNil()) {
 		params = &BasicParams{}
 	}
 

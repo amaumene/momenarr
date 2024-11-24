@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/jacklaaa89/trakt"
-	"github.com/jacklaaa89/trakt/authorization"
+	"github.com/amaumene/momenarr/trakt"
+	"github.com/amaumene/momenarr/trakt/authorization"
 	"log"
 	"os"
 )

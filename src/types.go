@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 	"github.com/timshannon/bolthold"
 	"golift.io/nzbget"
 )
@@ -27,11 +27,6 @@ type Media struct {
 	OnDisk     bool
 	File       string
 	downloadID int64
-}
-
-type Show struct {
-	IMDB  string `boltholdIndex:"IMDB"`
-	Title string
 }
 
 type NZB struct {

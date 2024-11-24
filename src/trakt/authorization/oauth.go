@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/go-querystring/query"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // grantType represents a grant type.

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jacklaaa89/trakt"
+	"github.com/amaumene/momenarr/trakt"
 )
 
 // scope defines the scope or context a function should be applied to.
