@@ -22,10 +22,11 @@ func (appConfig *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error
 	return nil
 }
 
-func (appConfig *App) syncEpisodesFromTrakt() error {
+func (appConfig *App) syncEpisodesFromFavorites() error {
 	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
 	params := &trakt.ListFavoritesParams{
 		ListParams: tokenParams,
+		Type:       "shows",
 	}
 	iterator := sync.Favorites(params)
 	for iterator.Next() {
@@ -50,9 +51,49 @@ func (appConfig *App) syncEpisodesFromTrakt() error {
 			}
 		}
 	}
-
 	if err := iterator.Err(); err != nil {
 		return fmt.Errorf("iterating episode watchlist: %v", err)
+	}
+	return nil
+}
+
+func (appConfig *App) syncEpisodesFromWatchlist() error {
+	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
+	watchListParams := &trakt.ListWatchListParams{
+		ListParams: tokenParams,
+		Type:       "show",
+	}
+	iterator := sync.WatchList(watchListParams)
+	for iterator.Next() {
+		item, err := iterator.Entry()
+		if err != nil {
+			return fmt.Errorf("scanning episode item: %v", err)
+		}
+		progressParams := &trakt.ProgressParams{
+			Params: trakt.Params{OAuth: appConfig.traktToken.AccessToken},
+		}
+		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
+		if err != nil {
+			return fmt.Errorf("getting show progress: %v", err)
+		}
+		if err := appConfig.syncEpisodeToDB(item.Show, showProgress.NextEpisode); err != nil {
+			return err
+		}
+	}
+	if err := iterator.Err(); err != nil {
+		return fmt.Errorf("iterating episode watchlist: %v", err)
+	}
+	return nil
+}
+
+func (appConfig *App) syncEpisodesFromTrakt() error {
+	err := appConfig.syncEpisodesFromWatchlist()
+	if err != nil {
+		return err
+	}
+	err = appConfig.syncEpisodesFromFavorites()
+	if err != nil {
+		return err
 	}
 	return nil
 }

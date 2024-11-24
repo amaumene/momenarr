@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"github.com/timshannon/bolthold"
 	"io"
 	"net/http"
 	"os"
@@ -66,34 +67,51 @@ func handlePostData(w http.ResponseWriter, r *http.Request, appConfig App) {
 }
 
 func processNotification(notification Notification, appConfig App) error {
-	if notification.Category == "momenarr" && notification.Status == "SUCCESS" {
-		var media Media
-		err := appConfig.store.Get(notification.IMDB, &media)
-		if err != nil {
-			return fmt.Errorf("finding media: %v", err)
-		}
-		file, err := findBiggestFile(notification.Dir)
-		if err != nil {
-			log.WithFields(log.Fields{"err": err}).Error("Finding biggest file")
-		}
+	if notification.Category == "momenarr" {
+		if notification.Status == "SUCCESS" {
+			var media Media
+			err := appConfig.store.Get(notification.IMDB, &media)
+			if err != nil {
+				return fmt.Errorf("finding media: %v", err)
+			}
+			file, err := findBiggestFile(notification.Dir)
+			if err != nil {
+				log.WithFields(log.Fields{"err": err}).Error("Finding biggest file")
+			}
 
-		destPath := filepath.Join(appConfig.downloadDir, filepath.Base(file))
-		err = os.Rename(file, destPath)
-		if err != nil {
-			log.WithFields(log.Fields{"err": err}).Error("Moving file to download directory")
-		}
-		media.File = file
-		media.OnDisk = true
-		if err := appConfig.store.Update(notification.IMDB, &media); err != nil {
-			log.WithFields(log.Fields{"err": err}).Error("Update media path/status in database")
-		}
+			destPath := filepath.Join(appConfig.downloadDir, filepath.Base(file))
+			err = os.Rename(file, destPath)
+			if err != nil {
+				log.WithFields(log.Fields{"err": err}).Error("Moving file to download directory")
+			}
+			media.File = file
+			media.OnDisk = true
+			if err := appConfig.store.Update(notification.IMDB, &media); err != nil {
+				log.WithFields(log.Fields{"err": err}).Error("Update media path/status in database")
+			}
 
-		IDs := []int64{
-			media.downloadID,
-		}
-		result, err := appConfig.nzbget.EditQueue("HistoryFinalDelete", "", IDs)
-		if err != nil || result == false {
-			log.WithFields(log.Fields{"err": err}).Error("Failed to delete NZBGet download")
+			IDs := []int64{
+				media.downloadID,
+			}
+			result, err := appConfig.nzbget.EditQueue("HistoryFinalDelete", "", IDs)
+			if err != nil || result == false {
+				log.WithFields(log.Fields{"err": err}).Error("Failed to delete NZBGet download")
+			}
+		} else {
+			err := appConfig.store.UpdateMatching(&NZB{}, bolthold.Where("Title").Eq(notification.Name), func(record interface{}) error {
+				update, ok := record.(*NZB)
+				if !ok {
+					return fmt.Errorf("record isn't the correct type! Wanted NZB, got %T", record)
+				}
+				update.Failed = true
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("updating NZB record: %v", err)
+			}
+			if err = appConfig.downloadNotOnDisk(); err != nil {
+				return fmt.Errorf("downloading on disk: %v", err)
+			}
 		}
 	}
 	return nil

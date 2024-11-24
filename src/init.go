@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/amaumene/momenarr/nzbget"
 	log "github.com/sirupsen/logrus"
-	"golift.io/nzbget"
 	"os"
 )
 

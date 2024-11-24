@@ -1,9 +1,9 @@
 package main
 
 import (
+	"github.com/amaumene/momenarr/nzbget"
 	"github.com/amaumene/momenarr/trakt"
 	"github.com/timshannon/bolthold"
-	"golift.io/nzbget"
 )
 
 type App struct {

@@ -46,10 +46,8 @@ func (appConfig App) cleanWatched() error {
 func (appConfig App) removeFile(IMDB string) error {
 	var media Media
 	err := appConfig.store.Get(IMDB, &media)
-	if err != nil && err.Error() == "No data found for this key" {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("finding media: %v", err)
+	if err != nil {
+		return fmt.Errorf("finding media: %s: %v", IMDB, err)
 	}
 
 	if len(media.File) > 0 {
@@ -57,7 +55,7 @@ func (appConfig App) removeFile(IMDB string) error {
 		if err != nil {
 			return fmt.Errorf("deleting media: %v", err)
 		}
-		err := os.Remove(filepath.Join(appConfig.downloadDir, media.File))
+		err = os.Remove(filepath.Join(appConfig.downloadDir, media.File))
 		if err != nil {
 			return fmt.Errorf("deleting file: %v", err)
 		}

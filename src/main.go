@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/amaumene/momenarr/nzbget"
 	log "github.com/sirupsen/logrus"
 	"github.com/timshannon/bolthold"
-	"golift.io/nzbget"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,8 +38,9 @@ func (appConfig *App) createDownload(IMDB string, nzb NZB) error {
 		return fmt.Errorf("update downloadID on database: %s", err)
 	}
 	log.WithFields(log.Fields{
-		"IMDB":  IMDB,
-		"Title": nzb.Title,
+		"IMDB":       IMDB,
+		"Title":      nzb.Title,
+		"downloadID": downloadID,
 	}).Info("Download started successfully")
 
 	return nil
@@ -100,8 +101,11 @@ func (appConfig *App) runTasks() {
 	}
 	err := appConfig.cleanWatched()
 	if err != nil {
-		log.Error("Error cleaning watched: %v", err)
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Error("cleaning watched")
 	}
+	log.Info("Tasks ran successfully")
 }
 
 func startBackgroundTasks(appConfig *App) {
@@ -142,6 +146,6 @@ func main() {
 
 	handleAPIRequests(appConfig)
 	port := "0.0.0.0:3000"
-	fmt.Printf("Server is running on port %s\n", port)
 	log.Fatal(http.ListenAndServe(port, nil))
+	log.WithFields(log.Fields{"port": port}).Info("Server is running")
 }

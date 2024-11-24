@@ -2,7 +2,6 @@ package trakt
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 )
 
@@ -40,7 +39,6 @@ func (s *Show) UnmarshalJSON(bytes []byte) error {
 	if err != nil {
 		return nil
 	}
-	fmt.Printf("%+v\n", a)
 
 	a.B.Year, err = parseYear(a.Year)
 	if err != nil {
