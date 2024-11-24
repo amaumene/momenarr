@@ -14,6 +14,8 @@ func (appConfig *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error
 		Number: ep.Number,
 		Season: ep.Season,
 		IMDB:   string(ep.IMDB),
+		Title:  ep.Title,
+		Year:   show.Year,
 	}
 	err := appConfig.store.Insert(ep.IMDB, media)
 	if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {

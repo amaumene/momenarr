@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/nzbget"
 	log "github.com/sirupsen/logrus"
-	"github.com/timshannon/bolthold"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,21 +26,21 @@ func (appConfig *App) createDownload(IMDB string, nzb NZB) error {
 		Parameters: toPointerSlice(parameters),
 	}
 	downloadID, err := appConfig.nzbget.Append(&input)
-	if err != nil && downloadID > 0 {
+	if err != nil || downloadID <= 0 {
 		return fmt.Errorf("creating NZBGet transfer: %s", err)
 	}
 	var media Media
 	if err = appConfig.store.Get(IMDB, &media); err != nil {
 		return fmt.Errorf("get media from database: %s", err)
 	}
-	media.downloadID = downloadID
-	if err = appConfig.store.Update(IMDB, &media); err != nil {
-		return fmt.Errorf("update downloadID on database: %s", err)
+	media.DownloadID = downloadID
+	if err = appConfig.store.Update(IMDB, media); err != nil {
+		return fmt.Errorf("update DownloadID on database: %s", err)
 	}
 	log.WithFields(log.Fields{
 		"IMDB":       IMDB,
 		"Title":      nzb.Title,
-		"downloadID": downloadID,
+		"DownloadID": downloadID,
 	}).Info("Download started successfully")
 
 	return nil

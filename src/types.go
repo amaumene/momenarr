@@ -1,9 +1,9 @@
 package main
 
 import (
+	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/nzbget"
 	"github.com/amaumene/momenarr/trakt"
-	"github.com/timshannon/bolthold"
 )
 
 type App struct {
@@ -19,19 +19,19 @@ type App struct {
 
 type Media struct {
 	IMDB       string `boltholdIndex:"IMDB"`
-	TVDB       int64  `boltholdIndex:"TVDB"`
+	TVDB       int64
 	Number     int64
 	Season     int64
 	Title      string
 	Year       int64
 	OnDisk     bool
 	File       string
-	downloadID int64
+	DownloadID int64
 }
 
 type NZB struct {
 	IMDB   string `boltholdIndex:"IMDB"`
-	Link   string `boltholdIndex:"Link"`
+	Link   string
 	Length int64
 	Title  string
 	Failed bool

@@ -6,10 +6,7 @@ require (
 	github.com/google/go-querystring v1.1.0
 	github.com/gorilla/rpc v1.2.1
 	github.com/sirupsen/logrus v1.9.3
-	github.com/timshannon/bolthold v0.0.0-20240314194003-30aac6950928
+	go.etcd.io/bbolt v1.3.10
 )
 
-require (
-	go.etcd.io/bbolt v1.3.8 // indirect
-	golang.org/x/sys v0.15.0 // indirect
-)
+require golang.org/x/sys v0.4.0 // indirect

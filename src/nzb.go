@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/newsnab"
-	"github.com/timshannon/bolthold"
 	"regexp"
 	"strconv"
 	"strings"

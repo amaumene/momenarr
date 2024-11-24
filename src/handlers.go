@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/amaumene/momenarr/bolthold"
 	log "github.com/sirupsen/logrus"
-	"github.com/timshannon/bolthold"
 	"io"
 	"net/http"
 	"os"
@@ -91,11 +91,11 @@ func processNotification(notification Notification, appConfig App) error {
 			}
 
 			IDs := []int64{
-				media.downloadID,
+				media.DownloadID,
 			}
 			result, err := appConfig.nzbget.EditQueue("HistoryFinalDelete", "", IDs)
 			if err != nil || result == false {
-				log.WithFields(log.Fields{"err": err}).Error("Failed to delete NZBGet download")
+				log.WithFields(log.Fields{"err": err, "ID": media.DownloadID}).Error("Failed to delete NZBGet download")
 			}
 		} else {
 			err := appConfig.store.UpdateMatching(&NZB{}, bolthold.Where("Title").Eq(notification.Name), func(record interface{}) error {
