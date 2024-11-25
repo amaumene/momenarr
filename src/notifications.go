@@ -27,7 +27,7 @@ func processNotification(notification Notification, app App) error {
 			if err != nil {
 				log.WithFields(log.Fields{"err": err}).Error("Moving file to download directory")
 			}
-			media.File = file
+			media.File = destPath
 			media.OnDisk = true
 			if err := app.Store.Update(notification.IMDB, &media); err != nil {
 				log.WithFields(log.Fields{"err": err}).Error("Update media path/status in database")

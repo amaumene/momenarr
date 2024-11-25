@@ -5,7 +5,6 @@ import (
 	"github.com/amaumene/momenarr/trakt"
 	"github.com/amaumene/momenarr/trakt/sync"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -55,7 +54,7 @@ func (app App) removeFile(IMDB string) error {
 		if err != nil {
 			return fmt.Errorf("deleting media: %v", err)
 		}
-		err = os.Remove(filepath.Join(app.Config.DownloadDir, media.File))
+		err = os.Remove(media.File)
 		if err != nil {
 			return fmt.Errorf("deleting file: %v", err)
 		}
