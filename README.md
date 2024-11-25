@@ -51,14 +51,15 @@ You can run the container or compile it locally.
 podman run --restart unless-stopped -d --name momenarr \
   -v $WHERE_TO_STORE_MEDIAS:/data \
   -v $WHERE_TO_STORE_DB_AND_TRAKT_TOKEN:/config \
-  -e DOWNLOAD_DIR="/data/downloads" \
-  -e TEMP_DIR="/data/temp" \
+  -e DOWNLOAD_DIR="/data/momenarr" \
   -e DATA_DIR="/config" \
   -e NEWSNAB_API_KEY="$YOUR_NEWSNAB_API" \
   -e NEWSNAB_HOST="$YOUR_NEWSNAB_HOST" \
-  -e TORBOX_API_KEY="$YOUR_TORBOX_API_KEY" \
   -e TRAKT_API_KEY="$YOUR_TRAKT_API_KEY" \
   -e TRAKT_CLIENT_SECRET="$YOUR_TRAKT_CLIENT_SECRET" \
+  -e NZBGET_URL="$NZBGET_URL" \
+  -e NZBGET_USER="$NZGET_USER" \
+  -e NZBGET_PASS="$NZBGET_PASS" \
 ghcr.io/amaumene/momenarr:main
 ```
 
