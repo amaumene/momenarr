@@ -12,64 +12,81 @@ import (
 )
 
 func (app *App) createDownload(IMDB string, nzb NZB) error {
-	parameters := []nzbget.Parameter{}
-	parameters = append(parameters,
-		nzbget.Parameter{
-			Name:  "IMDB",
-			Value: IMDB,
-		})
-	input := nzbget.AppendInput{
-		Filename:   nzb.Title + ".nzb",
-		Content:    nzb.Link,
-		Category:   "momenarr",
-		DupeMode:   "score",
-		Parameters: toPointerSlice(parameters),
+	input, err := createNZBGetInput(nzb, IMDB)
+	if err != nil {
+		return fmt.Errorf("creating NZBGet input: %w", err)
 	}
-	downloadID, err := app.NZBGet.Append(&input)
+
+	downloadID, err := app.NZBGet.Append(input)
 	if err != nil || downloadID <= 0 {
-		return fmt.Errorf("creating NZBGet transfer: %s", err)
+		return fmt.Errorf("creating NZBGet transfer: %w", err)
 	}
-	var media Media
-	if err = app.Store.Get(IMDB, &media); err != nil {
-		return fmt.Errorf("get media from database: %s", err)
+
+	err = updateMediaDownloadID(app.Store, IMDB, downloadID)
+	if err != nil {
+		return fmt.Errorf("updating DownloadID in database: %w", err)
 	}
-	media.DownloadID = downloadID
-	if err = app.Store.Update(IMDB, media); err != nil {
-		return fmt.Errorf("update DownloadID on database: %s", err)
-	}
-	log.WithFields(log.Fields{
-		"IMDB":       IMDB,
-		"Title":      nzb.Title,
-		"DownloadID": downloadID,
-	}).Info("Download started successfully")
+
+	logDownloadStart(IMDB, nzb.Title, downloadID)
 
 	return nil
 }
 
-func toPointerSlice(parameters []nzbget.Parameter) []*nzbget.Parameter {
-	ptrSlice := make([]*nzbget.Parameter, len(parameters))
-	for i := range parameters {
-		ptrSlice[i] = &parameters[i]
+func createNZBGetInput(nzb NZB, IMDB string) (*nzbget.AppendInput, error) {
+	return &nzbget.AppendInput{
+		Filename:   nzb.Title + ".nzb",
+		Content:    nzb.Link,
+		Category:   "momenarr",
+		DupeMode:   "score",
+		Parameters: []*nzbget.Parameter{{Name: "IMDB", Value: IMDB}},
+	}, nil
+}
+
+func updateMediaDownloadID(store *bolthold.Store, IMDB string, downloadID int64) error {
+	var media Media
+	if err := store.Get(IMDB, &media); err != nil {
+		return fmt.Errorf("getting media from database: %w", err)
 	}
-	return ptrSlice
+	media.DownloadID = downloadID
+	return store.Update(IMDB, media)
+}
+
+func logDownloadStart(IMDB, title string, downloadID int64) {
+	log.WithFields(log.Fields{
+		"IMDB":       IMDB,
+		"Title":      title,
+		"DownloadID": downloadID,
+	}).Info("Download started successfully")
 }
 
 func (app *App) downloadNotOnDisk() error {
-	var medias []Media
-	err := app.Store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
+	medias, err := findMediasNotOnDisk(app.Store)
 	if err != nil {
 		return fmt.Errorf("finding media not on disk: %s", err)
 	}
-
 	for _, media := range medias {
-		nzb, err := app.getNzbFromDB(media.IMDB)
+		err = app.processMediaDownload(media)
 		if err != nil {
-			return fmt.Errorf("getting NZB from database: %s", err)
+			return err
 		}
-		err = app.createDownload(media.IMDB, nzb)
-		if err != nil {
-			return fmt.Errorf("creating or downloading cached media: %s", err)
-		}
+	}
+	return nil
+}
+
+func findMediasNotOnDisk(store *bolthold.Store) ([]Media, error) {
+	var medias []Media
+	err := store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
+	return medias, err
+}
+
+func (app *App) processMediaDownload(media Media) error {
+	nzb, err := app.getNzbFromDB(media.IMDB)
+	if err != nil {
+		return fmt.Errorf("getting NZB from database: %s", err)
+	}
+	err = app.createDownload(media.IMDB, nzb)
+	if err != nil {
+		return fmt.Errorf("creating or downloading cached media: %s", err)
 	}
 	return nil
 }

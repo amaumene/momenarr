@@ -71,7 +71,6 @@ func (app *App) insertNZBItems(media Media, items []newsnab.Item) error {
 			Length: length,
 			Title:  item.Title,
 		}
-
 		err = app.Store.Insert(strings.TrimPrefix(item.GUID, "https://nzbs.in/details/"), nzb)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 			return fmt.Errorf("inserting NZB media into database: %v", err)

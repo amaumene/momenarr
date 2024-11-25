@@ -9,7 +9,7 @@ import (
 
 func handleAPIRequests(appConfig *App) {
 	http.HandleFunc("/api/notify", func(w http.ResponseWriter, r *http.Request) {
-		handlePostData(w, r, *appConfig)
+		handleApiNotify(w, r, *appConfig)
 	})
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -25,7 +25,7 @@ func handleAPIRequests(appConfig *App) {
 	})
 }
 
-func handlePostData(w http.ResponseWriter, r *http.Request, appConfig App) {
+func handleApiNotify(w http.ResponseWriter, r *http.Request, appConfig App) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
