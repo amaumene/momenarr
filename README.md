@@ -12,22 +12,38 @@ This is very much work in progress, probably very ugly code, I don't know that m
 
 ## How do it work?
 
-It uses Trakt watchlist and also watch history. It checks periodically for any updates. It will then search your NZB indexer (newsnab) and send this NZB to TorBox. Once the download is completed on [TorBox](https://torbox.app/), it downloads the file locally. It will also periodically check for your watch history to clean up watched medias.
+It uses Trakt's watchlist/favorites and also watch history to delete watched medias. It checks periodically for any
+updates. It will then search your NZB indexer (newsnab) and send this NZB to NZBGet. Once the download is completed, it
+copies the file to DownloadDir. It will also periodically check for your watch history to clean up watched medias.
+
+For a tv show in the watchlist it will download the first non watched episode. If the tv show is added to the favorites
+list, it will download the next 3 episodes.
+For a movie, it doesn't matter if it's in watchlist or favorites.
+
+In both cases, once the media is watched, it will be deleted from disk. Only the watched medias in the last 5 days are
+deleted.
+
+It selects the biggest REMUX file first and if the download fails, the second biggest, etc..
+If there are no REMUX it will pick the WEB-DL version.
+
+It exposes to endpoint API:
+
+* /api/notify for NZBGet to notify of a completed download.
+* /refresh to triggers a full refresh manually (i.e pulls watchlist/favorites from Trakt and clean watched medias)
 
 Very simple diagram explaining how it works:
-![](momenarr.jpg)
+![](momenarr.svg)
 
 ## Requirements
 
 This is how I use it:
 1. I use an newsnab indexer
-2. I use TorBox to download nzb
+2. I use NZBGet to download nzb
 3. I use Infuse (connected to Trakt) to watch my content
 4. I created a Trakt application to use its API
 5. I download the media locally and expose the medias through [WebDav](https://github.com/amaumene/my_webdav)
 
 You can run the container or compile it locally.
-You need to expose the API to the internet so TorBox's webhook can let know Momenarr when the download is finished.
 
 ## Container usage
 
