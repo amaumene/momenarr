@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-func (appConfig App) cleanWatched() error {
-	params := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
+func (app App) cleanWatched() error {
+	params := trakt.ListParams{OAuth: app.TraktToken.AccessToken}
 
 	historyParams := &trakt.ListHistoryParams{
 		ListParams: params,
@@ -26,12 +26,12 @@ func (appConfig App) cleanWatched() error {
 
 		switch item.Type.String() {
 		case "movie":
-			err = appConfig.removeFile(string(item.Movie.IMDB))
+			err = app.removeFile(string(item.Movie.IMDB))
 			if err != nil {
 				return fmt.Errorf("removing movie: %v", err)
 			}
 		case "episode":
-			err = appConfig.removeFile(string(item.Show.IMDB))
+			err = app.removeFile(string(item.Episode.IMDB))
 			if err != nil {
 				return fmt.Errorf("removing episode: %v", err)
 			}
@@ -43,19 +43,19 @@ func (appConfig App) cleanWatched() error {
 	return nil
 }
 
-func (appConfig App) removeFile(IMDB string) error {
+func (app App) removeFile(IMDB string) error {
 	var media Media
-	err := appConfig.store.Get(IMDB, &media)
+	err := app.Store.Get(IMDB, &media)
 	if err != nil {
 		return fmt.Errorf("finding media: %s: %v", IMDB, err)
 	}
 
 	if len(media.File) > 0 {
-		err = appConfig.store.Delete(IMDB, &media)
+		err = app.Store.Delete(IMDB, &media)
 		if err != nil {
 			return fmt.Errorf("deleting media: %v", err)
 		}
-		err = os.Remove(filepath.Join(appConfig.downloadDir, media.File))
+		err = os.Remove(filepath.Join(app.Config.DownloadDir, media.File))
 		if err != nil {
 			return fmt.Errorf("deleting file: %v", err)
 		}

@@ -2,13 +2,9 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"github.com/amaumene/momenarr/bolthold"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 )
 
 func handleAPIRequests(appConfig *App) {
@@ -64,78 +60,4 @@ func handlePostData(w http.ResponseWriter, r *http.Request, appConfig App) {
 	if _, err := w.Write([]byte(`{"message": "Data received and processing started"}`)); err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")
 	}
-}
-
-func processNotification(notification Notification, appConfig App) error {
-	if notification.Category == "momenarr" {
-		if notification.Status == "SUCCESS" {
-			var media Media
-			err := appConfig.store.Get(notification.IMDB, &media)
-			if err != nil {
-				return fmt.Errorf("finding media: %v", err)
-			}
-			file, err := findBiggestFile(notification.Dir)
-			if err != nil {
-				log.WithFields(log.Fields{"err": err}).Error("Finding biggest file")
-			}
-
-			destPath := filepath.Join(appConfig.downloadDir, filepath.Base(file))
-			err = os.Rename(file, destPath)
-			if err != nil {
-				log.WithFields(log.Fields{"err": err}).Error("Moving file to download directory")
-			}
-			media.File = file
-			media.OnDisk = true
-			if err := appConfig.store.Update(notification.IMDB, &media); err != nil {
-				log.WithFields(log.Fields{"err": err}).Error("Update media path/status in database")
-			}
-
-			IDs := []int64{
-				media.DownloadID,
-			}
-			result, err := appConfig.nzbget.EditQueue("HistoryFinalDelete", "", IDs)
-			if err != nil || result == false {
-				log.WithFields(log.Fields{"err": err, "ID": media.DownloadID}).Error("Failed to delete NZBGet download")
-			}
-		} else {
-			err := appConfig.store.UpdateMatching(&NZB{}, bolthold.Where("Title").Eq(notification.Name), func(record interface{}) error {
-				update, ok := record.(*NZB)
-				if !ok {
-					return fmt.Errorf("record isn't the correct type! Wanted NZB, got %T", record)
-				}
-				update.Failed = true
-				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("updating NZB record: %v", err)
-			}
-			if err = appConfig.downloadNotOnDisk(); err != nil {
-				return fmt.Errorf("downloading on disk: %v", err)
-			}
-		}
-	}
-	return nil
-}
-
-// findBiggestFile finds the biggest file in the given directory and its subdirectories.
-func findBiggestFile(dir string) (string, error) {
-	var biggestFile string
-	var maxSize int64
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && info.Size() > maxSize {
-			biggestFile = path
-			maxSize = info.Size()
-		}
-		return nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	return biggestFile, nil
 }

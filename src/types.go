@@ -7,14 +7,17 @@ import (
 )
 
 type App struct {
-	downloadDir   string
-	tempDir       string
-	dataDir       string
-	newsNabHost   string
-	newsNabApiKey string
-	traktToken    *trakt.Token
-	store         *bolthold.Store
-	nzbget        *nzbget.NZBGet
+	TraktToken *trakt.Token
+	Store      *bolthold.Store
+	NZBGet     *nzbget.NZBGet
+	Config     *Config
+}
+
+type Config struct {
+	DownloadDir   string
+	DataDir       string
+	NewsNabHost   string
+	NewsNabApiKey string
 }
 
 type Media struct {

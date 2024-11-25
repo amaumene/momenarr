@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-func (appConfig *App) getNzbFromDB(IMDB string) (NZB, error) {
+func (app *App) getNzbFromDB(IMDB string) (NZB, error) {
 	var nzb []NZB
-	err := appConfig.store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
+	err := app.Store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
 		RegExp(regexp.MustCompile("(?i)remux")).
 		And("Failed").Eq(false).
 		SortBy("Length").Reverse().Limit(1).Index("IMDB"))
@@ -20,7 +20,7 @@ func (appConfig *App) getNzbFromDB(IMDB string) (NZB, error) {
 		return NZB{}, fmt.Errorf("request NZB remux from database: %v", err)
 	}
 	if len(nzb) == 0 {
-		err = appConfig.store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
+		err = app.Store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
 			RegExp(regexp.MustCompile("(?i)web-dl")).
 			And("Failed").Eq(false).
 			SortBy("Length").Reverse().Limit(1).Index("IMDB"))
@@ -34,10 +34,10 @@ func (appConfig *App) getNzbFromDB(IMDB string) (NZB, error) {
 	return NZB{}, fmt.Errorf("no NZB found for %s", IMDB)
 }
 
-func (appConfig *App) searchNZB(media Media) (newsnab.Feed, error) {
+func (app *App) searchNZB(media Media) (newsnab.Feed, error) {
 	var feed newsnab.Feed
 	if media.Number > 0 && media.Season > 0 {
-		jsonResponse, err := newsnab.SearchTVShow(media.TVDB, media.Season, media.Number, appConfig.newsNabHost, appConfig.newsNabApiKey)
+		jsonResponse, err := newsnab.SearchTVShow(media.TVDB, media.Season, media.Number, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
 		if err != nil {
 			return feed, fmt.Errorf("searching NZB for episode: %v", err)
 		}
@@ -46,7 +46,7 @@ func (appConfig *App) searchNZB(media Media) (newsnab.Feed, error) {
 			return feed, fmt.Errorf("unmarshalling JSON NZB episode: %v", err)
 		}
 	} else {
-		jsonResponse, err := newsnab.SearchMovie(media.IMDB, appConfig.newsNabHost, appConfig.newsNabApiKey)
+		jsonResponse, err := newsnab.SearchMovie(media.IMDB, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
 		if err != nil {
 			return feed, fmt.Errorf("searching NZB for movie: %v", err)
 		}
@@ -58,7 +58,7 @@ func (appConfig *App) searchNZB(media Media) (newsnab.Feed, error) {
 	return feed, nil
 }
 
-func (appConfig *App) insertNZBItems(media Media, items []newsnab.Item) error {
+func (app *App) insertNZBItems(media Media, items []newsnab.Item) error {
 	for _, item := range items {
 		length, err := strconv.ParseInt(item.Enclosure.Attributes.Length, 10, 64)
 		if err != nil {
@@ -72,7 +72,7 @@ func (appConfig *App) insertNZBItems(media Media, items []newsnab.Item) error {
 			Title:  item.Title,
 		}
 
-		err = appConfig.store.Insert(strings.TrimPrefix(item.GUID, "https://nzbs.in/details/"), nzb)
+		err = app.Store.Insert(strings.TrimPrefix(item.GUID, "https://nzbs.in/details/"), nzb)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 			return fmt.Errorf("inserting NZB media into database: %v", err)
 		}
@@ -80,20 +80,20 @@ func (appConfig *App) insertNZBItems(media Media, items []newsnab.Item) error {
 	return nil
 }
 
-func (appConfig *App) populateNZB() error {
+func (app *App) populateNZB() error {
 	var medias []Media
-	err := appConfig.store.Find(&medias, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
+	err := app.Store.Find(&medias, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
 	if err != nil {
 		return fmt.Errorf("finding media in database: %v", err)
 	}
 
 	for _, media := range medias {
-		feed, err := appConfig.searchNZB(media)
+		feed, err := app.searchNZB(media)
 		if err != nil {
 			return err
 		}
 		if len(feed.Channel.Item) > 0 {
-			err := appConfig.insertNZBItems(media, feed.Channel.Item)
+			err := app.insertNZBItems(media, feed.Channel.Item)
 			if err != nil {
 				return err
 			}

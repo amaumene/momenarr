@@ -12,39 +12,39 @@ func createDir(dir string) {
 	}
 }
 
-func setConfig() *App {
-	appConfig := new(App)
-	appConfig.newsNabApiKey = os.Getenv("NEWSNAB_API_KEY")
-	if appConfig.newsNabApiKey == "" {
+func setConfig() *Config {
+	config := new(Config)
+	config.NewsNabApiKey = os.Getenv("NEWSNAB_API_KEY")
+	if config.NewsNabApiKey == "" {
 		log.WithFields(log.Fields{
-			"NEWSNAB_API_KEY": appConfig.newsNabApiKey,
+			"NEWSNAB_API_KEY": config.NewsNabApiKey,
 		}).Fatal("Environment variable missing")
 	}
 
-	appConfig.newsNabHost = os.Getenv("NEWSNAB_HOST")
-	if appConfig.newsNabHost == "" {
+	config.NewsNabHost = os.Getenv("NEWSNAB_HOST")
+	if config.NewsNabHost == "" {
 		log.WithFields(log.Fields{
-			"NEWSNAB_HOST": appConfig.newsNabHost,
+			"NEWSNAB_HOST": config.NewsNabHost,
 		}).Fatal("Environment variable missing")
 	}
 
-	appConfig.downloadDir = os.Getenv("DOWNLOAD_DIR")
-	if appConfig.downloadDir == "" {
+	config.DownloadDir = os.Getenv("DOWNLOAD_DIR")
+	if config.DownloadDir == "" {
 		log.WithFields(log.Fields{
-			"DOWNLOAD_DIR": appConfig.downloadDir,
+			"DOWNLOAD_DIR": config.DownloadDir,
 		}).Fatal("Environment variable missing")
 	}
 	// Create if it doesn't exist
-	createDir(appConfig.downloadDir)
+	createDir(config.DownloadDir)
 
-	appConfig.dataDir = os.Getenv("DATA_DIR")
-	if appConfig.dataDir == "" {
+	config.DataDir = os.Getenv("DATA_DIR")
+	if config.DataDir == "" {
 		log.WithFields(log.Fields{
-			"DATA_DIR": appConfig.dataDir,
+			"DATA_DIR": config.DataDir,
 		}).Warning("DATA_DIR not set, using current directory")
-		appConfig.dataDir = "."
+		config.DataDir = "."
 	}
-	return appConfig
+	return config
 }
 
 func getEnvTrakt() (string, string) {

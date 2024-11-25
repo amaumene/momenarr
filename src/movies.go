@@ -6,8 +6,8 @@ import (
 	"github.com/amaumene/momenarr/trakt/sync"
 )
 
-func (appConfig *App) syncMoviesFromWatchlist() error {
-	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
+func (app *App) syncMoviesFromWatchlist() error {
+	tokenParams := trakt.ListParams{OAuth: app.TraktToken.AccessToken}
 
 	watchListParams := &trakt.ListWatchListParams{
 		ListParams: tokenParams,
@@ -27,7 +27,7 @@ func (appConfig *App) syncMoviesFromWatchlist() error {
 			Year:   item.Movie.Year,
 			OnDisk: false,
 		}
-		err = appConfig.store.Insert(string(item.Movie.IMDB), movie)
+		err = app.Store.Insert(string(item.Movie.IMDB), movie)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 			return fmt.Errorf("scanning movie item: %v", err)
 		}
@@ -38,8 +38,8 @@ func (appConfig *App) syncMoviesFromWatchlist() error {
 	return nil
 }
 
-func (appConfig *App) syncMoviesFromFavorites() error {
-	tokenParams := trakt.ListParams{OAuth: appConfig.traktToken.AccessToken}
+func (app *App) syncMoviesFromFavorites() error {
+	tokenParams := trakt.ListParams{OAuth: app.TraktToken.AccessToken}
 	params := &trakt.ListFavoritesParams{
 		ListParams: tokenParams,
 		Type:       "movies",
@@ -57,7 +57,7 @@ func (appConfig *App) syncMoviesFromFavorites() error {
 			Year:   item.Movie.Year,
 			OnDisk: false,
 		}
-		err = appConfig.store.Insert(string(item.Movie.IMDB), movie)
+		err = app.Store.Insert(string(item.Movie.IMDB), movie)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 			return fmt.Errorf("scanning movie item: %v", err)
 		}
@@ -68,12 +68,12 @@ func (appConfig *App) syncMoviesFromFavorites() error {
 	return nil
 }
 
-func (appConfig *App) syncMoviesFromTrakt() error {
-	err := appConfig.syncMoviesFromWatchlist()
+func (app *App) syncMoviesFromTrakt() error {
+	err := app.syncMoviesFromWatchlist()
 	if err != nil {
 		return err
 	}
-	err = appConfig.syncMoviesFromFavorites()
+	err = app.syncMoviesFromFavorites()
 	if err != nil {
 		return err
 	}

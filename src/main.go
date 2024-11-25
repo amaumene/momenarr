@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func (appConfig *App) createDownload(IMDB string, nzb NZB) error {
+func (app *App) createDownload(IMDB string, nzb NZB) error {
 	parameters := []nzbget.Parameter{}
 	parameters = append(parameters,
 		nzbget.Parameter{
@@ -25,16 +25,16 @@ func (appConfig *App) createDownload(IMDB string, nzb NZB) error {
 		DupeMode:   "score",
 		Parameters: toPointerSlice(parameters),
 	}
-	downloadID, err := appConfig.nzbget.Append(&input)
+	downloadID, err := app.NZBGet.Append(&input)
 	if err != nil || downloadID <= 0 {
 		return fmt.Errorf("creating NZBGet transfer: %s", err)
 	}
 	var media Media
-	if err = appConfig.store.Get(IMDB, &media); err != nil {
+	if err = app.Store.Get(IMDB, &media); err != nil {
 		return fmt.Errorf("get media from database: %s", err)
 	}
 	media.DownloadID = downloadID
-	if err = appConfig.store.Update(IMDB, media); err != nil {
+	if err = app.Store.Update(IMDB, media); err != nil {
 		return fmt.Errorf("update DownloadID on database: %s", err)
 	}
 	log.WithFields(log.Fields{
@@ -54,19 +54,19 @@ func toPointerSlice(parameters []nzbget.Parameter) []*nzbget.Parameter {
 	return ptrSlice
 }
 
-func (appConfig *App) downloadNotOnDisk() error {
+func (app *App) downloadNotOnDisk() error {
 	var medias []Media
-	err := appConfig.store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
+	err := app.Store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
 	if err != nil {
 		return fmt.Errorf("finding media not on disk: %s", err)
 	}
 
 	for _, media := range medias {
-		nzb, err := appConfig.getNzbFromDB(media.IMDB)
+		nzb, err := app.getNzbFromDB(media.IMDB)
 		if err != nil {
 			return fmt.Errorf("getting NZB from database: %s", err)
 		}
-		err = appConfig.createDownload(media.IMDB, nzb)
+		err = app.createDownload(media.IMDB, nzb)
 		if err != nil {
 			return fmt.Errorf("creating or downloading cached media: %s", err)
 		}
@@ -74,32 +74,32 @@ func (appConfig *App) downloadNotOnDisk() error {
 	return nil
 }
 
-func (appConfig *App) syncFromTrakt() {
-	if err := appConfig.syncMoviesFromTrakt(); err != nil {
+func (app *App) syncFromTrakt() {
+	if err := app.syncMoviesFromTrakt(); err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("Error syncing movies from Trakt")
 	}
-	if err := appConfig.syncEpisodesFromTrakt(); err != nil {
+	if err := app.syncEpisodesFromTrakt(); err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("Error syncing episodes from Trakt")
 	}
 }
 
-func (appConfig *App) runTasks() {
-	appConfig.syncFromTrakt()
-	if err := appConfig.populateNZB(); err != nil {
+func (app *App) runTasks() {
+	app.syncFromTrakt()
+	if err := app.populateNZB(); err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("populating NZB")
 	}
-	if err := appConfig.downloadNotOnDisk(); err != nil {
+	if err := app.downloadNotOnDisk(); err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("downloading on disk")
 	}
-	err := appConfig.cleanWatched()
+	err := app.cleanWatched()
 	if err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
@@ -118,7 +118,7 @@ func startBackgroundTasks(appConfig *App) {
 func handleShutdown(appConfig *App, shutdownChan chan os.Signal) {
 	<-shutdownChan
 	log.Info("Received shutdown signal, shutting down gracefully...")
-	if err := appConfig.store.Close(); err != nil {
+	if err := appConfig.Store.Close(); err != nil {
 		log.Error("Error closing database: ", err)
 	}
 	log.Info("Server shut down successfully.")
@@ -127,24 +127,25 @@ func handleShutdown(appConfig *App, shutdownChan chan os.Signal) {
 
 func main() {
 	log.SetOutput(os.Stdout)
-	appConfig := setConfig()
+	app := new(App)
+	app.Config = setConfig()
 	traktApiKey, traktClientSecret := getEnvTrakt()
-	appConfig.traktToken = appConfig.setUpTrakt(traktApiKey, traktClientSecret)
-	appConfig.nzbget = setNZBGet()
+	app.TraktToken = app.setUpTrakt(traktApiKey, traktClientSecret)
+	app.NZBGet = setNZBGet()
 
 	var err error
-	appConfig.store, err = bolthold.Open(appConfig.dataDir+"/data.db", 0666, nil)
+	app.Store, err = bolthold.Open(app.Config.DataDir+"/data.db", 0666, nil)
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Fatal("Error opening database")
 	}
 
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, os.Interrupt)
-	go handleShutdown(appConfig, shutdownChan)
+	go handleShutdown(app, shutdownChan)
 
-	go startBackgroundTasks(appConfig)
+	go startBackgroundTasks(app)
 
-	handleAPIRequests(appConfig)
+	handleAPIRequests(app)
 	port := "0.0.0.0:3000"
 	log.Fatal(http.ListenAndServe(port, nil))
 	log.WithFields(log.Fields{"port": port}).Info("Server is running")
