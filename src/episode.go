@@ -43,13 +43,15 @@ func (app *App) syncEpisodesFromFavorites() error {
 		if err != nil {
 			return fmt.Errorf("getting show progress: %v", err)
 		}
-		for i := 0; i < 3; i++ {
-			nextEpisode, err := episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
-			if err != nil {
-				return fmt.Errorf("getting next episode from database: %v", err)
-			}
-			if err := app.syncEpisodeToDB(item.Show, nextEpisode); err != nil {
-				return err
+		if showProgress.NextEpisode != nil {
+			for i := 0; i < 3; i++ {
+				nextEpisode, err := episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
+				if err != nil {
+					return fmt.Errorf("getting next episode from database: %v", err)
+				}
+				if err := app.syncEpisodeToDB(item.Show, nextEpisode); err != nil {
+					return err
+				}
 			}
 		}
 	}
