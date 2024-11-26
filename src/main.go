@@ -65,6 +65,7 @@ func (app *App) downloadNotOnDisk() error {
 		return fmt.Errorf("finding media not on disk: %s", err)
 	}
 	for _, media := range medias {
+		fmt.Printf("media Title: %s\n", media.Title)
 		err = app.processMediaDownload(media)
 		if err != nil {
 			return err
@@ -75,7 +76,7 @@ func (app *App) downloadNotOnDisk() error {
 
 func findMediasNotOnDisk(store *bolthold.Store) ([]Media, error) {
 	var medias []Media
-	err := store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
+	err := store.Find(&medias, bolthold.Where("DownloadID").Eq(int64(0)))
 	return medias, err
 }
 
