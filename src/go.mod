@@ -1,7 +1,5 @@
 module github.com/amaumene/momenarr
 
-go 1.21.13
-
 require (
 	github.com/google/go-querystring v1.1.0
 	github.com/gorilla/rpc v1.2.1

@@ -1,16 +1,21 @@
-FROM registry.access.redhat.com/ubi9/go-toolset AS builder
+FROM golang AS builder
+
+WORKDIR /app
 
 COPY ./src .
 
-RUN go build -o momenarr
+RUN rm go.mod && rm go.sum
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal
+RUN go mod init github.com/amaumene/momenarr && go mod tidy
 
-COPY --from=builder /opt/app-root/src/momenarr /app/momenarr
+RUN CGO_ENABLED=0 go build -o momenarr
 
-USER 1001
+FROM gcr.io/distroless/static:nonroot
+
+COPY --chown=nonroot --from=builder /app/momenarr /app/momenarr
 
 VOLUME /data
+
 EXPOSE 3000/tcp
 
 CMD [ "/app/momenarr" ]
