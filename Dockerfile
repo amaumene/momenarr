@@ -10,9 +10,9 @@ RUN go mod init github.com/amaumene/momenarr && go mod tidy
 
 RUN CGO_ENABLED=0 go build -o momenarr
 
-FROM gcr.io/distroless/static:nonroot
+FROM scratch
 
-COPY --chown=nonroot --from=builder /app/momenarr /app/momenarr
+COPY --chown=65532 --from=builder /app/momenarr /app/momenarr
 
 VOLUME /data
 
