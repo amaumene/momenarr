@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func (app *App) createDownload(IMDB string, nzb NZB) error {
+func (app App) createDownload(IMDB string, nzb NZB) error {
 	input, err := createNZBGetInput(nzb, IMDB)
 	if err != nil {
 		return fmt.Errorf("creating NZBGet input: %w", err)
@@ -59,7 +59,7 @@ func logDownloadStart(IMDB, title string, downloadID int64) {
 	}).Info("Download started successfully")
 }
 
-func (app *App) downloadNotOnDisk() error {
+func (app App) downloadNotOnDisk() error {
 	medias, err := findMediasNotOnDisk(app.Store)
 	if err != nil {
 		return fmt.Errorf("finding media not on disk: %s", err)
@@ -80,7 +80,7 @@ func findMediasNotOnDisk(store *bolthold.Store) ([]Media, error) {
 	return medias, err
 }
 
-func (app *App) processMediaDownload(media Media) error {
+func (app App) processMediaDownload(media Media) error {
 	nzb, err := app.getNzbFromDB(media.IMDB)
 	if err != nil {
 		return fmt.Errorf("getting NZB from database: %s", err)
@@ -92,7 +92,7 @@ func (app *App) processMediaDownload(media Media) error {
 	return nil
 }
 
-func (app *App) syncFromTrakt() {
+func (app App) syncFromTrakt() {
 	if err := app.syncMoviesFromTrakt(); err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
@@ -105,7 +105,7 @@ func (app *App) syncFromTrakt() {
 	}
 }
 
-func (app *App) runTasks() {
+func (app App) runTasks() {
 	app.syncFromTrakt()
 	if err := app.populateNZB(); err != nil {
 		log.WithFields(log.Fields{

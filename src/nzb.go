@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func (app *App) getNzbFromDB(IMDB string) (NZB, error) {
+func (app App) getNzbFromDB(IMDB string) (NZB, error) {
 	var nzb []NZB
 	err := app.Store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).And("Title").
 		RegExp(regexp.MustCompile("(?i)remux")).
@@ -34,7 +34,7 @@ func (app *App) getNzbFromDB(IMDB string) (NZB, error) {
 	return NZB{}, fmt.Errorf("no NZB found for %s", IMDB)
 }
 
-func (app *App) searchNZB(media Media) (newsnab.Feed, error) {
+func (app App) searchNZB(media Media) (newsnab.Feed, error) {
 	var feed newsnab.Feed
 	if media.Number > 0 && media.Season > 0 {
 		jsonResponse, err := newsnab.SearchTVShow(media.TVDB, media.Season, media.Number, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
@@ -58,7 +58,7 @@ func (app *App) searchNZB(media Media) (newsnab.Feed, error) {
 	return feed, nil
 }
 
-func (app *App) insertNZBItems(media Media, items []newsnab.Item) error {
+func (app App) insertNZBItems(media Media, items []newsnab.Item) error {
 	for _, item := range items {
 		length, err := strconv.ParseInt(item.Enclosure.Attributes.Length, 10, 64)
 		if err != nil {
@@ -79,7 +79,7 @@ func (app *App) insertNZBItems(media Media, items []newsnab.Item) error {
 	return nil
 }
 
-func (app *App) populateNZB() error {
+func (app App) populateNZB() error {
 	var medias []Media
 	err := app.Store.Find(&medias, bolthold.Where("OnDisk").Eq(false).SortBy("IMDB"))
 	if err != nil {

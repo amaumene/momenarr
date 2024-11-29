@@ -8,7 +8,7 @@ import (
 	"github.com/amaumene/momenarr/trakt/sync"
 )
 
-func (app *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
+func (app App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
 	media := Media{
 		TVDB:   int64(show.TVDB),
 		Number: ep.Number,
@@ -24,7 +24,7 @@ func (app *App) syncEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
 	return nil
 }
 
-func (app *App) syncEpisodesFromFavorites() error {
+func (app App) syncEpisodesFromFavorites() error {
 	tokenParams := trakt.ListParams{OAuth: app.TraktToken.AccessToken}
 	params := &trakt.ListFavoritesParams{
 		ListParams: tokenParams,
@@ -61,7 +61,7 @@ func (app *App) syncEpisodesFromFavorites() error {
 	return nil
 }
 
-func (app *App) syncEpisodesFromWatchlist() error {
+func (app App) syncEpisodesFromWatchlist() error {
 	tokenParams := trakt.ListParams{OAuth: app.TraktToken.AccessToken}
 	watchListParams := &trakt.ListWatchListParams{
 		ListParams: tokenParams,
@@ -90,7 +90,7 @@ func (app *App) syncEpisodesFromWatchlist() error {
 	return nil
 }
 
-func (app *App) syncEpisodesFromTrakt() error {
+func (app App) syncEpisodesFromTrakt() error {
 	err := app.syncEpisodesFromWatchlist()
 	if err != nil {
 		return err

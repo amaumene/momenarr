@@ -6,7 +6,7 @@ import (
 	"github.com/amaumene/momenarr/trakt/sync"
 )
 
-func (app *App) syncMoviesFromWatchlist() error {
+func (app App) syncMoviesFromWatchlist() error {
 	tokenParams := trakt.ListParams{OAuth: app.TraktToken.AccessToken}
 
 	watchListParams := &trakt.ListWatchListParams{
@@ -38,7 +38,7 @@ func (app *App) syncMoviesFromWatchlist() error {
 	return nil
 }
 
-func (app *App) syncMoviesFromFavorites() error {
+func (app App) syncMoviesFromFavorites() error {
 	tokenParams := trakt.ListParams{OAuth: app.TraktToken.AccessToken}
 	params := &trakt.ListFavoritesParams{
 		ListParams: tokenParams,
@@ -68,7 +68,7 @@ func (app *App) syncMoviesFromFavorites() error {
 	return nil
 }
 
-func (app *App) syncMoviesFromTrakt() error {
+func (app App) syncMoviesFromTrakt() error {
 	err := app.syncMoviesFromWatchlist()
 	if err != nil {
 		return err
