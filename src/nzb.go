@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/newsnab"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -58,22 +60,60 @@ func (app App) searchNZB(media Media) (newsnab.Feed, error) {
 	return feed, nil
 }
 
+func readBlacklist(path string) ([]string, error) {
+	var blacklist []string
+	file, err := os.OpenFile(path, os.O_RDONLY, 0644)
+	if err != nil {
+		return blacklist, fmt.Errorf("opening blacklist file: %v", err)
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Printf("error closing file: %v\n", err)
+		}
+	}()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		blacklist = append(blacklist, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return blacklist, fmt.Errorf("scanning file: %v", err)
+	}
+
+	return blacklist, nil
+}
+
 func (app App) insertNZBItems(media Media, items []newsnab.Item) error {
 	for _, item := range items {
-		length, err := strconv.ParseInt(item.Enclosure.Attributes.Length, 10, 64)
+		blacklist, err := readBlacklist(app.Config.DataDir + "/blacklist.txt")
 		if err != nil {
-			return fmt.Errorf("converting NZB media length to int64: %v", err)
+			return fmt.Errorf("reading blacklist: %v", err)
 		}
 
-		nzb := NZB{
-			IMDB:   media.IMDB,
-			Link:   item.Link,
-			Length: length,
-			Title:  item.Title,
+		shouldInsert := true
+		for _, word := range blacklist {
+			if strings.Contains(strings.ToLower(item.Title), strings.ToLower(word)) {
+				shouldInsert = false
+				break
+			}
 		}
-		err = app.Store.Insert(strings.TrimPrefix(item.GUID, "https://nzbs.in/details/"), nzb)
-		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
-			return fmt.Errorf("inserting NZB media into database: %v", err)
+
+		if shouldInsert {
+			length, err := strconv.ParseInt(item.Enclosure.Attributes.Length, 10, 64)
+			if err != nil {
+				return fmt.Errorf("converting NZB media length to int64: %v", err)
+			}
+
+			nzb := NZB{
+				IMDB:   media.IMDB,
+				Link:   item.Link,
+				Length: length,
+				Title:  item.Title,
+			}
+			err = app.Store.Insert(strings.TrimPrefix(item.GUID, "https://nzbs.in/details/"), nzb)
+			if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
+				return fmt.Errorf("inserting NZB media into database: %v", err)
+			}
 		}
 	}
 	return nil

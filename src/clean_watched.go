@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/trakt"
 	"github.com/amaumene/momenarr/trakt/sync"
 	"os"
@@ -50,6 +51,10 @@ func (app App) removeFile(IMDB string) error {
 	}
 
 	if len(media.File) > 0 {
+		err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("IMDB").Eq(media.IMDB))
+		if err != nil {
+			return fmt.Errorf("deleting NZBs: %v", err)
+		}
 		err = app.Store.Delete(IMDB, &media)
 		if err != nil {
 			return fmt.Errorf("deleting media: %v", err)

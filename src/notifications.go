@@ -20,7 +20,7 @@ func downloadSuccess(notification Notification, app App, media Media) error {
 		return fmt.Errorf("moving file to download directory: %v", err)
 	}
 
-	err = os.Remove(notification.Dir)
+	err = os.RemoveAll(notification.Dir)
 	if err != nil {
 		return fmt.Errorf("removing download directory: %v", err)
 	}
