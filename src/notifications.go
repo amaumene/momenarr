@@ -65,6 +65,8 @@ func deleteFromHistory(media Media, app App) error {
 				result, err := app.NZBGet.EditQueue("HistoryFinalDelete", "", IDs)
 				if err != nil || result == false {
 					return fmt.Errorf("failed to delete NZBGet download: %v", err)
+				} else {
+					return nil
 				}
 			}
 		}
