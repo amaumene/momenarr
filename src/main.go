@@ -62,10 +62,9 @@ func logDownloadStart(IMDB, title string, downloadID int64) {
 func (app App) downloadNotOnDisk() error {
 	medias, err := findMediasNotOnDisk(app.Store)
 	if err != nil {
-		return fmt.Errorf("finding media not on disk: %s", err)
+		return err
 	}
 	for _, media := range medias {
-		fmt.Printf("media Title: %s\n", media.Title)
 		err = app.processMediaDownload(media)
 		if err != nil {
 			return err
@@ -76,7 +75,10 @@ func (app App) downloadNotOnDisk() error {
 
 func findMediasNotOnDisk(store *bolthold.Store) ([]Media, error) {
 	var medias []Media
-	err := store.Find(&medias, bolthold.Where("DownloadID").Eq(int64(0)))
+	err := store.Find(&medias, bolthold.Where("OnDisk").Eq(false))
+	if err != nil {
+		return medias, fmt.Errorf("finding media not on disk: %s", err)
+	}
 	return medias, err
 }
 
