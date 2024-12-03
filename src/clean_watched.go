@@ -26,12 +26,12 @@ func (app App) cleanWatched() error {
 
 		switch item.Type.String() {
 		case "movie":
-			err = app.removeFile(string(item.Movie.IMDB))
+			err = app.removeMedia(string(item.Movie.IMDB))
 			if err != nil {
 				return fmt.Errorf("removing movie: %v", err)
 			}
 		case "episode":
-			err = app.removeFile(string(item.Episode.IMDB))
+			err = app.removeMedia(string(item.Episode.IMDB))
 			if err != nil {
 				return fmt.Errorf("removing episode: %v", err)
 			}
@@ -43,14 +43,12 @@ func (app App) cleanWatched() error {
 	return nil
 }
 
-func (app App) removeFile(IMDB string) error {
+func (app App) removeMedia(IMDB string) error {
 	var media Media
 	err := app.Store.Get(IMDB, &media)
 	if err != nil {
 		return fmt.Errorf("finding media: %s: %v", IMDB, err)
-	}
-
-	if len(media.File) > 0 {
+	} else {
 		err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("IMDB").Eq(media.IMDB))
 		if err != nil {
 			return fmt.Errorf("deleting NZBs: %v", err)
