@@ -51,15 +51,15 @@ func (app App) removeMedia(IMDB string) error {
 	} else {
 		err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("IMDB").Eq(media.IMDB))
 		if err != nil {
-			return fmt.Errorf("deleting NZBs: %v", err)
+			return fmt.Errorf("deleting NZBs: %s: %v", IMDB, err)
 		}
 		err = app.Store.Delete(IMDB, &media)
 		if err != nil {
-			return fmt.Errorf("deleting media: %v", err)
+			return fmt.Errorf("deleting %s: %v", IMDB, err)
 		}
 		err = os.Remove(media.File)
 		if err != nil {
-			return fmt.Errorf("deleting file: %v", err)
+			return fmt.Errorf("deleting %s: %v", IMDB, err)
 		}
 	}
 	return nil
