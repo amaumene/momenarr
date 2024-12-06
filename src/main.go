@@ -17,18 +17,28 @@ func (app App) createDownload(IMDB string, nzb NZB) error {
 		return fmt.Errorf("creating NZBGet input: %w", err)
 	}
 
+	queue, err := app.NZBGet.ListGroups()
+	if err != nil {
+		return fmt.Errorf("getting NZBGet queue: %w", err)
+	}
+	for _, item := range queue {
+		if item.NZBName == nzb.Title {
+			log.WithFields(log.Fields{
+				"IMDB":  IMDB,
+				"Title": nzb.Title,
+			}).Info("NZB already in queue, skipping")
+			return nil
+		}
+	}
 	downloadID, err := app.NZBGet.Append(input)
 	if err != nil || downloadID <= 0 {
 		return fmt.Errorf("creating NZBGet transfer: %w", err)
 	}
-
 	err = updateMediaDownloadID(app.Store, IMDB, downloadID)
 	if err != nil {
 		return fmt.Errorf("updating DownloadID in database: %w", err)
 	}
-
 	logDownloadStart(IMDB, nzb.Title, downloadID)
-
 	return nil
 }
 
