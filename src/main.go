@@ -95,15 +95,33 @@ func (app App) processMediaDownload(media Media) error {
 }
 
 func (app App) syncFromTrakt() {
-	if err := app.syncMoviesFromTrakt(); err != nil {
+	err, movies := app.syncMoviesFromTrakt()
+	if err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("Error syncing movies from Trakt")
 	}
-	if err := app.syncEpisodesFromTrakt(); err != nil {
+	err, episodes := app.syncEpisodesFromTrakt()
+	if err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("Error syncing episodes from Trakt")
+	}
+	merged := append(movies, episodes...)
+	var existingEntries []Media
+	err = app.Store.Find(&existingEntries, bolthold.Where("IMDB").Not().ContainsAny(merged...))
+	if err != nil {
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Error("retrieving existing media entries from database")
+	}
+	for _, entry := range existingEntries {
+		err = app.Store.Delete(entry.IMDB, &entry)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("deleting existing media entry from database")
+		}
 	}
 }
 
