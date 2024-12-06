@@ -67,7 +67,10 @@ func (app App) downloadNotOnDisk() error {
 	for _, media := range medias {
 		err = app.processMediaDownload(media)
 		if err != nil {
-			return err
+			log.WithFields(log.Fields{
+				"err":   err,
+				"media": media.IMDB,
+			}).Error("No NZB found for media")
 		}
 	}
 	return nil
