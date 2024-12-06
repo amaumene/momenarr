@@ -30,6 +30,14 @@ func (app App) getNzbFromDB(IMDB string) (NZB, error) {
 			return NZB{}, fmt.Errorf("request NZB web-dl from database: %v", err)
 		}
 	}
+	if len(nzb) == 0 {
+		err = app.Store.Find(&nzb, bolthold.Where("IMDB").Eq(IMDB).
+			And("Failed").Eq(false).
+			SortBy("Length").Reverse().Limit(1).Index("IMDB"))
+		if err != nil {
+			return NZB{}, fmt.Errorf("request NZB no filters from database: %v", err)
+		}
+	}
 	if len(nzb) > 0 {
 		return nzb[0], nil
 	}
