@@ -2,14 +2,52 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/amaumene/momenarr/bolthold"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 )
 
+func listMedia(w http.ResponseWriter, appConfig App) {
+	w.WriteHeader(http.StatusOK)
+	var medias []Media
+	err := appConfig.Store.Find(&medias, bolthold.Where("IMDB").Ne(""))
+	if err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("getting medias from database")
+	}
+	var data string
+	for _, media := range medias {
+		data = data + fmt.Sprintf("IMDB: %s, Title: %s, OnDisk: %t\n", media.IMDB, media.Title, media.OnDisk)
+	}
+	if _, err := w.Write([]byte(data)); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("writing response")
+	}
+}
+func listNZBs(w http.ResponseWriter, appConfig App) {
+	w.WriteHeader(http.StatusOK)
+	var nzbs []NZB
+	err := appConfig.Store.Find(&nzbs, bolthold.Where("IMDB").Ne(""))
+	if err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("getting NZBs from database")
+	}
+	var data string
+	for _, nzb := range nzbs {
+		data = data + fmt.Sprintf("IMDB: %s, Title: %s, Link: %s, Length: %d\n", nzb.IMDB, nzb.Title, nzb.Link, nzb.Length)
+	}
+	if _, err := w.Write([]byte(data)); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("writing response")
+	}
+}
 func handleAPIRequests(appConfig *App) {
 	http.HandleFunc("/api/notify", func(w http.ResponseWriter, r *http.Request) {
 		handleApiNotify(w, r, *appConfig)
+	})
+	http.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
+		listMedia(w, *appConfig)
+	})
+	http.HandleFunc("/nzbs", func(w http.ResponseWriter, r *http.Request) {
+		listNZBs(w, *appConfig)
 	})
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
