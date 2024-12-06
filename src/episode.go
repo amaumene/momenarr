@@ -23,9 +23,9 @@ func (app App) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
 			Title:  ep.Title,
 			Year:   show.Year,
 		}
-		err := app.Store.Upsert(ep.IMDB, media)
-		if err != nil {
-			return fmt.Errorf("upserting episode into database: %v", err)
+		err := app.Store.Insert(ep.IMDB, media)
+		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
+			return fmt.Errorf("inserting episode into database: %v", err)
 		}
 	}
 	return nil

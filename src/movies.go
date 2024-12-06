@@ -19,9 +19,9 @@ func (app App) insertMovieToDB(movie *trakt.Movie) error {
 			Year:   movie.Year,
 			OnDisk: false,
 		}
-		err := app.Store.Upsert(string(movie.IMDB), media)
-		if err != nil {
-			return fmt.Errorf("upserting movie into database: %v", err)
+		err := app.Store.Insert(string(movie.IMDB), media)
+		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
+			return fmt.Errorf("scanning movie item: %v", err)
 		}
 	}
 	return nil
