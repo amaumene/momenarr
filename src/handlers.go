@@ -18,7 +18,7 @@ func listMedia(w http.ResponseWriter, appConfig App) {
 	}
 	var data string
 	for _, media := range medias {
-		data = data + fmt.Sprintf("IMDB: %s, Title: %s, OnDisk: %t\n", media.IMDB, media.Title, media.OnDisk)
+		data = data + fmt.Sprintf("IMDB: %s, Title: %s, OnDisk: %t, File:%s\n", media.IMDB, media.Title, media.OnDisk, media.File)
 	}
 	if _, err := w.Write([]byte(data)); err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")
