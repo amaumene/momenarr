@@ -1,9 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/amaumene/momenarr/bolthold"
-	"github.com/amaumene/momenarr/nzbget"
+	"github.com/amaumene/momenarr/sabnzbd"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"os"
@@ -12,60 +13,40 @@ import (
 )
 
 func (app App) createDownload(IMDB string, nzb NZB) error {
-	input, err := createNZBGetInput(nzb, IMDB)
-	if err != nil {
-		return fmt.Errorf("creating NZBGet input: %w", err)
+	var media Media
+	if err := app.Store.Get(IMDB, &media); err != nil {
+		return fmt.Errorf("getting media from database: %w", err)
 	}
-
-	queue, err := app.NZBGet.ListGroups()
-	if err != nil {
-		return fmt.Errorf("getting NZBGet queue: %w", err)
-	}
-	for _, item := range queue {
-		if item.NZBName == nzb.Title {
-			log.WithFields(log.Fields{
-				"IMDB":  IMDB,
-				"Title": nzb.Title,
-			}).Info("NZB already in queue, skipping")
-			return nil
+	if media.DownloadID == "" {
+		ctx := context.Background()
+		response, err := app.SabNZBd.AddFromUrl(ctx, sabnzbd.AddNzbRequest{Url: nzb.Link, Category: "momenarr"})
+		if err != nil {
+			return fmt.Errorf("creating NZB transfer: %w", err)
 		}
+
+		err = updateMediaDownloadID(app.Store, IMDB, response.NzoIDs)
+		if err != nil {
+			return fmt.Errorf("updating DownloadID in database: %w", err)
+		}
+		logDownloadStart(IMDB, nzb.Title, response.NzoIDs)
 	}
-	downloadID, err := app.NZBGet.Append(input)
-	if err != nil || downloadID <= 0 {
-		return fmt.Errorf("creating NZBGet transfer: %w", err)
-	}
-	err = updateMediaDownloadID(app.Store, IMDB, downloadID)
-	if err != nil {
-		return fmt.Errorf("updating DownloadID in database: %w", err)
-	}
-	logDownloadStart(IMDB, nzb.Title, downloadID)
 	return nil
 }
 
-func createNZBGetInput(nzb NZB, IMDB string) (*nzbget.AppendInput, error) {
-	return &nzbget.AppendInput{
-		Filename:   nzb.Title + ".nzb",
-		Content:    nzb.Link,
-		Category:   "momenarr",
-		DupeMode:   "score",
-		Parameters: []*nzbget.Parameter{{Name: "IMDB", Value: IMDB}},
-	}, nil
-}
-
-func updateMediaDownloadID(store *bolthold.Store, IMDB string, downloadID int64) error {
+func updateMediaDownloadID(store *bolthold.Store, IMDB string, downloadID []string) error {
 	var media Media
 	if err := store.Get(IMDB, &media); err != nil {
 		return fmt.Errorf("getting media from database: %w", err)
 	}
-	media.DownloadID = downloadID
+	media.DownloadID = downloadID[0]
 	return store.Update(IMDB, media)
 }
 
-func logDownloadStart(IMDB, title string, downloadID int64) {
+func logDownloadStart(IMDB, title string, downloadID []string) {
 	log.WithFields(log.Fields{
 		"IMDB":       IMDB,
 		"Title":      title,
-		"DownloadID": downloadID,
+		"DownloadID": downloadID[0],
 	}).Info("Download started successfully")
 }
 
@@ -182,7 +163,7 @@ func main() {
 	app.Config = setConfig()
 	traktApiKey, traktClientSecret := getEnvTrakt()
 	app.TraktToken = app.setUpTrakt(traktApiKey, traktClientSecret)
-	app.NZBGet = setNZBGet()
+	app.SabNZBd = setSabNZBd()
 
 	var err error
 	app.Store, err = bolthold.Open(app.Config.DataDir+"/data.db", 0666, nil)

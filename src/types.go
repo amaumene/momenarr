@@ -2,15 +2,16 @@ package main
 
 import (
 	"github.com/amaumene/momenarr/bolthold"
-	"github.com/amaumene/momenarr/nzbget"
+	"github.com/amaumene/momenarr/sabnzbd"
 	"github.com/amaumene/momenarr/trakt"
 )
 
 type App struct {
 	TraktToken *trakt.Token
 	Store      *bolthold.Store
-	NZBGet     *nzbget.NZBGet
-	Config     *Config
+	//NZBGet     *nzbget.NZBGet
+	SabNZBd *sabnzbd.Client
+	Config  *Config
 }
 
 type Config struct {
@@ -29,7 +30,7 @@ type Media struct {
 	Year       int64
 	OnDisk     bool
 	File       string
-	DownloadID int64
+	DownloadID string
 }
 
 type NZB struct {
@@ -41,9 +42,9 @@ type NZB struct {
 }
 
 type Notification struct {
+	Id       string `json:"id"`
 	Name     string `json:"name"`
 	Category string `json:"category"`
 	Status   string `json:"status"`
-	IMDB     string `json:"imdb"`
 	Dir      string `json:"dir"`
 }

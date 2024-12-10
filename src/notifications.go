@@ -5,7 +5,6 @@ import (
 	"github.com/amaumene/momenarr/bolthold"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 func downloadSuccess(notification Notification, app App, media Media) error {
@@ -27,7 +26,8 @@ func downloadSuccess(notification Notification, app App, media Media) error {
 
 	media.File = destPath
 	media.OnDisk = true
-	if err := app.Store.Update(notification.IMDB, &media); err != nil {
+	media.DownloadID = "downloaded"
+	if err := app.Store.Update(media.IMDB, &media); err != nil {
 		return fmt.Errorf("update media path/status in database: %v", err)
 	}
 	return nil
@@ -52,47 +52,50 @@ func downloadFailure(notification Notification, app App) error {
 }
 
 func deleteFromHistory(media Media, app App) error {
-	for i := 0; i < 3; i++ {
-		history, err := app.NZBGet.History(false)
-		if err != nil {
-			return fmt.Errorf("getting NZBGet history: %v", err)
-		}
-		for _, item := range history {
-			if item.NZBID == media.DownloadID {
-				IDs := []int64{
-					media.DownloadID,
-				}
-				result, err := app.NZBGet.EditQueue("HistoryFinalDelete", "", IDs)
-				if err != nil || result == false {
-					return fmt.Errorf("failed to delete NZBGet download: %v", err)
-				} else {
-					return nil
-				}
-			}
-		}
-		time.Sleep(10 * time.Second)
-	}
+	//for i := 0; i < 3; i++ {
+	//	history, err := app.NZBGet.History(false)
+	//	if err != nil {
+	//		return fmt.Errorf("getting NZBGet history: %v", err)
+	//	}
+	//	for _, item := range history {
+	//		if item.NZBID == media.DownloadID {
+	//			IDs := []int64{
+	//				media.DownloadID,
+	//			}
+	//			result, err := app.NZBGet.EditQueue("HistoryFinalDelete", "", IDs)
+	//			if err != nil || result == false {
+	//				return fmt.Errorf("failed to delete NZBGet download: %v", err)
+	//			} else {
+	//				return nil
+	//			}
+	//		}
+	//	}
+	//	time.Sleep(10 * time.Second)
+	//}
 	return nil
 }
 
 func processNotification(notification Notification, app App) error {
+	fmt.Printf("notification: %+v\n", notification)
 	if notification.Category == "momenarr" {
-		var media Media
-		err := app.Store.Get(notification.IMDB, &media)
+		var media []Media
+		err := app.Store.Find(&media, bolthold.Where("DownloadID").Eq(notification.Id).Limit(1))
 		if err != nil {
 			return fmt.Errorf("finding media: %v", err)
 		}
-		if notification.Status == "SUCCESS" {
-			if err = downloadSuccess(notification, app, media); err != nil {
-				return fmt.Errorf("downloading success: %v", err)
+		if len(media) > 0 {
+			if notification.Status == "" {
+				if err = downloadSuccess(notification, app, media[0]); err != nil {
+					return fmt.Errorf("downloading success: %v", err)
+				}
+			} else {
+				if err = downloadFailure(notification, app); err != nil {
+					return fmt.Errorf("downloading failure: %v", err)
+				}
 			}
-		} else {
-			if err = downloadFailure(notification, app); err != nil {
-				return fmt.Errorf("downloading failure: %v", err)
+			if err = deleteFromHistory(media[0], app); err != nil {
+				return fmt.Errorf("deleting from history: %v", err)
 			}
-		}
-		if err = deleteFromHistory(media, app); err != nil {
-			return fmt.Errorf("deleting from history: %v", err)
 		}
 	}
 	return nil

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/amaumene/momenarr/nzbget"
+	"github.com/amaumene/momenarr/sabnzbd"
 	log "github.com/sirupsen/logrus"
 	"os"
 )
@@ -60,29 +60,52 @@ func getEnvTrakt() (string, string) {
 	return traktApiKey, traktClientSecret
 }
 
-func setNZBGet() *nzbget.NZBGet {
-	nzbgetURL := os.Getenv("NZBGET_URL")
-	if nzbgetURL == "" {
+//func setNZBGet() *nzbget.NZBGet {
+//	nzbgetURL := os.Getenv("NZBGET_URL")
+//	if nzbgetURL == "" {
+//		log.WithFields(log.Fields{
+//			"NZBGET_URL": nzbgetURL,
+//		}).Fatal("Environment variable missing")
+//	}
+//	nzbgetUser := os.Getenv("NZBGET_USER")
+//	if nzbgetUser == "" {
+//		log.WithFields(log.Fields{
+//			"NZBGET_USER": nzbgetUser,
+//		}).Fatal("Environment variable missing")
+//	}
+//	nzbgetPass := os.Getenv("NZBGET_PASS")
+//	if nzbgetPass == "" {
+//		log.WithFields(log.Fields{
+//			"NZBGET_PASS": nzbgetPass,
+//		}).Fatal("Environment variable missing")
+//	}
+//	nzbget := nzbget.New(&nzbget.Config{
+//		URL:  nzbgetURL,
+//		User: nzbgetUser,
+//		Pass: nzbgetPass,
+//	})
+//	return nzbget
+//}
+
+func setSabNZBd() *sabnzbd.Client {
+	sabNzbdURL := os.Getenv("SABNZBD_URL")
+	if sabNzbdURL == "" {
 		log.WithFields(log.Fields{
-			"NZBGET_URL": nzbgetURL,
+			"SABNZBD_URL": sabNzbdURL,
 		}).Fatal("Environment variable missing")
 	}
-	nzbgetUser := os.Getenv("NZBGET_USER")
-	if nzbgetUser == "" {
+	sabNzbdApiKey := os.Getenv("SABNZBD_KEY")
+	if sabNzbdApiKey == "" {
 		log.WithFields(log.Fields{
-			"NZBGET_USER": nzbgetUser,
+			"SABNZBD_KEY": sabNzbdApiKey,
 		}).Fatal("Environment variable missing")
 	}
-	nzbgetPass := os.Getenv("NZBGET_PASS")
-	if nzbgetPass == "" {
-		log.WithFields(log.Fields{
-			"NZBGET_PASS": nzbgetPass,
-		}).Fatal("Environment variable missing")
+
+	opts := sabnzbd.Options{
+		Addr:   sabNzbdURL,
+		ApiKey: sabNzbdApiKey,
 	}
-	nzbget := nzbget.New(&nzbget.Config{
-		URL:  nzbgetURL,
-		User: nzbgetUser,
-		Pass: nzbgetPass,
-	})
-	return nzbget
+	s := sabnzbd.New(opts)
+
+	return s
 }
