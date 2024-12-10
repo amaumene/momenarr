@@ -52,6 +52,11 @@ func downloadFailure(notification Failure, app App) error {
 	}
 	for _, nzb := range nzbs {
 		var media Media
+		err = app.Store.Get(nzb.IMDB, &media)
+		if err != nil {
+			return fmt.Errorf("finding media: %s: %v", nzb.IMDB, err)
+		}
+		media.OnDisk = false
 		media.DownloadID = ""
 		if err := app.Store.Update(nzb.IMDB, &media); err != nil {
 			return fmt.Errorf("update media status in database: %v", err)
