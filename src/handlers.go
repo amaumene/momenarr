@@ -40,8 +40,11 @@ func listNZBs(w http.ResponseWriter, appConfig App) {
 	}
 }
 func handleAPIRequests(appConfig *App) {
-	http.HandleFunc("/api/notify", func(w http.ResponseWriter, r *http.Request) {
-		handleApiNotify(w, r, *appConfig)
+	http.HandleFunc("/api/success", func(w http.ResponseWriter, r *http.Request) {
+		handleApiSuccess(w, r, *appConfig)
+	})
+	http.HandleFunc("/api/failure", func(w http.ResponseWriter, r *http.Request) {
+		handleApiFailure(w, r, *appConfig)
 	})
 	http.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
 		listMedia(w, *appConfig)
@@ -63,7 +66,7 @@ func handleAPIRequests(appConfig *App) {
 	})
 }
 
-func handleApiNotify(w http.ResponseWriter, r *http.Request, appConfig App) {
+func handleApiSuccess(w http.ResponseWriter, r *http.Request, appConfig App) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
@@ -80,14 +83,51 @@ func handleApiNotify(w http.ResponseWriter, r *http.Request, appConfig App) {
 		}
 	}()
 
-	var notification Notification
+	var notification Success
 	err = json.Unmarshal(body, &notification)
 	if err != nil {
 		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
 		return
 	}
 	go func() {
-		err := processNotification(notification, appConfig)
+		err := processSuccess(notification, appConfig)
+		if err != nil {
+			log.WithFields(log.Fields{"err": err}).Error("processing notification")
+		}
+	}()
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write([]byte(`{"message": "Data received and processing started"}`)); err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("writing response")
+	}
+}
+
+func handleApiFailure(w http.ResponseWriter, r *http.Request, appConfig App) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			log.WithFields(log.Fields{"err": err}).Error("failed to close request body")
+		}
+	}()
+
+	var notification Failure
+	err = json.Unmarshal(body, &notification)
+	if err != nil {
+		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
+		return
+	}
+	go func() {
+		err := processFailure(notification, appConfig)
 		if err != nil {
 			log.WithFields(log.Fields{"err": err}).Error("processing notification")
 		}

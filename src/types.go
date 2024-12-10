@@ -41,10 +41,16 @@ type NZB struct {
 	Failed bool
 }
 
-type Notification struct {
-	Id       string `json:"id"`
+type Failure struct {
+	Type    string `json:"type"`
+	Title   string `json:"title"`
+	Message string `json:"message"`
+}
+
+type Success struct {
 	Name     string `json:"name"`
+	Id       string `json:"id"`
 	Category string `json:"category"`
-	Status   string `json:"status"`
 	Dir      string `json:"dir"`
+	Status   string `json:"status"`
 }
