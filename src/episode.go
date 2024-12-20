@@ -10,11 +10,7 @@ import (
 )
 
 func (app App) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
-	if show.IMDB == "" || int64(show.TVDB) == 0 || ep.Number < 0 || ep.Season < 0 {
-		log.WithFields(log.Fields{
-			"media": show.Title,
-		}).Error("episode missing IMDB, TVDB, episode number or season number")
-	} else {
+	if len(show.IMDB) > 0 || int64(show.TVDB) > 0 || ep.Number > 0 || ep.Season > 0 {
 		media := Media{
 			TVDB:   int64(show.TVDB),
 			Number: ep.Number,
@@ -63,8 +59,7 @@ func (app App) syncEpisodesFromFavorites() (error, []interface{}) {
 					log.WithFields(log.Fields{
 						"err": err,
 					}).Error("getting next episode from database")
-				}
-				if err := app.insertEpisodeToDB(item.Show, nextEpisode); err != nil {
+				} else if err := app.insertEpisodeToDB(item.Show, nextEpisode); err != nil {
 					log.WithFields(log.Fields{
 						"err": err,
 					}).Error("inserting episode into database")
@@ -103,8 +98,7 @@ func (app App) syncEpisodesFromWatchlist() (error, []interface{}) {
 			log.WithFields(log.Fields{
 				"err": err,
 			}).Error("getting show progress")
-		}
-		if err := app.insertEpisodeToDB(item.Show, showProgress.NextEpisode); err != nil {
+		} else if err := app.insertEpisodeToDB(item.Show, showProgress.NextEpisode); err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
 			}).Error("inserting episode into database")
