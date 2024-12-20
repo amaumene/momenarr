@@ -10,7 +10,7 @@ import (
 )
 
 func (app App) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
-	if len(show.IMDB) == 0 || int64(show.TVDB) == 0 || ep.Number < 0 || ep.Season < 0 {
+	if show.IMDB == "" || int64(show.TVDB) == 0 || ep.Number < 0 || ep.Season < 0 {
 		log.WithFields(log.Fields{
 			"media": show.Title,
 		}).Error("episode missing IMDB, TVDB, episode number or season number")

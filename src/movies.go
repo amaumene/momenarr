@@ -8,7 +8,7 @@ import (
 )
 
 func (app App) insertMovieToDB(movie *trakt.Movie) error {
-	if len(string(movie.IMDB)) == 0 {
+	if movie.IMDB == "" {
 		log.WithFields(log.Fields{
 			"media": movie.Title,
 		}).Error("movie missing IMDB")
