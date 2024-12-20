@@ -10,7 +10,7 @@ import (
 )
 
 func (app App) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
-	if len(show.IMDB) > 0 || int64(show.TVDB) > 0 || ep.Number > 0 || ep.Season > 0 {
+	if len(show.IMDB) > 0 && int64(show.TVDB) > 0 && ep.Number > 0 && ep.Season > 0 {
 		media := Media{
 			TVDB:   int64(show.TVDB),
 			Number: ep.Number,
