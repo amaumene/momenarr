@@ -89,17 +89,15 @@ func handleApiSuccess(w http.ResponseWriter, r *http.Request, appConfig App) {
 		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
 		return
 	}
-	go func() {
-		err := processSuccess(notification, appConfig)
-		if err != nil {
-			log.WithFields(log.Fields{"err": err}).Error("processing notification")
-		}
-	}()
 
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(`{"message": "Data received and processing started"}`)); err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")
+	}
+	err = processSuccess(notification, appConfig)
+	if err != nil {
+		log.WithFields(log.Fields{"err": err}).Error("processing notification")
 	}
 }
 
