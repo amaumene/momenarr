@@ -40,10 +40,14 @@ func (app App) syncMoviesFromWatchlist() (error, []interface{}) {
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
-			return fmt.Errorf("scanning movie item: %v", err), nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("scanning movie item")
 		}
 		if err := app.insertMovieToDB(item.Movie); err != nil {
-			return err, nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("inserting movie into database")
 		}
 		movies = append(movies, string(item.Movie.IMDB))
 	}
@@ -65,10 +69,14 @@ func (app App) syncMoviesFromFavorites() (error, []interface{}) {
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
-			return fmt.Errorf("scanning movie item: %v", err), nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("scanning movie item")
 		}
 		if err := app.insertMovieToDB(item.Movie); err != nil {
-			return err, nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("inserting movie into database")
 		}
 		movies = append(movies, string(item.Movie.IMDB))
 	}

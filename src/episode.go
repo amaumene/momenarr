@@ -43,23 +43,31 @@ func (app App) syncEpisodesFromFavorites() (error, []interface{}) {
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
-			return fmt.Errorf("scanning episode item: %v", err), nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("scanning episode item")
 		}
 		progressParams := &trakt.ProgressParams{
 			Params: trakt.Params{OAuth: app.TraktToken.AccessToken},
 		}
 		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
 		if err != nil {
-			return fmt.Errorf("getting show progress: %v", err), nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("getting show progress")
 		}
 		if showProgress.NextEpisode != nil {
 			for i := 0; i < 3; i++ {
 				nextEpisode, err := episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
 				if err != nil {
-					return fmt.Errorf("getting next episode from database: %v", err), nil
+					log.WithFields(log.Fields{
+						"err": err,
+					}).Error("getting next episode from database")
 				}
 				if err := app.insertEpisodeToDB(item.Show, nextEpisode); err != nil {
-					return err, nil
+					log.WithFields(log.Fields{
+						"err": err,
+					}).Error("inserting episode into database")
 				}
 				episodes = append(episodes, string(nextEpisode.IMDB))
 			}
@@ -83,17 +91,23 @@ func (app App) syncEpisodesFromWatchlist() (error, []interface{}) {
 	for iterator.Next() {
 		item, err := iterator.Entry()
 		if err != nil {
-			return fmt.Errorf("scanning episode item: %v", err), nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("scanning episode item")
 		}
 		progressParams := &trakt.ProgressParams{
 			Params: trakt.Params{OAuth: app.TraktToken.AccessToken},
 		}
 		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
 		if err != nil {
-			return fmt.Errorf("getting show progress: %v", err), nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("getting show progress")
 		}
 		if err := app.insertEpisodeToDB(item.Show, showProgress.NextEpisode); err != nil {
-			return err, nil
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("inserting episode into database")
 		}
 		episodes = append(episodes, string(item.Show.IMDB))
 	}
