@@ -68,30 +68,6 @@ func downloadFailure(notification Failure, app App) error {
 	return nil
 }
 
-//func deleteFromHistory(media Media, app App) error {
-//for i := 0; i < 3; i++ {
-//	history, err := app.NZBGet.History(false)
-//	if err != nil {
-//		return fmt.Errorf("getting NZBGet history: %v", err)
-//	}
-//	for _, item := range history {
-//		if item.NZBID == media.DownloadID {
-//			IDs := []int64{
-//				media.DownloadID,
-//			}
-//			result, err := app.NZBGet.EditQueue("HistoryFinalDelete", "", IDs)
-//			if err != nil || result == false {
-//				return fmt.Errorf("failed to delete NZBGet download: %v", err)
-//			} else {
-//				return nil
-//			}
-//		}
-//	}
-//	time.Sleep(10 * time.Second)
-//}
-//return nil
-//}
-
 func processSuccess(notification Success, app App) error {
 	var media []Media
 	err := app.Store.Find(&media, bolthold.Where("DownloadID").Eq(notification.Id).Limit(1))
@@ -104,15 +80,11 @@ func processSuccess(notification Success, app App) error {
 				return fmt.Errorf("downloading success: %v", err)
 			}
 		}
-		//if err = deleteFromHistory(media[0], app); err != nil {
-		//	return fmt.Errorf("deleting from history: %v", err)
-		//}
 	}
 	return nil
 }
 
 func processFailure(notification Failure, app App) error {
-	fmt.Printf("notification: %+v\n", notification)
 	if err := downloadFailure(notification, app); err != nil {
 		return fmt.Errorf("downloading failure: %v", err)
 	}
