@@ -58,8 +58,15 @@ func (app App) syncEpisodesFromFavorites() (error, []interface{}) {
 				if err != nil {
 					log.WithFields(log.Fields{
 						"err": err,
-					}).Error("getting next episode from database")
-				} else if err := app.insertEpisodeToDB(item.Show, nextEpisode); err != nil {
+					}).Error("getting next episode from trakt")
+					nextEpisode, err = episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season+int64(1), 1, nil)
+					if err != nil {
+						log.WithFields(log.Fields{
+							"err": err,
+						}).Error("probably no more episodes")
+					}
+				}
+				if err := app.insertEpisodeToDB(item.Show, nextEpisode); err != nil {
 					log.WithFields(log.Fields{
 						"err": err,
 					}).Error("inserting episode into database")
