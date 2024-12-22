@@ -5,6 +5,7 @@ import (
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/trakt"
 	"github.com/amaumene/momenarr/trakt/sync"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"time"
 )
@@ -47,20 +48,27 @@ func (app App) removeMedia(IMDB string) error {
 	var media Media
 	err := app.Store.Get(IMDB, &media)
 	if err != nil {
-		return fmt.Errorf("finding media: %s: %v", IMDB, err)
-	} else {
-		err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("IMDB").Eq(media.IMDB))
-		if err != nil {
-			return fmt.Errorf("deleting NZBs: %s: %v", IMDB, err)
-		}
-		err = app.Store.Delete(IMDB, &media)
-		if err != nil {
-			return fmt.Errorf("deleting %s: %v", IMDB, err)
-		}
-		err = os.Remove(media.File)
-		if err != nil {
-			return fmt.Errorf("deleting %s: %v", IMDB, err)
-		}
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Error("finding media")
+	}
+	err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("IMDB").Eq(media.IMDB))
+	if err != nil {
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Error("deleting NZBs")
+	}
+	err = os.Remove(media.File)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Error("deleting media")
+	}
+	err = app.Store.Delete(IMDB, &media)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Error("deleting database entry")
 	}
 	return nil
 }
