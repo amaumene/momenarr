@@ -106,7 +106,8 @@ func (app App) syncEpisodesFromWatchlist() (error, []interface{}) {
 			log.WithFields(log.Fields{
 				"err": err,
 			}).Error("getting show progress")
-		} else if err := app.insertEpisodeToDB(item.Show, showProgress.NextEpisode); err != nil {
+		}
+		if err := app.insertEpisodeToDB(item.Show, showProgress.NextEpisode); err != nil {
 			log.WithFields(log.Fields{
 				"err": err,
 			}).Error("inserting episode into database")
