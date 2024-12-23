@@ -60,6 +60,7 @@ func (app App) syncEpisodesFromFavorites() (error, []interface{}) {
 						"err": err,
 					}).Error("getting next episode from trakt")
 					nextEpisode, err = episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season+int64(1), 1, nil)
+					fmt.Println(nextEpisode)
 					if err != nil {
 						log.WithFields(log.Fields{
 							"err": err,

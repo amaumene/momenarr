@@ -18,7 +18,7 @@ func listMedia(w http.ResponseWriter, appConfig App) {
 	}
 	var data string
 	for _, media := range medias {
-		data = data + fmt.Sprintf("IMDB: %s\t, Title: %s\t, OnDisk: %t\t, DownloadID:%s\n", media.IMDB, media.Title, media.OnDisk, media.DownloadID)
+		data = data + fmt.Sprintf("IMDB: %s\t\tTitle: %s\t\tOnDisk: %t\t\tFile:%s\n", media.IMDB, media.Title, media.OnDisk, media.File)
 	}
 	if _, err := w.Write([]byte(data)); err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")
@@ -33,7 +33,7 @@ func listNZBs(w http.ResponseWriter, appConfig App) {
 	}
 	var data string
 	for _, nzb := range nzbs {
-		data = data + fmt.Sprintf("IMDB: %s\t, Title: %s\t, Link: %s\t, Length: %d\n", nzb.IMDB, nzb.Title, nzb.Link, nzb.Length)
+		data = data + fmt.Sprintf("IMDB: %s\t\tTitle: %s\t\tLink: %s\t\tLength: %d\n", nzb.IMDB, nzb.Title, nzb.Link, nzb.Length)
 	}
 	if _, err := w.Write([]byte(data)); err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")
