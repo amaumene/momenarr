@@ -110,12 +110,7 @@ func (app App) syncFromTrakt() {
 		}).Error("retrieving existing media entries from database")
 	}
 	for _, entry := range existingEntries {
-		err = app.Store.Delete(entry.IMDB, &entry)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"err": err,
-			}).Error("deleting existing media entry from database")
-		}
+		app.removeMedia(entry.IMDB)
 	}
 }
 
