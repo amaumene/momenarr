@@ -8,7 +8,7 @@ import (
 
 func SearchTVShow(TVDB int64, showSeason int64, showEpisode int64, newsNabHost string, newsNabApiKey string) (string, error) {
 	// Construct the URL with the provided arguments
-	url := fmt.Sprintf("https://%s/api?apikey=%s&t=tvsearch&tvdbid=%d&season=%d&ep=%d&o=json", newsNabHost, newsNabApiKey, TVDB, showSeason, showEpisode)
+	url := fmt.Sprintf("https://%s/api?apikey=%s&t=tvsearch&tvdbid=%d&season=%d&ep=%d", newsNabHost, newsNabApiKey, TVDB, showSeason, showEpisode)
 	// Make the HTTP GET request
 	resp, err := http.Get(url)
 	if err != nil {
@@ -37,7 +37,8 @@ func SearchMovie(IMDB string, newsNabHost string, newsNabApiKey string) (string,
 		return "", fmt.Errorf("invalid IMDB ID")
 	}
 	// Construct the URL with the provided arguments
-	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%s&o=json", newsNabHost, newsNabApiKey, IMDB)
+	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%s", newsNabHost, newsNabApiKey, IMDB)
+	fmt.Println(url)
 	// Make the HTTP GET request
 	resp, err := http.Get(url)
 	if err != nil {

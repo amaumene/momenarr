@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/newsnab"
@@ -47,22 +47,22 @@ func (app App) getNzbFromDB(IMDB string) (NZB, error) {
 func (app App) searchNZB(media Media) (newsnab.Feed, error) {
 	var feed newsnab.Feed
 	if media.Number > 0 && media.Season > 0 {
-		jsonResponse, err := newsnab.SearchTVShow(media.TVDB, media.Season, media.Number, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
+		xmlResponse, err := newsnab.SearchTVShow(media.TVDB, media.Season, media.Number, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
 		if err != nil {
 			return feed, fmt.Errorf("searching NZB for episode: %v", err)
 		}
-		err = json.Unmarshal([]byte(jsonResponse), &feed)
+		err = xml.Unmarshal([]byte(xmlResponse), &feed)
 		if err != nil {
-			return feed, fmt.Errorf("unmarshalling JSON NZB episode: %v", err)
+			return feed, fmt.Errorf("unmarshalling XML NZB episode: %v", err)
 		}
 	} else {
-		jsonResponse, err := newsnab.SearchMovie(media.IMDB, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
+		xmlResponse, err := newsnab.SearchMovie(media.IMDB, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
 		if err != nil {
 			return feed, fmt.Errorf("searching NZB for movie: %v", err)
 		}
-		err = json.Unmarshal([]byte(jsonResponse), &feed)
+		err = xml.Unmarshal([]byte(xmlResponse), &feed)
 		if err != nil {
-			return feed, fmt.Errorf("unmarshalling JSON NZB movie: %v", err)
+			return feed, fmt.Errorf("unmarshalling XML NZB movie: %v", err)
 		}
 	}
 	return feed, nil

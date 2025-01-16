@@ -61,5 +61,6 @@ func (app App) removeMedia(IMDB string) error {
 	if err != nil {
 		return fmt.Errorf("deleting database entry for %s: %v", IMDB, err)
 	}
+	fmt.Printf("Deleted %s\n", media.File)
 	return nil
 }
