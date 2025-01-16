@@ -114,7 +114,7 @@ func (app App) insertNZBItems(media Media, items []newsnab.Item) error {
 
 			nzb := NZB{
 				IMDB:   media.IMDB,
-				Link:   item.Link,
+				Link:   item.Enclosure.URL,
 				Length: length,
 				Title:  item.Title,
 			}
