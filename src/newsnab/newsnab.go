@@ -38,7 +38,6 @@ func SearchMovie(IMDB string, newsNabHost string, newsNabApiKey string) (string,
 	}
 	// Construct the URL with the provided arguments
 	url := fmt.Sprintf("https://%s/api?apikey=%s&t=movie&imdbid=%s", newsNabHost, newsNabApiKey, IMDB)
-	fmt.Println(url)
 	// Make the HTTP GET request
 	resp, err := http.Get(url)
 	if err != nil {

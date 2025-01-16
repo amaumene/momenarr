@@ -1,51 +1,50 @@
 package newsnab
 
-type Feed struct {
-	Attributes FeedAttributes `json:"@attributes"`
-	Channel    Channel        `json:"channel"`
-}
+import "encoding/xml"
 
-type FeedAttributes struct {
-	Version string `json:"version"`
+type Feed struct {
+	XMLName xml.Name `xml:"rss"`
+	Channel Channel  `xml:"channel"`
 }
 
 type Channel struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Link        string   `json:"link"`
-	Language    string   `json:"language"`
-	WebMaster   string   `json:"webMaster"`
-	Category    struct{} `json:"category"`
-	Response    Response `json:"response"`
-	Item        []Item   `json:"item"`
+	Title       string   `xml:"title"`
+	Link        string   `xml:"link"`
+	Description string   `xml:"description"`
+	Language    string   `xml:"language"`
+	WebMaster   string   `xml:"webMaster"`
+	Response    Response `xml:"response"`
+	Items       []Item   `xml:"item"`
 }
 
 type Response struct {
-	Attributes ResponseAttributes `json:"@attributes"`
-}
-
-type ResponseAttributes struct {
-	Offset string `json:"offset"`
-	Total  string `json:"total"`
+	Offset string `xml:"offset,attr"`
+	Total  string `xml:"total,attr"`
 }
 
 type Item struct {
-	Title       string    `json:"title"`
-	GUID        string    `json:"guid"`
-	Link        string    `json:"link"`
-	Comments    string    `json:"comments"`
-	PubDate     string    `json:"pubDate"`
-	Category    string    `json:"category"`
-	Description string    `json:"description"`
-	Enclosure   Enclosure `json:"enclosure"`
+	Title       string    `xml:"title"`
+	GUID        GUID      `xml:"guid"`
+	Link        string    `xml:"link"`
+	Comments    string    `xml:"comments"`
+	Description string    `xml:"description"`
+	PubDate     string    `xml:"pubDate"`
+	Enclosure   Enclosure `xml:"enclosure"`
+	NewznabAttr []Attr    `xml:"attr,omitempty"` // Captures newznab-specific attributes
+}
+
+type GUID struct {
+	IsPermaLink string `xml:"isPermaLink,attr"`
+	Value       string `xml:",chardata"`
 }
 
 type Enclosure struct {
-	Attributes EnclosureAttributes `json:"@attributes"`
+	URL    string `xml:"url,attr"`
+	Length string `xml:"length,attr"`
+	Type   string `xml:"type,attr"`
 }
 
-type EnclosureAttributes struct {
-	URL    string `json:"url"`
-	Length string `json:"length"`
-	Type   string `json:"type"`
+type Attr struct {
+	Name  string `xml:"name,attr"`
+	Value string `xml:"value,attr"`
 }

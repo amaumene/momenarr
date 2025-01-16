@@ -9,9 +9,8 @@ import (
 type App struct {
 	TraktToken *trakt.Token
 	Store      *bolthold.Store
-	//NZBGet     *nzbget.NZBGet
-	SabNZBd *sabnzbd.Client
-	Config  *Config
+	SabNZBd    *sabnzbd.Client
+	Config     *Config
 }
 
 type Config struct {

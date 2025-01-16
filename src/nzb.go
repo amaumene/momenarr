@@ -107,7 +107,7 @@ func (app App) insertNZBItems(media Media, items []newsnab.Item) error {
 		}
 
 		if shouldInsert {
-			length, err := strconv.ParseInt(item.Enclosure.Attributes.Length, 10, 64)
+			length, err := strconv.ParseInt(item.Enclosure.Length, 10, 64)
 			if err != nil {
 				return fmt.Errorf("converting NZB media length to int64: %v", err)
 			}
@@ -118,7 +118,7 @@ func (app App) insertNZBItems(media Media, items []newsnab.Item) error {
 				Length: length,
 				Title:  item.Title,
 			}
-			err = app.Store.Insert(strings.TrimPrefix(item.GUID, "https://nzbs.in/details/"), nzb)
+			err = app.Store.Insert(strings.TrimPrefix(item.GUID.Value, "https://nzbs.in/details/"), nzb)
 			if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 				return fmt.Errorf("inserting NZB media into database: %v", err)
 			}
@@ -139,8 +139,8 @@ func (app App) populateNZB() error {
 		if err != nil {
 			return err
 		}
-		if len(feed.Channel.Item) > 0 {
-			err := app.insertNZBItems(media, feed.Channel.Item)
+		if len(feed.Channel.Items) > 0 {
+			err := app.insertNZBItems(media, feed.Channel.Items)
 			if err != nil {
 				return err
 			}
