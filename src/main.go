@@ -15,18 +15,18 @@ import (
 func (app App) createDownload(IMDB string, nzb NZB) error {
 	var media Media
 	if err := app.Store.Get(IMDB, &media); err != nil {
-		return fmt.Errorf("getting media from database: %w", err)
+		return fmt.Errorf("getting media from database: %s", err)
 	}
 	if media.DownloadID == "" {
 		ctx := context.Background()
 		response, err := app.SabNZBd.AddFromUrl(ctx, sabnzbd.AddNzbRequest{Url: nzb.Link, Category: "momenarr"})
 		if err != nil {
-			return fmt.Errorf("creating NZB transfer: %w", err)
+			return fmt.Errorf("creating NZB transfer: %s", err)
 		}
 
 		err = updateMediaDownloadID(app.Store, IMDB, response.NzoIDs)
 		if err != nil {
-			return fmt.Errorf("updating DownloadID in database: %w", err)
+			return fmt.Errorf("updating DownloadID in database: %s", err)
 		}
 		logDownloadStart(IMDB, nzb.Title, response.NzoIDs)
 	}

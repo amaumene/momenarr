@@ -47,7 +47,7 @@ func (app App) getNzbFromDB(IMDB string) (NZB, error) {
 func (app App) searchNZB(media Media) (newsnab.Feed, error) {
 	var feed newsnab.Feed
 	if media.Number > 0 && media.Season > 0 {
-		xmlResponse, err := newsnab.SearchTVShow(media.IMDB, media.Season, media.Number, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
+		xmlResponse, err := newsnab.SearchTVShow(media.IMDBSeason, media.Season, media.Number, app.Config.NewsNabHost, app.Config.NewsNabApiKey)
 		if err != nil {
 			return feed, fmt.Errorf("searching NZB for episode: %v", err)
 		}
@@ -118,7 +118,6 @@ func (app App) insertNZBItems(media Media, items []newsnab.Item) error {
 				Length: length,
 				Title:  item.Title,
 			}
-			fmt.Printf("name: %s imdb: %s\n", item.Title, media.IMDB)
 			err = app.Store.Insert(strings.TrimPrefix(item.GUID.Value, "https://nzbs.in/details/"), nzb)
 			if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 				return fmt.Errorf("inserting NZB media into database: %v", err)

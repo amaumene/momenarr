@@ -12,11 +12,12 @@ import (
 func (app App) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
 	if len(show.IMDB) > 0 && ep.Number > 0 && ep.Season > 0 {
 		media := Media{
-			Number: ep.Number,
-			Season: ep.Season,
-			IMDB:   string(show.IMDB),
-			Title:  ep.Title,
-			Year:   show.Year,
+			Number:     ep.Number,
+			Season:     ep.Season,
+			IMDB:       string(ep.IMDB),
+			IMDBSeason: string(show.IMDB),
+			Title:      ep.Title,
+			Year:       show.Year,
 		}
 		err := app.Store.Insert(ep.IMDB, media)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {

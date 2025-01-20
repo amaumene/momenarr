@@ -22,6 +22,7 @@ type Config struct {
 
 type Media struct {
 	IMDB       string `boltholdIndex:"IMDB"`
+	IMDBSeason string
 	Number     int64
 	Season     int64
 	Title      string
