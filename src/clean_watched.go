@@ -49,18 +49,21 @@ func (app App) removeMedia(IMDB string) error {
 	if err != nil {
 		return fmt.Errorf("finding %s in database: %v", IMDB, err)
 	}
-	err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("IMDB").Eq(media.IMDB))
-	if err != nil {
-		return fmt.Errorf("deleting NZBs for %s: %v", IMDB, err)
-	}
-	err = os.Remove(media.File)
-	if err != nil {
-		return fmt.Errorf("deleting %s: %v", media.File, err)
-	}
+
 	err = app.Store.Delete(IMDB, &media)
 	if err != nil {
 		return fmt.Errorf("deleting database entry for %s: %v", IMDB, err)
 	}
-	fmt.Printf("Deleted %s\n", media.File)
+
+	err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("IMDB").Eq(media.IMDB))
+	if err != nil {
+		return fmt.Errorf("deleting NZBs for %s: %v", IMDB, err)
+	}
+
+	err = os.Remove(media.File)
+	if err != nil {
+		return fmt.Errorf("deleting %s: %v", media.File, err)
+	}
+
 	return nil
 }

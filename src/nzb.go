@@ -74,11 +74,6 @@ func readBlacklist(path string) ([]string, error) {
 	if err != nil {
 		return blacklist, fmt.Errorf("opening blacklist file: %v", err)
 	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			fmt.Printf("error closing file: %v\n", err)
-		}
-	}()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -88,6 +83,9 @@ func readBlacklist(path string) ([]string, error) {
 		return blacklist, fmt.Errorf("scanning file: %v", err)
 	}
 
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("error closing file: %v\n", err)
+	}
 	return blacklist, nil
 }
 
