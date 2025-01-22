@@ -8,14 +8,15 @@ import (
 )
 
 func (app App) insertMovieToDB(movie *trakt.Movie) error {
-	if len(movie.IMDB) > 0 {
+	if int64(movie.Trakt) > 0 && len(movie.IMDB) > 0 {
 		media := Media{
+			Trakt:  int64(movie.Trakt),
 			IMDB:   string(movie.IMDB),
 			Title:  movie.Title,
 			Year:   movie.Year,
 			OnDisk: false,
 		}
-		err := app.Store.Insert(string(movie.IMDB), media)
+		err := app.Store.Insert(int64(movie.Trakt), media)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 			return fmt.Errorf("scanning movie item: %v", err)
 		}
@@ -45,7 +46,7 @@ func (app App) syncMoviesFromWatchlist() (error, []interface{}) {
 				"err": err,
 			}).Error("inserting movie into database")
 		}
-		movies = append(movies, string(item.Movie.IMDB))
+		movies = append(movies, int64(item.Movie.Trakt))
 	}
 	if err := iterator.Err(); err != nil {
 		return fmt.Errorf("iterating movie watchlist: %v", err), nil
@@ -74,7 +75,7 @@ func (app App) syncMoviesFromFavorites() (error, []interface{}) {
 				"err": err,
 			}).Error("inserting movie into database")
 		}
-		movies = append(movies, string(item.Movie.IMDB))
+		movies = append(movies, int64(item.Movie.Trakt))
 	}
 	if err := iterator.Err(); err != nil {
 		return fmt.Errorf("iterating movie favorites: %v", err), nil

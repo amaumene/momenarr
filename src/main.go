@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-func (app App) createDownload(IMDB string, nzb NZB) error {
+func (app App) createDownload(Trakt int64, nzb NZB) error {
 	var media Media
-	if err := app.Store.Get(IMDB, &media); err != nil {
+	if err := app.Store.Get(Trakt, &media); err != nil {
 		return fmt.Errorf("getting media from database: %s", err)
 	}
 	if media.DownloadID == "" {
@@ -24,27 +24,27 @@ func (app App) createDownload(IMDB string, nzb NZB) error {
 			return fmt.Errorf("creating NZB transfer: %s", err)
 		}
 
-		err = updateMediaDownloadID(app.Store, IMDB, response.NzoIDs)
+		err = updateMediaDownloadID(app.Store, Trakt, response.NzoIDs)
 		if err != nil {
 			return fmt.Errorf("updating DownloadID in database: %s", err)
 		}
-		logDownloadStart(IMDB, nzb.Title, response.NzoIDs)
+		logDownloadStart(Trakt, nzb.Title, response.NzoIDs)
 	}
 	return nil
 }
 
-func updateMediaDownloadID(store *bolthold.Store, IMDB string, downloadID []string) error {
+func updateMediaDownloadID(store *bolthold.Store, Trakt int64, downloadID []string) error {
 	var media Media
-	if err := store.Get(IMDB, &media); err != nil {
+	if err := store.Get(Trakt, &media); err != nil {
 		return fmt.Errorf("getting media from database: %w", err)
 	}
 	media.DownloadID = downloadID[0]
-	return store.Update(IMDB, media)
+	return store.Update(Trakt, media)
 }
 
-func logDownloadStart(IMDB, title string, downloadID []string) {
+func logDownloadStart(Trakt int64, title string, downloadID []string) {
 	log.WithFields(log.Fields{
-		"IMDB":       IMDB,
+		"TraktID":    Trakt,
 		"Title":      title,
 		"DownloadID": downloadID[0],
 	}).Info("Download started successfully")
@@ -60,7 +60,8 @@ func (app App) downloadNotOnDisk() error {
 		if err != nil {
 			log.WithFields(log.Fields{
 				"err":   err,
-				"media": media.IMDB,
+				"media": media.Trakt,
+				"title": media.Title,
 			}).Error("No NZB found for media")
 		}
 	}
@@ -77,11 +78,11 @@ func findMediasNotOnDisk(store *bolthold.Store) ([]Media, error) {
 }
 
 func (app App) processMediaDownload(media Media) error {
-	nzb, err := app.getNzbFromDB(media.IMDB)
+	nzb, err := app.getNzbFromDB(media.Trakt)
 	if err != nil {
 		return fmt.Errorf("getting NZB from database: %s", err)
 	}
-	err = app.createDownload(media.IMDB, nzb)
+	err = app.createDownload(media.Trakt, nzb)
 	if err != nil {
 		return fmt.Errorf("creating or downloading cached media: %s", err)
 	}
@@ -103,14 +104,14 @@ func (app App) syncFromTrakt() {
 	}
 	merged := append(movies, episodes...)
 	var existingEntries []Media
-	err = app.Store.Find(&existingEntries, bolthold.Where("IMDB").Not().ContainsAny(merged...))
+	err = app.Store.Find(&existingEntries, bolthold.Where("Trakt").Not().ContainsAny(merged...))
 	if err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
 		}).Error("retrieving existing media entries from database")
 	}
 	for _, entry := range existingEntries {
-		app.removeMedia(entry.IMDB)
+		app.removeMedia(entry.Trakt)
 	}
 }
 

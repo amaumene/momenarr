@@ -12,13 +12,14 @@ import (
 func listMedia(w http.ResponseWriter, appConfig App) {
 	w.WriteHeader(http.StatusOK)
 	var medias []Media
-	err := appConfig.Store.Find(&medias, bolthold.Where("IMDB").Ne(""))
+	q := &bolthold.Query{}
+	err := appConfig.Store.Find(&medias, q)
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("getting medias from database")
 	}
 	var data string
 	for _, media := range medias {
-		data = data + fmt.Sprintf("IMDB: %s\t\tTitle: %s\t\tOnDisk: %t\nFile:%s\n", media.IMDB, media.Title, media.OnDisk, media.File)
+		data = data + fmt.Sprintf("IMDB: %s\nTitle: %s\nOnDisk: %t\nFile:%s\n", media.IMDB, media.Title, media.OnDisk, media.File)
 	}
 	if _, err := w.Write([]byte(data)); err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")
@@ -27,13 +28,14 @@ func listMedia(w http.ResponseWriter, appConfig App) {
 func listNZBs(w http.ResponseWriter, appConfig App) {
 	w.WriteHeader(http.StatusOK)
 	var nzbs []NZB
-	err := appConfig.Store.Find(&nzbs, bolthold.Where("IMDB").Ne(""))
+	q := &bolthold.Query{}
+	err := appConfig.Store.Find(&nzbs, q)
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("getting NZBs from database")
 	}
 	var data string
 	for _, nzb := range nzbs {
-		data = data + fmt.Sprintf("IMDB: %s\t\tTitle: %s\t\tLink: %s\t\tLength: %d\n", nzb.IMDB, nzb.Title, nzb.Link, nzb.Length)
+		data = data + fmt.Sprintf("Trakt: %s\nTitle: %s\nLink: %s\nLength: %d\n", nzb.Trakt, nzb.Title, nzb.Link, nzb.Length)
 	}
 	if _, err := w.Write([]byte(data)); err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")

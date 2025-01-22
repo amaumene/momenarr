@@ -10,16 +10,16 @@ import (
 )
 
 func (app App) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
-	if len(show.IMDB) > 0 && ep.Number > 0 && ep.Season > 0 {
+	if int64(ep.Trakt) > 0 && len(show.IMDB) > 0 && ep.Number > 0 && ep.Season > 0 {
 		media := Media{
-			Number:     ep.Number,
-			Season:     ep.Season,
-			IMDB:       string(ep.IMDB),
-			IMDBSeason: string(show.IMDB),
-			Title:      ep.Title,
-			Year:       show.Year,
+			Trakt:  int64(ep.Trakt),
+			Number: ep.Number,
+			Season: ep.Season,
+			IMDB:   string(show.IMDB),
+			Title:  ep.Title,
+			Year:   show.Year,
 		}
-		err := app.Store.Insert(ep.IMDB, media)
+		err := app.Store.Insert(int64(ep.Trakt), media)
 		if err != nil && err.Error() != "This Key already exists in this bolthold for this type" {
 			return fmt.Errorf("inserting episode into database: %v", err)
 		}
@@ -54,12 +54,12 @@ func (app App) syncEpisodesFromFavorites() (error, []interface{}) {
 		}
 		if showProgress.NextEpisode != nil {
 			for i := 0; i < 3; i++ {
-				nextEpisode, err := episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
+				nextEpisode, err := episode.Get(item.Show.Trakt, showProgress.NextEpisode.Season, showProgress.NextEpisode.Number+int64(i), nil)
 				if err != nil {
 					log.WithFields(log.Fields{
 						"err": err,
 					}).Error("getting next episode from trakt")
-					nextEpisode, err = episode.Get(item.Show.IMDB, showProgress.NextEpisode.Season+int64(1), 1, nil)
+					nextEpisode, err = episode.Get(item.Show.Trakt, showProgress.NextEpisode.Season+int64(1), 1, nil)
 					if err != nil {
 						log.WithFields(log.Fields{
 							"err": err,
@@ -71,7 +71,7 @@ func (app App) syncEpisodesFromFavorites() (error, []interface{}) {
 						"err": err,
 					}).Error("inserting episode into database")
 				}
-				episodes = append(episodes, string(nextEpisode.IMDB))
+				episodes = append(episodes, int64(nextEpisode.Trakt))
 			}
 		}
 	}
@@ -111,7 +111,7 @@ func (app App) syncEpisodesFromWatchlist() (error, []interface{}) {
 				"err": err,
 			}).Error("inserting episode into database")
 		}
-		episodes = append(episodes, string(item.Show.IMDB))
+		episodes = append(episodes, int64(item.Show.Trakt))
 	}
 	if err := iterator.Err(); err != nil {
 		return fmt.Errorf("iterating episode watchlist: %v", err), nil

@@ -21,8 +21,8 @@ type Config struct {
 }
 
 type Media struct {
-	IMDB       string `boltholdIndex:"IMDB"`
-	IMDBSeason string
+	Trakt      int64 `boltholdIndex:"Trakt"`
+	IMDB       string
 	Number     int64
 	Season     int64
 	Title      string
@@ -33,7 +33,7 @@ type Media struct {
 }
 
 type NZB struct {
-	IMDB   string `boltholdIndex:"IMDB"`
+	Trakt  int64 `boltholdIndex:"Trakt"`
 	Link   string
 	Length int64
 	Title  string

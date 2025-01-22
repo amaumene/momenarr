@@ -26,12 +26,12 @@ func (app App) cleanWatched() error {
 
 		switch item.Type.String() {
 		case "movie":
-			err = app.removeMedia(string(item.Movie.IMDB))
+			err = app.removeMedia(int64(item.Movie.Trakt))
 			if err != nil {
 				return fmt.Errorf("removing movie: %v", err)
 			}
 		case "episode":
-			err = app.removeMedia(string(item.Episode.IMDB))
+			err = app.removeMedia(int64(item.Episode.Trakt))
 			if err != nil {
 				return fmt.Errorf("removing episode: %v", err)
 			}
@@ -43,21 +43,21 @@ func (app App) cleanWatched() error {
 	return nil
 }
 
-func (app App) removeMedia(IMDB string) error {
+func (app App) removeMedia(Trakt int64) error {
 	var media Media
-	err := app.Store.Get(IMDB, &media)
+	err := app.Store.Get(Trakt, &media)
 	if err != nil {
-		return fmt.Errorf("finding %s in database: %v", IMDB, err)
+		return fmt.Errorf("finding %d in database: %v", Trakt, err)
 	}
 
-	err = app.Store.Delete(IMDB, &media)
+	err = app.Store.Delete(Trakt, &media)
 	if err != nil {
-		return fmt.Errorf("deleting database entry for %s: %v", IMDB, err)
+		return fmt.Errorf("deleting database entry for %d: %v", Trakt, err)
 	}
 
-	err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("IMDB").Eq(media.IMDB))
+	err = app.Store.DeleteMatching(&NZB{}, bolthold.Where("Trakt").Eq(media.Trakt))
 	if err != nil {
-		return fmt.Errorf("deleting NZBs for %s: %v", IMDB, err)
+		return fmt.Errorf("deleting NZBs for %d: %v", Trakt, err)
 	}
 
 	err = os.Remove(media.File)

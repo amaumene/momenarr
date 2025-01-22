@@ -27,7 +27,7 @@ func downloadSuccess(notification Success, app App, media Media) error {
 	media.File = destPath
 	media.OnDisk = true
 	media.DownloadID = "downloaded"
-	if err := app.Store.Update(media.IMDB, &media); err != nil {
+	if err := app.Store.Update(media.Trakt, &media); err != nil {
 		return fmt.Errorf("update media path/status in database: %v", err)
 	}
 	return nil
@@ -52,13 +52,13 @@ func downloadFailure(notification Failure, app App) error {
 	}
 	for _, nzb := range nzbs {
 		var media Media
-		err = app.Store.Get(nzb.IMDB, &media)
+		err = app.Store.Get(nzb.Trakt, &media)
 		if err != nil {
-			return fmt.Errorf("finding media: %s: %v", nzb.IMDB, err)
+			return fmt.Errorf("finding media: %s: %v", nzb.Trakt, err)
 		}
 		media.OnDisk = false
 		media.DownloadID = ""
-		if err := app.Store.Update(nzb.IMDB, &media); err != nil {
+		if err := app.Store.Update(nzb.Trakt, &media); err != nil {
 			return fmt.Errorf("update media status in database: %v", err)
 		}
 	}
