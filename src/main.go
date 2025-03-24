@@ -103,15 +103,17 @@ func (app App) syncFromTrakt() {
 		}).Error("Error syncing episodes from Trakt")
 	}
 	merged := append(movies, episodes...)
-	var existingEntries []Media
-	err = app.Store.Find(&existingEntries, bolthold.Where("Trakt").Not().ContainsAny(merged...))
-	if err != nil {
-		log.WithFields(log.Fields{
-			"err": err,
-		}).Error("retrieving existing media entries from database")
-	}
-	for _, entry := range existingEntries {
-		app.removeMedia(entry.Trakt)
+	if len(merged) >= 1 {
+		var existingEntries []Media
+		err = app.Store.Find(&existingEntries, bolthold.Where("Trakt").Not().ContainsAny(merged...))
+		if err != nil {
+			log.WithFields(log.Fields{
+				"err": err,
+			}).Error("retrieving existing media entries from database")
+		}
+		for _, entry := range existingEntries {
+			app.removeMedia(entry.Trakt)
+		}
 	}
 }
 
@@ -136,8 +138,9 @@ func (app App) runTasks() {
 	log.Info("Tasks ran successfully")
 }
 
-func startBackgroundTasks(appConfig *App) {
+func startBackgroundTasks(appConfig *App, traktClientSecret string) {
 	for {
+		appConfig.TraktToken = appConfig.refreshTraktToken(traktClientSecret)
 		appConfig.runTasks()
 		time.Sleep(6 * time.Hour)
 	}
@@ -171,7 +174,7 @@ func main() {
 	signal.Notify(shutdownChan, os.Interrupt)
 	go handleShutdown(app, shutdownChan)
 
-	go startBackgroundTasks(app)
+	go startBackgroundTasks(app, traktClientSecret)
 
 	handleAPIRequests(app)
 	port := "0.0.0.0:3000"

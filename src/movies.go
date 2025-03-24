@@ -93,5 +93,8 @@ func (app App) syncMoviesFromTrakt() (error, []interface{}) {
 		return err, nil
 	}
 	mergedMovies := append(watchlist, favorites...)
+	if len(mergedMovies) == 0 {
+		return fmt.Errorf("no movies found"), nil
+	}
 	return nil, mergedMovies
 }

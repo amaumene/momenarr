@@ -89,3 +89,19 @@ func (app App) setUpTrakt(traktApiKey string, traktClientSecret string) *trakt.T
 	}
 	return token
 }
+
+func (app App) refreshTraktToken(traktClientSecret string) *trakt.Token {
+	tokenFile := app.Config.DataDir + "/token.json"
+	tokenFromFile, _ := loadTokenFromFile(tokenFile)
+	refreshedToken, err := authorization.RefreshToken(&trakt.RefreshTokenParams{
+		RefreshToken: tokenFromFile.RefreshToken,
+		ClientSecret: traktClientSecret,
+	})
+	if err != nil {
+		log.Fatalf("Error refreshing token: %v", err)
+	}
+	if err := saveTokenToFile(refreshedToken, tokenFile); err != nil {
+		log.Fatalf("Error saving token: %v", err)
+	}
+	return refreshedToken
+}

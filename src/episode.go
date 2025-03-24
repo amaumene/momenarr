@@ -129,5 +129,8 @@ func (app App) syncEpisodesFromTrakt() (error, []interface{}) {
 		return err, nil
 	}
 	mergedEpisodes := append(watchlist, favorites...)
+	if len(mergedEpisodes) == 0 {
+		return fmt.Errorf("no episodes found"), nil
+	}
 	return nil, mergedEpisodes
 }
