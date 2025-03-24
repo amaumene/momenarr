@@ -101,6 +101,7 @@ func handleApiSuccess(w http.ResponseWriter, r *http.Request, appConfig App) {
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("processing notification")
 	}
+	fmt.Println(notification)
 }
 
 func handleApiFailure(w http.ResponseWriter, r *http.Request, appConfig App) {
