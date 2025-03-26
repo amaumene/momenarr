@@ -5,6 +5,7 @@ import (
 	"github.com/amaumene/momenarr/bolthold"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -76,10 +77,14 @@ func deleteFromHistory(media Media, app App) error {
 }
 
 func processNotification(notification Notification, app App) error {
-	fmt.Println(notification)
 	if notification.Category == "momenarr" {
 		var media Media
-		err := app.Store.Get(notification.Trakt, &media)
+
+		traktID, err := strconv.ParseInt(notification.Trakt, 10, 64)
+		if err != nil {
+			return fmt.Errorf("converting notification.Trakt to int64: %v", err)
+		}
+		err = app.Store.Get(traktID, &media)
 		if err != nil {
 			return fmt.Errorf("finding media: %v", err)
 		}
