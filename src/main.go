@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/nzbget"
 	log "github.com/sirupsen/logrus"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -40,13 +42,34 @@ func (app App) createDownload(Trakt int64, nzb NZB) error {
 		return fmt.Errorf("updating DownloadID in database: %w", err)
 	}
 	logDownloadStart(Trakt, nzb.Title, downloadID)
+	os.Exit(1)
 	return nil
 }
 
 func createNZBGetInput(nzb NZB, Trakt int64) (*nzbget.AppendInput, error) {
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := httpClient.Get(nzb.Link)
+	if err != nil {
+		return nil, fmt.Errorf("downloading NZB file: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to download NZB file, status: %s", resp.Status)
+	}
+
+	content, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading NZB file content: %w", err)
+	}
+
+	encodedContent := base64.StdEncoding.EncodeToString(content)
 	return &nzbget.AppendInput{
 		Filename:   nzb.Title + ".nzb",
-		Content:    nzb.Link,
+		Content:    encodedContent,
 		Category:   "momenarr",
 		DupeMode:   "score",
 		Parameters: []*nzbget.Parameter{{Name: "Trakt", Value: strconv.FormatInt(Trakt, 10)}},
@@ -132,7 +155,12 @@ func (app App) syncFromTrakt() {
 			}).Error("retrieving existing media entries from database")
 		}
 		for _, entry := range existingEntries {
-			app.removeMedia(entry.Trakt)
+			if err := app.removeMedia(entry.Trakt); err != nil {
+				log.WithFields(log.Fields{
+					"err":   err,
+					"Trakt": entry.Trakt,
+				}).Error("Error removing media")
+			}
 		}
 	}
 }
