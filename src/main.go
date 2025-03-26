@@ -42,7 +42,7 @@ func (app App) createDownload(Trakt int64, nzb NZB) error {
 		return fmt.Errorf("updating DownloadID in database: %w", err)
 	}
 	logDownloadStart(Trakt, nzb.Title, downloadID)
-	os.Exit(1)
+
 	return nil
 }
 
