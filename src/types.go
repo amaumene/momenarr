@@ -2,14 +2,14 @@ package main
 
 import (
 	"github.com/amaumene/momenarr/bolthold"
-	"github.com/amaumene/momenarr/sabnzbd"
+	"github.com/amaumene/momenarr/nzbget"
 	"github.com/amaumene/momenarr/trakt"
 )
 
 type App struct {
 	TraktToken *trakt.Token
 	Store      *bolthold.Store
-	SabNZBd    *sabnzbd.Client
+	NZBGet     *nzbget.NZBGet
 	Config     *Config
 }
 
