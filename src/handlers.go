@@ -12,19 +12,19 @@ import (
 func listMedia(w http.ResponseWriter, appConfig App) {
 	w.WriteHeader(http.StatusOK)
 	var medias []Media
-	q := &bolthold.Query{}
-	err := appConfig.Store.Find(&medias, q)
+	err := appConfig.Store.Find(&medias, bolthold.Where("IMDB").Ne(""))
 	if err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("getting medias from database")
 	}
 	var data string
 	for _, media := range medias {
-		data = data + fmt.Sprintf("IMDB: %s\nTitle: %s\nOnDisk: %t\nFile:%s\n", media.IMDB, media.Title, media.OnDisk, media.File)
+		data = data + fmt.Sprintf("IMDB: %s, Title: %s, OnDisk: %t, File:%s\n", media.IMDB, media.Title, media.OnDisk, media.File)
 	}
 	if _, err := w.Write([]byte(data)); err != nil {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")
 	}
 }
+
 func listNZBs(w http.ResponseWriter, appConfig App) {
 	w.WriteHeader(http.StatusOK)
 	var nzbs []NZB
@@ -41,12 +41,10 @@ func listNZBs(w http.ResponseWriter, appConfig App) {
 		log.WithFields(log.Fields{"err": err}).Error("writing response")
 	}
 }
+
 func handleAPIRequests(appConfig *App) {
-	http.HandleFunc("/api/success", func(w http.ResponseWriter, r *http.Request) {
-		handleApiSuccess(w, r, *appConfig)
-	})
-	http.HandleFunc("/api/failure", func(w http.ResponseWriter, r *http.Request) {
-		handleApiFailure(w, r, *appConfig)
+	http.HandleFunc("/api/notify", func(w http.ResponseWriter, r *http.Request) {
+		handleApiNotify(w, r, *appConfig)
 	})
 	http.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
 		listMedia(w, *appConfig)
@@ -68,7 +66,7 @@ func handleAPIRequests(appConfig *App) {
 	})
 }
 
-func handleApiSuccess(w http.ResponseWriter, r *http.Request, appConfig App) {
+func handleApiNotify(w http.ResponseWriter, r *http.Request, appConfig App) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
@@ -85,50 +83,14 @@ func handleApiSuccess(w http.ResponseWriter, r *http.Request, appConfig App) {
 		}
 	}()
 
-	var notification Success
-	err = json.Unmarshal(body, &notification)
-	if err != nil {
-		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write([]byte(`{"message": "Data received and processing started"}`)); err != nil {
-		log.WithFields(log.Fields{"err": err}).Error("writing response")
-	}
-	err = processSuccess(notification, appConfig)
-	if err != nil {
-		log.WithFields(log.Fields{"err": err}).Error("processing notification")
-	}
-	fmt.Println(notification)
-}
-
-func handleApiFailure(w http.ResponseWriter, r *http.Request, appConfig App) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-		return
-	}
-	defer func() {
-		if err := r.Body.Close(); err != nil {
-			log.WithFields(log.Fields{"err": err}).Error("failed to close request body")
-		}
-	}()
-
-	var notification Failure
+	var notification Notification
 	err = json.Unmarshal(body, &notification)
 	if err != nil {
 		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
 		return
 	}
 	go func() {
-		err := processFailure(notification, appConfig)
+		err := processNotification(notification, appConfig)
 		if err != nil {
 			log.WithFields(log.Fields{"err": err}).Error("processing notification")
 		}

@@ -1,52 +1,72 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"github.com/amaumene/momenarr/bolthold"
-	"github.com/amaumene/momenarr/sabnzbd"
+	"github.com/amaumene/momenarr/nzbget"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 )
 
 func (app App) createDownload(Trakt int64, nzb NZB) error {
-	var media Media
-	if err := app.Store.Get(Trakt, &media); err != nil {
-		return fmt.Errorf("getting media from database: %s", err)
+	input, err := createNZBGetInput(nzb, Trakt)
+	if err != nil {
+		return fmt.Errorf("creating NZBGet input: %w", err)
 	}
-	if media.DownloadID == "" {
-		ctx := context.Background()
-		response, err := app.SabNZBd.AddFromUrl(ctx, sabnzbd.AddNzbRequest{Url: nzb.Link, Category: "momenarr"})
-		if err != nil {
-			return fmt.Errorf("creating NZB transfer: %s", err)
-		}
 
-		err = updateMediaDownloadID(app.Store, Trakt, response.NzoIDs)
-		if err != nil {
-			return fmt.Errorf("updating DownloadID in database: %s", err)
-		}
-		logDownloadStart(Trakt, nzb.Title, response.NzoIDs)
+	queue, err := app.NZBGet.ListGroups()
+	if err != nil {
+		return fmt.Errorf("getting NZBGet queue: %w", err)
 	}
+	for _, item := range queue {
+		if item.NZBName == nzb.Title {
+			log.WithFields(log.Fields{
+				"Trakt": Trakt,
+				"Title": nzb.Title,
+			}).Info("NZB already in queue, skipping")
+			return nil
+		}
+	}
+	downloadID, err := app.NZBGet.Append(input)
+	if err != nil || downloadID <= 0 {
+		return fmt.Errorf("creating NZBGet transfer: %w", err)
+	}
+	err = updateMediaDownloadID(app.Store, Trakt, downloadID)
+	if err != nil {
+		return fmt.Errorf("updating DownloadID in database: %w", err)
+	}
+	logDownloadStart(Trakt, nzb.Title, downloadID)
 	return nil
 }
 
-func updateMediaDownloadID(store *bolthold.Store, Trakt int64, downloadID []string) error {
+func createNZBGetInput(nzb NZB, Trakt int64) (*nzbget.AppendInput, error) {
+	return &nzbget.AppendInput{
+		Filename:   nzb.Title + ".nzb",
+		Content:    nzb.Link,
+		Category:   "momenarr",
+		DupeMode:   "score",
+		Parameters: []*nzbget.Parameter{{Name: "Trakt", Value: strconv.FormatInt(Trakt, 10)}},
+	}, nil
+}
+
+func updateMediaDownloadID(store *bolthold.Store, Trakt int64, downloadID int64) error {
 	var media Media
 	if err := store.Get(Trakt, &media); err != nil {
 		return fmt.Errorf("getting media from database: %w", err)
 	}
-	media.DownloadID = downloadID[0]
+	media.DownloadID = downloadID
 	return store.Update(Trakt, media)
 }
 
-func logDownloadStart(Trakt int64, title string, downloadID []string) {
+func logDownloadStart(Trakt int64, title string, downloadID int64) {
 	log.WithFields(log.Fields{
-		"TraktID":    Trakt,
+		"Trakt":      Trakt,
 		"Title":      title,
-		"DownloadID": downloadID[0],
+		"DownloadID": downloadID,
 	}).Info("Download started successfully")
 }
 
@@ -162,7 +182,7 @@ func main() {
 	app.Config = setConfig()
 	traktApiKey, traktClientSecret := getEnvTrakt()
 	app.TraktToken = app.setUpTrakt(traktApiKey, traktClientSecret)
-	app.SabNZBd = setSabNZBd()
+	app.NZBGet = setNZBGet()
 
 	var err error
 	app.Store, err = bolthold.Open(app.Config.DataDir+"/data.db", 0666, nil)

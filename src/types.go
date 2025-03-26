@@ -29,7 +29,7 @@ type Media struct {
 	Year       int64
 	OnDisk     bool
 	File       string
-	DownloadID string
+	DownloadID int64
 }
 
 type NZB struct {
@@ -40,16 +40,10 @@ type NZB struct {
 	Failed bool
 }
 
-type Failure struct {
-	Type    string `json:"type"`
-	Title   string `json:"title"`
-	Message string `json:"message"`
-}
-
-type Success struct {
+type Notification struct {
 	Name     string `json:"name"`
-	Id       string `json:"id"`
 	Category string `json:"category"`
-	Dir      string `json:"dir"`
 	Status   string `json:"status"`
+	Trakt    string `json:"trakt"`
+	Dir      string `json:"dir"`
 }
