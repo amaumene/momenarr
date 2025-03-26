@@ -44,6 +44,6 @@ type Notification struct {
 	Name     string `json:"name"`
 	Category string `json:"category"`
 	Status   string `json:"status"`
-	Trakt    string `json:"trakt"`
+	Trakt    int64  `json:"trakt"`
 	Dir      string `json:"dir"`
 }

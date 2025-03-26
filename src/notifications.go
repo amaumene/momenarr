@@ -76,7 +76,6 @@ func deleteFromHistory(media Media, app App) error {
 }
 
 func processNotification(notification Notification, app App) error {
-	fmt.Println(notification)
 	if notification.Category == "momenarr" {
 		var media Media
 		err := app.Store.Get(notification.Trakt, &media)
