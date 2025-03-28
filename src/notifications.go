@@ -28,7 +28,12 @@ func downloadSuccess(notification Notification, app App, media Media) error {
 
 	media.File = destPath
 	media.OnDisk = true
-	if err := app.Store.Update(notification.Trakt, &media); err != nil {
+
+	traktID, err := strconv.ParseInt(notification.Trakt, 10, 64)
+	if err != nil {
+		return fmt.Errorf("converting notification.Trakt to int64: %v", err)
+	}
+	if err := app.Store.Update(traktID, &media); err != nil {
 		return fmt.Errorf("update media path/status in database: %v", err)
 	}
 	return nil
