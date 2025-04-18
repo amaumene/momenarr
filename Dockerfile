@@ -8,7 +8,7 @@ RUN rm go.mod && rm go.sum
 
 RUN go mod init github.com/amaumene/momenarr && go mod tidy
 
-RUN CGO_ENABLED=0 go build -o momenarr
+RUN CGO_ENABLED=0 go build -o momenarr -ldflags "-w -s"
 
 FROM scratch
 
