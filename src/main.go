@@ -155,7 +155,7 @@ func (app App) syncFromTrakt() {
 			}).Error("retrieving existing media entries from database")
 		}
 		for _, entry := range existingEntries {
-			if err := app.removeMedia(entry.Trakt); err != nil {
+			if err := app.removeMedia(entry.Trakt, "not in merged list"); err != nil {
 				log.WithFields(log.Fields{
 					"err":   err,
 					"Trakt": entry.Trakt,

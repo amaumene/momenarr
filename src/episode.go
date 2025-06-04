@@ -111,7 +111,7 @@ func (app App) syncEpisodesFromWatchlist() (error, []interface{}) {
 				"err": err,
 			}).Error("inserting episode into database")
 		}
-		episodes = append(episodes, int64(item.Show.Trakt))
+		episodes = append(episodes, int64(showProgress.NextEpisode.Trakt))
 	}
 	if err := iterator.Err(); err != nil {
 		return fmt.Errorf("iterating episode watchlist: %v", err), nil
