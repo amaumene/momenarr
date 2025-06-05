@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/newsnab"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"regexp"
 	"strconv"
@@ -135,13 +136,15 @@ func (app App) populateNZB() error {
 	for _, media := range medias {
 		feed, err := app.searchNZB(media)
 		if err != nil {
-			return err
+			return fmt.Errorf("searching NZB for %v: %v", media, err)
 		}
 		if len(feed.Channel.Items) > 0 {
 			err := app.insertNZBItems(media, feed.Channel.Items)
 			if err != nil {
-				return err
+				return fmt.Errorf("inserting NZB items into database: %v", err)
 			}
+		} else {
+			log.WithField("media", media).Warn("No NZB found for media")
 		}
 	}
 	return nil
