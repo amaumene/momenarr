@@ -4,7 +4,7 @@ RUN apk add --no-cache git
 
 WORKDIR /app
 
-COPY ./src/ .
+COPY . .
 
 RUN rm go.mod && rm go.sum
 
