@@ -4,7 +4,6 @@
 *.dll
 *.so
 *.dylib
-momenarr
 node_modules/
 package-lock.json
 package.json
@@ -40,7 +39,7 @@ token.json
 blacklist.txt
 downloads/
 temp/
+momenarr
 
 # Log files
 *.log
-EOF < /dev/null
