@@ -20,14 +20,14 @@ import (
 
 // NZBService handles NZB search and management operations
 type NZBService struct {
-	repo         repository.Repository
-	newsNabHost  string
-	newsNabAPIKey string
-	blacklistFile string
-	blacklistCache []string
+	repo               repository.Repository
+	newsNabHost        string
+	newsNabAPIKey      string
+	blacklistFile      string
+	blacklistCache     []string
 	blacklistCacheTime time.Time
-	blacklistMu sync.RWMutex
-	testMode     bool // When true, skips database storage
+	blacklistMu        sync.RWMutex
+	testMode           bool // When true, skips database storage
 }
 
 // NewNZBService creates a new NZBService
@@ -65,22 +65,113 @@ var (
 	resolution2160pRegex = regexp.MustCompile("(?i)2160p|4k")
 	resolution1080pRegex = regexp.MustCompile("(?i)1080p")
 	resolution720pRegex  = regexp.MustCompile("(?i)720p")
-	
+
 	// Quality regex patterns
 	remuxRegex = regexp.MustCompile("(?i)remux")
 	webDLRegex = regexp.MustCompile("(?i)web-dl")
-	
+
 	blacklistCacheDuration = 5 * time.Minute
 )
 
-// GetNZBFromDB retrieves the best NZB for a given Trakt ID prioritizing resolution then file size
+// GetNZBFromDB retrieves the best NZB for a given Trakt ID prioritizing remux first, then web-dl by highest resolution, and finally by size
 func (s *NZBService) GetNZBFromDB(traktID int64) (*models.NZB, error) {
 	allNZBs, err := s.repo.FindNZBsByTraktIDs([]int64{traktID})
 	if err != nil {
 		return nil, fmt.Errorf("finding NZBs: %w", err)
 	}
 
-	// Group NZBs by resolution, keeping only the biggest file size for each resolution
+	// Filter out failed NZBs and those with different Trakt IDs
+	var validNZBs []*models.NZB
+	for _, nzb := range allNZBs {
+		if !nzb.Failed && nzb.Trakt == traktID {
+			validNZBs = append(validNZBs, nzb)
+		}
+	}
+
+	if len(validNZBs) == 0 {
+		return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
+	}
+
+	// Step 1: Find remux candidates first regardless of resolution
+	var remuxCandidates []*models.NZB
+	for _, nzb := range validNZBs {
+		if s.matchesQuality(nzb.Title, QualityRemux) {
+			remuxCandidates = append(remuxCandidates, nzb)
+		}
+	}
+
+	// If we have remux candidates, find the best one by resolution then size
+	if len(remuxCandidates) > 0 {
+		var bestRemux *models.NZB
+		var bestRemuxResolution = ResolutionOther
+
+		for _, nzb := range remuxCandidates {
+			resolution := s.getResolution(nzb.Title)
+
+			// Better resolution found
+			if resolution < bestRemuxResolution {
+				bestRemuxResolution = resolution
+				bestRemux = nzb
+			} else if resolution == bestRemuxResolution && (bestRemux == nil || nzb.Length > bestRemux.Length) {
+				// Same resolution but larger size
+				bestRemux = nzb
+			}
+		}
+
+		log.WithFields(log.Fields{
+			"trakt":      traktID,
+			"title":      bestRemux.Title,
+			"size_gb":    float64(bestRemux.Length) / (1024 * 1024 * 1024),
+			"resolution": s.getResolutionName(bestRemuxResolution),
+			"quality":    "remux",
+		}).Debug("Selected remux NZB")
+		return bestRemux, nil
+	}
+
+	// Step 2: If no remux available, find web-dl candidates
+	var webDLCandidates []*models.NZB
+	for _, nzb := range validNZBs {
+		if s.matchesQuality(nzb.Title, QualityWebDL) {
+			webDLCandidates = append(webDLCandidates, nzb)
+		}
+	}
+
+	// If we have web-dl candidates, find the best one by resolution then size
+	if len(webDLCandidates) > 0 {
+		// Group web-dl NZBs by resolution
+		var candidates = map[Resolution]*models.NZB{
+			Resolution2160p: nil,
+			Resolution1080p: nil,
+			Resolution720p:  nil,
+			ResolutionOther: nil,
+		}
+
+		for _, nzb := range webDLCandidates {
+			resolution := s.getResolution(nzb.Title)
+
+			// Keep the biggest file for each resolution
+			if candidates[resolution] == nil || nzb.Length > candidates[resolution].Length {
+				candidates[resolution] = nzb
+			}
+		}
+
+		// Return highest priority resolution available
+		resolutionPriority := []Resolution{Resolution2160p, Resolution1080p, Resolution720p, ResolutionOther}
+		for _, resolution := range resolutionPriority {
+			if candidates[resolution] != nil {
+				log.WithFields(log.Fields{
+					"trakt":      traktID,
+					"title":      candidates[resolution].Title,
+					"size_gb":    float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
+					"resolution": s.getResolutionName(resolution),
+					"quality":    "web-dl",
+				}).Debug("Selected web-dl NZB by resolution and size")
+				return candidates[resolution], nil
+			}
+		}
+	}
+
+	// Step 3: If no remux or web-dl, just find the biggest file in the highest resolution
 	var candidates = map[Resolution]*models.NZB{
 		Resolution2160p: nil,
 		Resolution1080p: nil,
@@ -88,29 +179,25 @@ func (s *NZBService) GetNZBFromDB(traktID int64) (*models.NZB, error) {
 		ResolutionOther: nil,
 	}
 
-	for _, nzb := range allNZBs {
-		if nzb.Failed || nzb.Trakt != traktID {
-			continue
-		}
-
-		// Determine resolution priority
+	for _, nzb := range validNZBs {
 		resolution := s.getResolution(nzb.Title)
-		
+
 		// Keep the biggest file for each resolution
 		if candidates[resolution] == nil || nzb.Length > candidates[resolution].Length {
 			candidates[resolution] = nzb
 		}
 	}
 
-	// Return highest priority resolution available (2160p > 1080p > 720p > other)
+	// Return highest priority resolution available
 	resolutionPriority := []Resolution{Resolution2160p, Resolution1080p, Resolution720p, ResolutionOther}
 	for _, resolution := range resolutionPriority {
 		if candidates[resolution] != nil {
 			log.WithFields(log.Fields{
-				"trakt": traktID,
-				"title": candidates[resolution].Title,
-				"size_gb": float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
+				"trakt":      traktID,
+				"title":      candidates[resolution].Title,
+				"size_gb":    float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
 				"resolution": s.getResolutionName(resolution),
+				"quality":    "other",
 			}).Debug("Selected NZB by resolution and size")
 			return candidates[resolution], nil
 		}
@@ -209,7 +296,7 @@ func (s *NZBService) processBatchConcurrently(ctx context.Context, medias []*mod
 		wg.Add(1)
 		go func(m *models.Media) {
 			defer wg.Done()
-			
+
 			// Acquire semaphore
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
@@ -460,7 +547,7 @@ func (s *NZBService) TestResolutionDetection(titles []string) {
 	for _, title := range titles {
 		resolution := s.getResolution(title)
 		log.WithFields(log.Fields{
-			"title": title,
+			"title":               title,
 			"detected_resolution": s.getResolutionName(resolution),
 		}).Info("Resolution test")
 	}
