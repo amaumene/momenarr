@@ -118,13 +118,21 @@ func (s *NZBService) GetNZBFromDB(traktID int64) (*models.NZB, error) {
 			}
 		}
 
-		log.WithFields(log.Fields{
-			"trakt":      traktID,
-			"title":      bestRemux.Title,
-			"size_gb":    float64(bestRemux.Length) / (1024 * 1024 * 1024),
-			"resolution": s.getResolutionName(bestRemuxResolution),
-			"quality":    "remux",
-		}).Debug("Selected remux NZB")
+		// In test mode, only output the selected NZB
+		if s.testMode {
+			fmt.Printf("Selected remux NZB: %s (%.2f GB, %s)\n", 
+				bestRemux.Title, 
+				float64(bestRemux.Length) / (1024 * 1024 * 1024),
+				s.getResolutionName(bestRemuxResolution))
+		} else {
+			log.WithFields(log.Fields{
+				"trakt":      traktID,
+				"title":      bestRemux.Title,
+				"size_gb":    float64(bestRemux.Length) / (1024 * 1024 * 1024),
+				"resolution": s.getResolutionName(bestRemuxResolution),
+				"quality":    "remux",
+			}).Debug("Selected remux NZB")
+		}
 		return bestRemux, nil
 	}
 
@@ -159,13 +167,21 @@ func (s *NZBService) GetNZBFromDB(traktID int64) (*models.NZB, error) {
 		resolutionPriority := []Resolution{Resolution2160p, Resolution1080p, Resolution720p, ResolutionOther}
 		for _, resolution := range resolutionPriority {
 			if candidates[resolution] != nil {
-				log.WithFields(log.Fields{
-					"trakt":      traktID,
-					"title":      candidates[resolution].Title,
-					"size_gb":    float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
-					"resolution": s.getResolutionName(resolution),
-					"quality":    "web-dl",
-				}).Debug("Selected web-dl NZB by resolution and size")
+				// In test mode, only output the selected NZB
+				if s.testMode {
+					fmt.Printf("Selected web-dl NZB: %s (%.2f GB, %s)\n", 
+						candidates[resolution].Title, 
+						float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
+						s.getResolutionName(resolution))
+				} else {
+					log.WithFields(log.Fields{
+						"trakt":      traktID,
+						"title":      candidates[resolution].Title,
+						"size_gb":    float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
+						"resolution": s.getResolutionName(resolution),
+						"quality":    "web-dl",
+					}).Debug("Selected web-dl NZB by resolution and size")
+				}
 				return candidates[resolution], nil
 			}
 		}
@@ -192,13 +208,21 @@ func (s *NZBService) GetNZBFromDB(traktID int64) (*models.NZB, error) {
 	resolutionPriority := []Resolution{Resolution2160p, Resolution1080p, Resolution720p, ResolutionOther}
 	for _, resolution := range resolutionPriority {
 		if candidates[resolution] != nil {
-			log.WithFields(log.Fields{
-				"trakt":      traktID,
-				"title":      candidates[resolution].Title,
-				"size_gb":    float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
-				"resolution": s.getResolutionName(resolution),
-				"quality":    "other",
-			}).Debug("Selected NZB by resolution and size")
+			// In test mode, only output the selected NZB
+			if s.testMode {
+				fmt.Printf("Selected NZB: %s (%.2f GB, %s)\n", 
+					candidates[resolution].Title, 
+					float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
+					s.getResolutionName(resolution))
+			} else {
+				log.WithFields(log.Fields{
+					"trakt":      traktID,
+					"title":      candidates[resolution].Title,
+					"size_gb":    float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
+					"resolution": s.getResolutionName(resolution),
+					"quality":    "other",
+				}).Debug("Selected NZB by resolution and size")
+			}
 			return candidates[resolution], nil
 		}
 	}
@@ -347,11 +371,13 @@ func (s *NZBService) populateNZBForMedia(media *models.Media) error {
 		return fmt.Errorf("inserting NZB items: %w", err)
 	}
 
-	log.WithFields(log.Fields{
-		"trakt": media.Trakt,
-		"title": media.Title,
-		"count": len(feed.Channel.Items),
-	}).Debug("Successfully populated NZB items for media")
+	if !s.testMode {
+		log.WithFields(log.Fields{
+			"trakt": media.Trakt,
+			"title": media.Title,
+			"count": len(feed.Channel.Items),
+		}).Debug("Successfully populated NZB items for media")
+	}
 
 	return nil
 }
@@ -390,10 +416,12 @@ func (s *NZBService) insertNZBItems(media *models.Media, items []newsnab.Item) e
 
 	for _, item := range items {
 		if s.isBlacklisted(item.Title, blacklist) {
-			log.WithFields(log.Fields{
-				"title": item.Title,
-				"trakt": media.Trakt,
-			}).Debug("Skipping blacklisted NZB item")
+			if !s.testMode {
+				log.WithFields(log.Fields{
+					"title": item.Title,
+					"trakt": media.Trakt,
+				}).Debug("Skipping blacklisted NZB item")
+			}
 			continue
 		}
 
@@ -424,7 +452,8 @@ func (s *NZBService) insertNZBItem(media *models.Media, item newsnab.Item) error
 	}
 
 	if s.testMode {
-		// Test mode: skip saving to database, no output here - only selected NZBs are output during download phase
+		// Test mode: skip saving to database and suppress debug logs
+		// Only selected NZBs are output during download phase in GetNZBFromDB
 		return nil
 	}
 
