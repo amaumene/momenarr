@@ -114,7 +114,7 @@ func (r *BoltRepository) ProcessMediaBatches(batchSize int, processor func([]*mo
 		
 		// Use Skip and Limit for pagination - note: this is a simplified approach
 		// In a real scenario, you might want to use a more efficient cursor-based approach
-		if err := r.store.Find(&batch, bolthold.Where("Trakt").Ge(0).Skip(offset).Limit(batchSize)); err != nil {
+		if err := r.store.Find(&batch, bolthold.Where("Trakt").Ge(int64(0)).Skip(offset).Limit(batchSize)); err != nil {
 			return fmt.Errorf("failed to find media batch: %w", err)
 		}
 		
