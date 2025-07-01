@@ -11,14 +11,18 @@ import (
 type Repository interface {
 	// Media operations
 	SaveMedia(media *models.Media) error
+	SaveMediaBatch(medias []*models.Media) error
 	GetMedia(traktID int64) (*models.Media, error)
 	FindMediaNotOnDisk() ([]*models.Media, error)
+	FindMediaBatch(traktIDs []int64) ([]*models.Media, error)
+	ProcessMediaBatches(batchSize int, processor func([]*models.Media) error) error
 	UpdateMediaDownloadID(traktID, downloadID int64) error
 	RemoveMedia(traktID int64) error
 	FindAllMedia() ([]*models.Media, error)
 
 	// NZB operations
 	SaveNZB(nzb *models.NZB) error
+	SaveNZBBatch(nzbs []*models.NZB) error
 	GetNZB(traktID int64) (*models.NZB, error)
 	FindNZBsByTraktIDs(traktIDs []int64) ([]*models.NZB, error)
 	RemoveNZBsByTraktID(traktID int64) error
@@ -61,17 +65,86 @@ func (r *BoltRepository) FindMediaNotOnDisk() ([]*models.Media, error) {
 	return medias, nil
 }
 
-func (r *BoltRepository) UpdateMediaDownloadID(traktID, downloadID int64) error {
-	media, err := r.GetMedia(traktID)
-	if err != nil {
-		return fmt.Errorf("failed to get media for update: %w", err)
+// SaveMediaBatch saves multiple media items in a single transaction
+func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
+	if len(medias) == 0 {
+		return nil
 	}
 	
-	media.DownloadID = downloadID
-	if err := r.store.Update(traktID, media); err != nil {
-		return fmt.Errorf("failed to update media download ID: %w", err)
+	tx, err := r.store.Bolt().Begin(true)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+	
+	for _, media := range medias {
+		if err := r.store.TxUpsert(tx, media.Trakt, media); err != nil {
+			return fmt.Errorf("failed to save media in batch: %w", err)
+		}
+	}
+	
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}
 	return nil
+}
+
+// FindMediaBatch finds multiple media items by their Trakt IDs
+func (r *BoltRepository) FindMediaBatch(traktIDs []int64) ([]*models.Media, error) {
+	var medias []*models.Media
+	
+	// Convert []int64 to []interface{}
+	ids := make([]interface{}, len(traktIDs))
+	for i, id := range traktIDs {
+		ids[i] = id
+	}
+	
+	if err := r.store.Find(&medias, bolthold.Where("Trakt").In(ids...)); err != nil {
+		return nil, fmt.Errorf("failed to find media batch: %w", err)
+	}
+	return medias, nil
+}
+
+// ProcessMediaBatches processes all media in batches to avoid loading everything into memory
+func (r *BoltRepository) ProcessMediaBatches(batchSize int, processor func([]*models.Media) error) error {
+	var offset int
+	
+	for {
+		var batch []*models.Media
+		
+		// Use Skip and Limit for pagination - note: this is a simplified approach
+		// In a real scenario, you might want to use a more efficient cursor-based approach
+		if err := r.store.Find(&batch, bolthold.Where("Trakt").Ge(0).Skip(offset).Limit(batchSize)); err != nil {
+			return fmt.Errorf("failed to find media batch: %w", err)
+		}
+		
+		if len(batch) == 0 {
+			break // No more records
+		}
+		
+		if err := processor(batch); err != nil {
+			return fmt.Errorf("failed to process media batch: %w", err)
+		}
+		
+		offset += batchSize
+		
+		// If we got fewer records than batch size, we're done
+		if len(batch) < batchSize {
+			break
+		}
+	}
+	
+	return nil
+}
+
+func (r *BoltRepository) UpdateMediaDownloadID(traktID, downloadID int64) error {
+	return r.store.UpdateMatching(&models.Media{}, 
+		bolthold.Where("Trakt").Eq(traktID),
+		func(record interface{}) error {
+			media := record.(*models.Media)
+			media.DownloadID = downloadID
+			return nil
+		})
 }
 
 func (r *BoltRepository) RemoveMedia(traktID int64) error {
@@ -118,6 +191,30 @@ func (r *BoltRepository) FindNZBsByTraktIDs(traktIDs []int64) ([]*models.NZB, er
 		return nil, fmt.Errorf("failed to find NZBs by Trakt IDs: %w", err)
 	}
 	return nzbs, nil
+}
+
+// SaveNZBBatch saves multiple NZB items in a single transaction
+func (r *BoltRepository) SaveNZBBatch(nzbs []*models.NZB) error {
+	if len(nzbs) == 0 {
+		return nil
+	}
+	
+	tx, err := r.store.Bolt().Begin(true)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+	
+	for _, nzb := range nzbs {
+		if err := r.store.TxUpsert(tx, nzb.Trakt, nzb); err != nil {
+			return fmt.Errorf("failed to save NZB in batch: %w", err)
+		}
+	}
+	
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit NZB batch transaction: %w", err)
+	}
+	return nil
 }
 
 func (r *BoltRepository) RemoveNZBsByTraktID(traktID int64) error {

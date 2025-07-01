@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/amaumene/momenarr/pkg/models"
@@ -11,6 +12,7 @@ import (
 
 // AppService coordinates all application services
 type AppService struct {
+	mu                  sync.RWMutex
 	repo                repository.Repository
 	traktService        *TraktService
 	nzbService          *NZBService
@@ -38,7 +40,7 @@ func NewAppService(
 	}
 }
 
-// RunTasks executes all main application tasks
+// RunTasks executes all main application tasks with proper synchronization
 func (s *AppService) RunTasks() error {
 	log.Info("Starting application tasks")
 	startTime := time.Now()
@@ -50,19 +52,31 @@ func (s *AppService) RunTasks() error {
 	}
 
 	// 2. Populate NZB entries
-	if err := s.nzbService.PopulateNZB(); err != nil {
+	s.mu.RLock()
+	nzbService := s.nzbService
+	s.mu.RUnlock()
+	
+	if err := nzbService.PopulateNZB(); err != nil {
 		log.WithError(err).Error("Failed to populate NZB entries")
 		return fmt.Errorf("populating NZB entries: %w", err)
 	}
 
 	// 3. Download media not on disk
-	if err := s.downloadService.DownloadNotOnDisk(); err != nil {
+	s.mu.RLock()
+	downloadService := s.downloadService
+	s.mu.RUnlock()
+	
+	if err := downloadService.DownloadNotOnDisk(); err != nil {
 		log.WithError(err).Error("Failed to download media not on disk")
 		return fmt.Errorf("downloading media not on disk: %w", err)
 	}
 
 	// 4. Clean watched media
-	if err := s.cleanupService.CleanWatched(); err != nil {
+	s.mu.RLock()
+	cleanupService := s.cleanupService
+	s.mu.RUnlock()
+	
+	if err := cleanupService.CleanWatched(); err != nil {
 		log.WithError(err).Error("Failed to clean watched media")
 		return fmt.Errorf("cleaning watched media: %w", err)
 	}
@@ -75,7 +89,11 @@ func (s *AppService) RunTasks() error {
 
 // syncFromTrakt handles the Trakt synchronization and cleanup
 func (s *AppService) syncFromTrakt() error {
-	merged, err := s.traktService.SyncFromTrakt()
+	s.mu.RLock()
+	traktService := s.traktService
+	s.mu.RUnlock()
+	
+	merged, err := traktService.SyncFromTrakt()
 	if err != nil {
 		return fmt.Errorf("syncing from Trakt: %w", err)
 	}
@@ -90,31 +108,35 @@ func (s *AppService) syncFromTrakt() error {
 	return nil
 }
 
-// cleanupRemovedMedia removes media that is no longer in the merged list
+// cleanupRemovedMedia removes media that is no longer in the merged list using streaming
 func (s *AppService) cleanupRemovedMedia(currentTraktIDs []int64) error {
-	allMedia, err := s.repo.FindAllMedia()
-	if err != nil {
-		return fmt.Errorf("finding all media: %w", err)
-	}
-
 	// Create a map for faster lookup
-	currentIDs := make(map[int64]bool)
+	currentIDs := make(map[int64]bool, len(currentTraktIDs))
 	for _, id := range currentTraktIDs {
 		currentIDs[id] = true
 	}
 
 	var removedCount int
-	for _, media := range allMedia {
-		if !currentIDs[media.Trakt] {
-			if err := s.cleanupService.RemoveMediaManually(media.Trakt, "not in current Trakt lists"); err != nil {
-				log.WithError(err).WithFields(log.Fields{
-					"trakt": media.Trakt,
-					"title": media.Title,
-				}).Error("Failed to remove media not in current lists")
-				continue
+	
+	// Process media in batches to avoid loading everything into memory
+	err := s.repo.ProcessMediaBatches(100, func(batch []*models.Media) error {
+		for _, media := range batch {
+			if !currentIDs[media.Trakt] {
+				if err := s.cleanupService.RemoveMediaManually(media.Trakt, "not in current Trakt lists"); err != nil {
+					log.WithError(err).WithFields(log.Fields{
+						"trakt": media.Trakt,
+						"title": media.Title,
+					}).Error("Failed to remove media not in current lists")
+					continue
+				}
+				removedCount++
 			}
-			removedCount++
 		}
+		return nil
+	})
+	
+	if err != nil {
+		return fmt.Errorf("processing media batches for cleanup: %w", err)
 	}
 
 	if removedCount > 0 {
@@ -180,8 +202,10 @@ func (s *AppService) GetDownloadStatus(downloadID int64) (string, error) {
 }
 
 
-// UpdateTraktServices updates the Trakt-related services with new token
+// UpdateTraktServices updates the Trakt-related services with new token (thread-safe)
 func (s *AppService) UpdateTraktServices(traktService *TraktService, cleanupService *CleanupService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.traktService = traktService
 	s.cleanupService = cleanupService
 }

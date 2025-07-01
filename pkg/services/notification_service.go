@@ -178,28 +178,33 @@ func (s *NotificationService) deleteFromHistory(media *models.Media) error {
 	return fmt.Errorf("download ID %d not found in history after %d retries", media.DownloadID, maxHistoryRetries)
 }
 
-// findBiggestFile finds the biggest file in a directory
+// findBiggestFile finds the biggest file in a directory (optimized version)
 func (s *NotificationService) findBiggestFile(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("reading directory %s: %w", dir, err)
+	}
+
 	var biggestFile string
 	var maxSize int64
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
 		}
 		
-		if !info.IsDir() && info.Size() > maxSize {
-			biggestFile = path
+		info, err := entry.Info()
+		if err != nil {
+			log.WithError(err).WithField("file", entry.Name()).Debug("Failed to get file info")
+			continue
+		}
+		
+		if info.Size() > maxSize {
+			biggestFile = filepath.Join(dir, entry.Name())
 			maxSize = info.Size()
 		}
-		
-		return nil
-	})
-
-	if err != nil {
-		return "", fmt.Errorf("walking directory %s: %w", dir, err)
 	}
-
+	
 	if biggestFile == "" {
 		return "", fmt.Errorf("no files found in directory %s", dir)
 	}

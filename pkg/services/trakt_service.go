@@ -80,7 +80,7 @@ func (s *TraktService) syncMoviesFromTrakt() ([]int64, error) {
 	return merged, nil
 }
 
-// syncMoviesFromWatchlist syncs movies from Trakt watchlist
+// syncMoviesFromWatchlist syncs movies from Trakt watchlist using batch operations
 func (s *TraktService) syncMoviesFromWatchlist() ([]int64, error) {
 	tokenParams := trakt.ListParams{OAuth: s.token.AccessToken}
 	watchListParams := &trakt.ListWatchListParams{
@@ -90,6 +90,8 @@ func (s *TraktService) syncMoviesFromWatchlist() ([]int64, error) {
 	
 	iterator := sync.WatchList(watchListParams)
 	var movieIDs []int64
+	var mediaBatch []*models.Media
+	const batchSize = 50
 
 	for iterator.Next() {
 		item, err := iterator.Entry()
@@ -98,12 +100,29 @@ func (s *TraktService) syncMoviesFromWatchlist() ([]int64, error) {
 			continue
 		}
 
-		if err := s.insertMovieToDB(item.Movie); err != nil {
-			log.WithError(err).WithField("movie", item.Movie.Title).Error("Failed to insert movie into database")
+		media, err := s.createMovieMedia(item.Movie)
+		if err != nil {
+			log.WithError(err).WithField("movie", item.Movie.Title).Error("Failed to create movie media")
 			continue
 		}
 
+		mediaBatch = append(mediaBatch, media)
 		movieIDs = append(movieIDs, int64(item.Movie.Trakt))
+
+		// Save batch when it reaches batch size
+		if len(mediaBatch) >= batchSize {
+			if err := s.repo.SaveMediaBatch(mediaBatch); err != nil {
+				log.WithError(err).Error("Failed to save movie batch")
+			}
+			mediaBatch = nil
+		}
+	}
+
+	// Save remaining items in batch
+	if len(mediaBatch) > 0 {
+		if err := s.repo.SaveMediaBatch(mediaBatch); err != nil {
+			log.WithError(err).Error("Failed to save final movie batch")
+		}
 	}
 
 	if err := iterator.Err(); err != nil {
@@ -113,7 +132,7 @@ func (s *TraktService) syncMoviesFromWatchlist() ([]int64, error) {
 	return movieIDs, nil
 }
 
-// syncMoviesFromFavorites syncs movies from Trakt favorites
+// syncMoviesFromFavorites syncs movies from Trakt favorites using batch operations
 func (s *TraktService) syncMoviesFromFavorites() ([]int64, error) {
 	tokenParams := trakt.ListParams{OAuth: s.token.AccessToken}
 	params := &trakt.ListFavoritesParams{
@@ -123,6 +142,8 @@ func (s *TraktService) syncMoviesFromFavorites() ([]int64, error) {
 	
 	iterator := sync.Favorites(params)
 	var movieIDs []int64
+	var mediaBatch []*models.Media
+	const batchSize = 50
 
 	for iterator.Next() {
 		item, err := iterator.Entry()
@@ -131,12 +152,29 @@ func (s *TraktService) syncMoviesFromFavorites() ([]int64, error) {
 			continue
 		}
 
-		if err := s.insertMovieToDB(item.Movie); err != nil {
-			log.WithError(err).WithField("movie", item.Movie.Title).Error("Failed to insert movie into database")
+		media, err := s.createMovieMedia(item.Movie)
+		if err != nil {
+			log.WithError(err).WithField("movie", item.Movie.Title).Error("Failed to create movie media")
 			continue
 		}
 
+		mediaBatch = append(mediaBatch, media)
 		movieIDs = append(movieIDs, int64(item.Movie.Trakt))
+
+		// Save batch when it reaches batch size
+		if len(mediaBatch) >= batchSize {
+			if err := s.repo.SaveMediaBatch(mediaBatch); err != nil {
+				log.WithError(err).Error("Failed to save movie batch")
+			}
+			mediaBatch = nil
+		}
+	}
+
+	// Save remaining items in batch
+	if len(mediaBatch) > 0 {
+		if err := s.repo.SaveMediaBatch(mediaBatch); err != nil {
+			log.WithError(err).Error("Failed to save final movie batch")
+		}
 	}
 
 	if err := iterator.Err(); err != nil {
@@ -146,13 +184,13 @@ func (s *TraktService) syncMoviesFromFavorites() ([]int64, error) {
 	return movieIDs, nil
 }
 
-// insertMovieToDB inserts a movie into the database
-func (s *TraktService) insertMovieToDB(movie *trakt.Movie) error {
+// createMovieMedia creates a media object from a Trakt movie without saving it
+func (s *TraktService) createMovieMedia(movie *trakt.Movie) (*models.Media, error) {
 	if int64(movie.Trakt) <= 0 || len(movie.IMDB) == 0 {
-		return fmt.Errorf("invalid movie data: Trakt=%d, IMDB=%s", movie.Trakt, movie.IMDB)
+		return nil, fmt.Errorf("invalid movie data: Trakt=%d, IMDB=%s", movie.Trakt, movie.IMDB)
 	}
 
-	media := &models.Media{
+	return &models.Media{
 		Trakt:     int64(movie.Trakt),
 		IMDB:      string(movie.IMDB),
 		Title:     movie.Title,
@@ -160,6 +198,14 @@ func (s *TraktService) insertMovieToDB(movie *trakt.Movie) error {
 		OnDisk:    false,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+	}, nil
+}
+
+// insertMovieToDB inserts a movie into the database (deprecated - use batch operations)
+func (s *TraktService) insertMovieToDB(movie *trakt.Movie) error {
+	media, err := s.createMovieMedia(movie)
+	if err != nil {
+		return err
 	}
 
 	if err := s.repo.SaveMedia(media); err != nil {

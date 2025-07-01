@@ -35,6 +35,7 @@ type Config struct {
 	BlacklistFile   string `json:"blacklist_file"`
 	MaxRetries      int    `json:"max_retries"`
 	RequestTimeout  int    `json:"request_timeout"`
+	TestMode        bool   `json:"test_mode"` // When true, only shows selected NZBs without downloading or storing
 }
 
 // LoadConfig loads configuration from environment variables
@@ -46,6 +47,7 @@ func LoadConfig() (*Config, error) {
 		BlacklistFile:   getEnvOrDefault("BLACKLIST_FILE", "blacklist.txt"),
 		MaxRetries:      getEnvIntOrDefault("MAX_RETRIES", 3),
 		RequestTimeout:  getEnvIntOrDefault("REQUEST_TIMEOUT", 30),
+		TestMode:        getEnvBoolOrDefault("TEST_MODE", false),
 	}
 
 	// Required environment variables
@@ -126,6 +128,15 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
 			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvBoolOrDefault(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
 		}
 	}
 	return defaultValue

@@ -22,17 +22,27 @@ type DownloadService struct {
 	httpClient *http.Client
 	category   string
 	dupeMode   string
+	testMode   bool // When true, only outputs selected NZBs without downloading
 }
 
 // NewDownloadService creates a new DownloadService
-func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbService *NZBService) *DownloadService {
+func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbService *NZBService, testMode bool) *DownloadService {
 	return &DownloadService{
 		repo:       repo,
 		nzbGet:     nzbGet,
 		nzbService: nzbService,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		category:   "momenarr",
-		dupeMode:   "score",
+		testMode:   testMode,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+				DisableCompression:  false,
+			},
+		},
+		category: "momenarr",
+		dupeMode: "score",
 	}
 }
 
@@ -65,6 +75,25 @@ func (s *DownloadService) processMediaDownload(media *models.Media) error {
 	if err != nil {
 		return fmt.Errorf("getting NZB from database: %w", err)
 	}
+
+	if s.testMode {
+		// Test mode: only output the selected NZB information
+		log.WithFields(log.Fields{
+			"trakt":       media.Trakt,
+			"media_title": media.Title,
+			"nzb_title":   nzb.Title,
+			"size_gb":     float64(nzb.Length) / (1024 * 1024 * 1024),
+			"nzb_link":    nzb.Link,
+		}).Warn("🧪 TEST MODE: Would download this NZB")
+		return nil
+	}
+
+	log.WithFields(log.Fields{
+		"trakt": media.Trakt,
+		"media_title": media.Title,
+		"nzb_title": nzb.Title,
+		"size_gb": float64(nzb.Length) / (1024 * 1024 * 1024),
+	}).Info("Selected NZB for download")
 
 	if err := s.CreateDownload(media.Trakt, nzb); err != nil {
 		return fmt.Errorf("creating download: %w", err)
