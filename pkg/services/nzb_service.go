@@ -337,16 +337,7 @@ func (s *NZBService) insertNZBItem(media *models.Media, item newsnab.Item) error
 	}
 
 	if s.testMode {
-		// Test mode: only output the NZB information without saving
-		resolution := s.getResolution(nzb.Title)
-		log.WithFields(log.Fields{
-			"trakt":       media.Trakt,
-			"media_title": media.Title,
-			"nzb_title":   nzb.Title,
-			"resolution":  s.getResolutionName(resolution),
-			"size_gb":     float64(nzb.Length) / (1024 * 1024 * 1024),
-			"nzb_link":    nzb.Link,
-		}).Info("🧪 TEST MODE: Found NZB (not saved to database)")
+		// Test mode: skip saving to database, no output here - only selected NZBs are output during download phase
 		return nil
 	}
 

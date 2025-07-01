@@ -46,6 +46,11 @@ func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbSe
 	}
 }
 
+// IsTestMode returns whether the service is running in test mode
+func (s *DownloadService) IsTestMode() bool {
+	return s.testMode
+}
+
 // DownloadNotOnDisk downloads all media that is not on disk
 func (s *DownloadService) DownloadNotOnDisk() error {
 	medias, err := s.repo.FindMediaNotOnDisk()

@@ -40,6 +40,18 @@ func NewAppService(
 	}
 }
 
+// isTestMode checks if any service is running in test mode
+func (s *AppService) isTestMode() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	// Check if download service is in test mode
+	if s.downloadService != nil {
+		return s.downloadService.IsTestMode()
+	}
+	return false
+}
+
 // RunTasks executes all main application tasks with proper synchronization
 func (s *AppService) RunTasks() error {
 	log.Info("Starting application tasks")
@@ -66,9 +78,14 @@ func (s *AppService) RunTasks() error {
 	downloadService := s.downloadService
 	s.mu.RUnlock()
 	
-	if err := downloadService.DownloadNotOnDisk(); err != nil {
-		log.WithError(err).Error("Failed to download media not on disk")
-		return fmt.Errorf("downloading media not on disk: %w", err)
+	// Skip download processing in test mode since database will be empty
+	if s.isTestMode() {
+		log.Info("🧪 TEST MODE: Skipping download processing - database contains no NZBs")
+	} else {
+		if err := downloadService.DownloadNotOnDisk(); err != nil {
+			log.WithError(err).Error("Failed to download media not on disk")
+			return fmt.Errorf("downloading media not on disk: %w", err)
+		}
 	}
 
 	// 4. Clean watched media
