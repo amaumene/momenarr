@@ -1,14 +1,16 @@
 FROM golang:alpine AS builder
 
+RUN apk add --no-cache git
+
 WORKDIR /app
 
-COPY ./src .
+COPY ./src/ .
 
 RUN rm go.mod && rm go.sum
 
 RUN go mod init github.com/amaumene/momenarr && go mod tidy
 
-RUN CGO_ENABLED=0 go build -o momenarr -ldflags "-w -s"
+RUN CGO_ENABLED=0 go build -o momenarr -ldflags "-w -s" ./cmd/momenarr
 
 FROM scratch
 
