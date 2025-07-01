@@ -24,6 +24,32 @@ func NewHandler(appService *services.AppService) *Handler {
 	}
 }
 
+// ServeHTTP implements the http.Handler interface
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/api/notify":
+		h.handleNotify(w, r)
+	case "/api/media":
+		h.handleMedia(w, r)
+	case "/api/media/stats":
+		h.handleMediaStats(w, r)
+	case "/api/cleanup/stats":
+		h.handleCleanupStats(w, r)
+	case "/api/download/retry":
+		h.handleRetryDownload(w, r)
+	case "/api/download/cancel":
+		h.handleCancelDownload(w, r)
+	case "/api/download/status":
+		h.handleDownloadStatus(w, r)
+	case "/api/refresh":
+		h.handleRefresh(w, r)
+	case "/health":
+		h.handleHealth(w, r)
+	default:
+		h.writeErrorResponse(w, http.StatusNotFound, "Not found", "The requested endpoint does not exist")
+	}
+}
+
 // SetupRoutes sets up all HTTP routes
 func (h *Handler) SetupRoutes() {
 	http.HandleFunc("/api/notify", h.handleNotify)
