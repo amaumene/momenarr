@@ -87,8 +87,8 @@ func (s *TraktTokenService) generateNewToken() (*trakt.Token, error) {
 
 	log.WithFields(log.Fields{
 		"verification_url": deviceCode.VerificationURL,
-		"user_code":       deviceCode.UserCode,
-		"expires_in":      deviceCode.ExpiresIn,
+		"user_code":        deviceCode.UserCode,
+		"expires_in":       deviceCode.ExpiresIn,
 	}).Info("Please authorize the application")
 
 	fmt.Printf("Please go to %s and enter the code: %s\n", deviceCode.VerificationURL, deviceCode.UserCode)
@@ -152,6 +152,6 @@ func (s *TraktTokenService) ValidateToken(token *trakt.Token) bool {
 	// Additional validation could be added here, such as:
 	// - Checking token expiration
 	// - Making a test API call
-	
+
 	return true
 }

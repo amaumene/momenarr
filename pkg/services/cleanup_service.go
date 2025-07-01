@@ -18,8 +18,8 @@ const (
 
 // CleanupService handles cleanup of watched media
 type CleanupService struct {
-	repo       repository.Repository
-	token      *trakt.Token
+	repo        repository.Repository
+	token       *trakt.Token
 	watchedDays int
 }
 

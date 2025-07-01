@@ -21,7 +21,6 @@ type AppService struct {
 	cleanupService      *CleanupService
 }
 
-// NewAppService creates a new AppService
 func NewAppService(
 	repo repository.Repository,
 	traktService *TraktService,
@@ -40,59 +39,38 @@ func NewAppService(
 	}
 }
 
-// isTestMode checks if any service is running in test mode
-func (s *AppService) isTestMode() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	
-	// Check if download service is in test mode
-	if s.downloadService != nil {
-		return s.downloadService.IsTestMode()
-	}
-	return false
-}
-
 // RunTasks executes all main application tasks with proper synchronization
 func (s *AppService) RunTasks() error {
 	log.Info("Starting application tasks")
 	startTime := time.Now()
 
-	// 1. Sync from Trakt
 	if err := s.syncFromTrakt(); err != nil {
 		log.WithError(err).Error("Failed to sync from Trakt")
 		return fmt.Errorf("syncing from Trakt: %w", err)
 	}
 
-	// 2. Populate NZB entries
 	s.mu.RLock()
 	nzbService := s.nzbService
 	s.mu.RUnlock()
-	
+
 	if err := nzbService.PopulateNZB(); err != nil {
 		log.WithError(err).Error("Failed to populate NZB entries")
 		return fmt.Errorf("populating NZB entries: %w", err)
 	}
 
-	// 3. Download media not on disk
 	s.mu.RLock()
 	downloadService := s.downloadService
 	s.mu.RUnlock()
-	
-	// Skip download processing in test mode since database will be empty
-	if s.isTestMode() {
-		log.Info("🧪 TEST MODE: Skipping download processing - database contains no NZBs")
-	} else {
-		if err := downloadService.DownloadNotOnDisk(); err != nil {
-			log.WithError(err).Error("Failed to download media not on disk")
-			return fmt.Errorf("downloading media not on disk: %w", err)
-		}
+
+	if err := downloadService.DownloadNotOnDisk(); err != nil {
+		log.WithError(err).Error("Failed to download media not on disk")
+		return fmt.Errorf("downloading media not on disk: %w", err)
 	}
 
-	// 4. Clean watched media
 	s.mu.RLock()
 	cleanupService := s.cleanupService
 	s.mu.RUnlock()
-	
+
 	if err := cleanupService.CleanWatched(); err != nil {
 		log.WithError(err).Error("Failed to clean watched media")
 		return fmt.Errorf("cleaning watched media: %w", err)
@@ -109,7 +87,7 @@ func (s *AppService) syncFromTrakt() error {
 	s.mu.RLock()
 	traktService := s.traktService
 	s.mu.RUnlock()
-	
+
 	merged, err := traktService.SyncFromTrakt()
 	if err != nil {
 		return fmt.Errorf("syncing from Trakt: %w", err)
@@ -134,8 +112,7 @@ func (s *AppService) cleanupRemovedMedia(currentTraktIDs []int64) error {
 	}
 
 	var removedCount int
-	
-	// Process media in batches to avoid loading everything into memory
+
 	err := s.repo.ProcessMediaBatches(100, func(batch []*models.Media) error {
 		for _, media := range batch {
 			if !currentIDs[media.Trakt] {
@@ -151,7 +128,7 @@ func (s *AppService) cleanupRemovedMedia(currentTraktIDs []int64) error {
 		}
 		return nil
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("processing media batches for cleanup: %w", err)
 	}
@@ -168,7 +145,6 @@ func (s *AppService) ProcessNotification(notification *models.Notification) erro
 	return s.notificationService.ProcessNotification(notification)
 }
 
-// GetMediaStats returns statistics about media in the system
 func (s *AppService) GetMediaStats() (*MediaStats, error) {
 	allMedia, err := s.repo.FindAllMedia()
 	if err != nil {
@@ -198,26 +174,79 @@ func (s *AppService) GetMediaStats() (*MediaStats, error) {
 	return stats, nil
 }
 
-// GetCleanupStats returns cleanup statistics
 func (s *AppService) GetCleanupStats() (*CleanupStats, error) {
 	return s.cleanupService.GetCleanupStats()
 }
 
-// RetryFailedDownload retries a failed download
 func (s *AppService) RetryFailedDownload(traktID int64) error {
 	return s.downloadService.RetryFailedDownload(traktID)
 }
 
-// CancelDownload cancels an active download
 func (s *AppService) CancelDownload(downloadID int64) error {
 	return s.downloadService.CancelDownload(downloadID)
 }
 
-// GetDownloadStatus gets the status of a download
 func (s *AppService) GetDownloadStatus(downloadID int64) (string, error) {
 	return s.downloadService.GetDownloadStatus(downloadID)
 }
 
+func (s *AppService) GetNZBsByTraktID(traktID int64) ([]*models.NZB, error) {
+	return s.repo.FindAllNZBsByTraktID(traktID)
+}
+
+// MediaStatusItem represents a media item for status display
+type MediaStatusItem struct {
+	TraktID  int64  `json:"trakt_id"`
+	Title    string `json:"title"`
+	Type     string `json:"type"`
+	Season   int64  `json:"season,omitempty"`
+	Episode  int64  `json:"episode,omitempty"`
+	Year     int64  `json:"year,omitempty"`
+	IMDBID   string `json:"imdb_id"`
+	OnDisk   bool   `json:"on_disk"`
+	Status   string `json:"status"`
+	FilePath string `json:"file_path,omitempty"`
+}
+
+func (s *AppService) GetMediaStatus() ([]*MediaStatusItem, error) {
+	allMedia, err := s.repo.FindAllMedia()
+	if err != nil {
+		return nil, fmt.Errorf("finding all media: %w", err)
+	}
+
+	var statusItems []*MediaStatusItem
+	for _, media := range allMedia {
+		item := &MediaStatusItem{
+			TraktID:  media.Trakt,
+			Title:    media.Title,
+			Year:     media.Year,
+			IMDBID:   media.IMDB,
+			OnDisk:   media.OnDisk,
+			FilePath: media.File,
+		}
+
+		if media.IsEpisode() {
+			item.Type = "episode"
+			item.Season = media.Season
+			item.Episode = media.Number
+		} else {
+			item.Type = "movie"
+		}
+
+		// Set human-readable status
+		if media.OnDisk {
+			item.Status = "Available"
+		} else if media.DownloadID > 0 {
+			item.Status = "Downloading"
+		} else {
+			item.Status = "Wanted"
+		}
+
+		statusItems = append(statusItems, item)
+	}
+
+	return statusItems, nil
+}
 
 // UpdateTraktServices updates the Trakt-related services with new token (thread-safe)
 func (s *AppService) UpdateTraktServices(traktService *TraktService, cleanupService *CleanupService) {
@@ -227,14 +256,13 @@ func (s *AppService) UpdateTraktServices(traktService *TraktService, cleanupServ
 	s.cleanupService = cleanupService
 }
 
-// Close gracefully shuts down the application service
 func (s *AppService) Close() error {
 	log.Info("Shutting down application service")
-	
+
 	if err := s.repo.Close(); err != nil {
 		return fmt.Errorf("closing repository: %w", err)
 	}
-	
+
 	return nil
 }
 

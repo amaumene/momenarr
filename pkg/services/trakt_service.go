@@ -87,7 +87,7 @@ func (s *TraktService) syncMoviesFromWatchlist() ([]int64, error) {
 		ListParams: tokenParams,
 		Type:       "movie",
 	}
-	
+
 	iterator := sync.WatchList(watchListParams)
 	var movieIDs []int64
 	var mediaBatch []*models.Media
@@ -139,7 +139,7 @@ func (s *TraktService) syncMoviesFromFavorites() ([]int64, error) {
 		ListParams: tokenParams,
 		Type:       "movies",
 	}
-	
+
 	iterator := sync.Favorites(params)
 	var movieIDs []int64
 	var mediaBatch []*models.Media
@@ -245,7 +245,7 @@ func (s *TraktService) syncEpisodesFromWatchlist() ([]int64, error) {
 		ListParams: tokenParams,
 		Type:       "show",
 	}
-	
+
 	iterator := sync.WatchList(watchListParams)
 	var episodeIDs []int64
 
@@ -259,7 +259,7 @@ func (s *TraktService) syncEpisodesFromWatchlist() ([]int64, error) {
 		progressParams := &trakt.ProgressParams{
 			Params: trakt.Params{OAuth: s.token.AccessToken},
 		}
-		
+
 		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
 		if err != nil {
 			log.WithError(err).WithField("show", item.Show.Title).Error("Failed to get show progress")
@@ -289,7 +289,7 @@ func (s *TraktService) syncEpisodesFromFavorites() ([]int64, error) {
 		ListParams: tokenParams,
 		Type:       "shows",
 	}
-	
+
 	iterator := sync.Favorites(params)
 	var episodeIDs []int64
 
@@ -303,7 +303,7 @@ func (s *TraktService) syncEpisodesFromFavorites() ([]int64, error) {
 		progressParams := &trakt.ProgressParams{
 			Params: trakt.Params{OAuth: s.token.AccessToken},
 		}
-		
+
 		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
 		if err != nil {
 			log.WithError(err).WithField("show", item.Show.Title).Error("Failed to get show progress")
@@ -362,7 +362,7 @@ func (s *TraktService) getNextEpisodes(show *trakt.Show, nextEpisode *trakt.Epis
 // insertEpisodeToDB inserts an episode into the database
 func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
 	if int64(ep.Trakt) <= 0 || len(show.IMDB) == 0 || ep.Number <= 0 || ep.Season <= 0 {
-		return fmt.Errorf("invalid episode data: Trakt=%d, IMDB=%s, Season=%d, Number=%d", 
+		return fmt.Errorf("invalid episode data: Trakt=%d, IMDB=%s, Season=%d, Number=%d",
 			ep.Trakt, show.IMDB, ep.Season, ep.Number)
 	}
 

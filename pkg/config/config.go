@@ -21,7 +21,7 @@ type Config struct {
 	NewsNabAPIKey string `json:"newsnab_api_key" validate:"required"`
 
 	// Trakt configuration
-	TraktAPIKey      string `json:"trakt_api_key" validate:"required"`
+	TraktAPIKey       string `json:"trakt_api_key" validate:"required"`
 	TraktClientSecret string `json:"trakt_client_secret" validate:"required"`
 
 	// NZBGet configuration
@@ -31,23 +31,21 @@ type Config struct {
 	NZBGetPassword string `json:"nzbget_password" validate:"required"`
 
 	// Application settings
-	SyncInterval    string `json:"sync_interval"`
-	BlacklistFile   string `json:"blacklist_file"`
-	MaxRetries      int    `json:"max_retries"`
-	RequestTimeout  int    `json:"request_timeout"`
-	TestMode        bool   `json:"test_mode"` // When true, only shows selected NZBs without downloading or storing
+	SyncInterval   string `json:"sync_interval"`
+	BlacklistFile  string `json:"blacklist_file"`
+	MaxRetries     int    `json:"max_retries"`
+	RequestTimeout int    `json:"request_timeout"`
 }
 
 // LoadConfig loads configuration from environment variables
 func LoadConfig() (*Config, error) {
 	config := &Config{
-		Port:            getEnvOrDefault("PORT", "3000"),
-		Host:            getEnvOrDefault("HOST", "0.0.0.0"),
-		SyncInterval:    getEnvOrDefault("SYNC_INTERVAL", "6h"),
-		BlacklistFile:   getEnvOrDefault("BLACKLIST_FILE", "blacklist.txt"),
-		MaxRetries:      getEnvIntOrDefault("MAX_RETRIES", 3),
-		RequestTimeout:  getEnvIntOrDefault("REQUEST_TIMEOUT", 30),
-		TestMode:        getEnvBoolOrDefault("TEST_MODE", false),
+		Port:           getEnvOrDefault("PORT", "3000"),
+		Host:           getEnvOrDefault("HOST", "0.0.0.0"),
+		SyncInterval:   getEnvOrDefault("SYNC_INTERVAL", "6h"),
+		BlacklistFile:  getEnvOrDefault("BLACKLIST_FILE", "blacklist.txt"),
+		MaxRetries:     getEnvIntOrDefault("MAX_RETRIES", 3),
+		RequestTimeout: getEnvIntOrDefault("REQUEST_TIMEOUT", 30),
 	}
 
 	// Required environment variables
@@ -133,14 +131,6 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 	return defaultValue
 }
 
-func getEnvBoolOrDefault(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		if boolValue, err := strconv.ParseBool(value); err == nil {
-			return boolValue
-		}
-	}
-	return defaultValue
-}
 
 func getRequiredEnv(key string) (string, error) {
 	value := os.Getenv(key)

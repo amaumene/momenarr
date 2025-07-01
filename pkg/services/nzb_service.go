@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,260 +19,26 @@ import (
 
 // NZBService handles NZB search and management operations
 type NZBService struct {
-	repo               repository.Repository
-	newsNabHost        string
-	newsNabAPIKey      string
-	blacklistFile      string
-	blacklistCache     []string
-	blacklistCacheTime time.Time
-	blacklistMu        sync.RWMutex
-	testMode           bool // When true, skips database storage
+	repo           repository.Repository
+	newsNabHost    string
+	newsNabAPIKey  string
+	blacklistFile  string
+	blacklistCache []string
+	blacklistMu    sync.RWMutex
 }
 
-// NewNZBService creates a new NZBService
-func NewNZBService(repo repository.Repository, newsNabHost, newsNabAPIKey, blacklistFile string, testMode bool) *NZBService {
+func NewNZBService(repo repository.Repository, newsNabHost, newsNabAPIKey, blacklistFile string) *NZBService {
 	return &NZBService{
 		repo:          repo,
 		newsNabHost:   newsNabHost,
 		newsNabAPIKey: newsNabAPIKey,
 		blacklistFile: blacklistFile,
-		testMode:      testMode,
 	}
 }
 
-// Resolution represents different resolution priorities for NZB selection
-type Resolution int
-
-const (
-	Resolution2160p Resolution = iota // 4K - highest priority
-	Resolution1080p                   // 1080p - second priority
-	Resolution720p                    // 720p - third priority
-	ResolutionOther                   // Any other resolution - lowest priority
-)
-
-// Quality represents different quality preferences for NZB selection
-type Quality int
-
-const (
-	QualityRemux Quality = iota
-	QualityWebDL
-	QualityAny
-)
-
-var (
-	// Resolution regex patterns
-	resolution2160pRegex = regexp.MustCompile("(?i)2160p|4k")
-	resolution1080pRegex = regexp.MustCompile("(?i)1080p")
-	resolution720pRegex  = regexp.MustCompile("(?i)720p")
-
-	// Quality regex patterns
-	remuxRegex = regexp.MustCompile("(?i)remux")
-	webDLRegex = regexp.MustCompile("(?i)web-dl")
-
-	blacklistCacheDuration = 5 * time.Minute
-)
-
-// GetNZBFromDB retrieves the best NZB for a given Trakt ID prioritizing remux first, then web-dl by highest resolution, and finally by size
+// GetNZBFromDB retrieves the best NZB for a given Trakt ID prioritizing remux first, then web-dl, and finally by size
 func (s *NZBService) GetNZBFromDB(traktID int64) (*models.NZB, error) {
-	allNZBs, err := s.repo.FindNZBsByTraktIDs([]int64{traktID})
-	if err != nil {
-		return nil, fmt.Errorf("finding NZBs: %w", err)
-	}
-
-	// Filter out failed NZBs and those with different Trakt IDs
-	var validNZBs []*models.NZB
-	for _, nzb := range allNZBs {
-		if !nzb.Failed && nzb.Trakt == traktID {
-			validNZBs = append(validNZBs, nzb)
-		}
-	}
-
-	if len(validNZBs) == 0 {
-		return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
-	}
-
-	// Step 1: Find remux candidates first regardless of resolution
-	var remuxCandidates []*models.NZB
-	for _, nzb := range validNZBs {
-		if s.matchesQuality(nzb.Title, QualityRemux) {
-			remuxCandidates = append(remuxCandidates, nzb)
-		}
-	}
-
-	// If we have remux candidates, find the best one by resolution then size
-	if len(remuxCandidates) > 0 {
-		var bestRemux *models.NZB
-		var bestRemuxResolution = ResolutionOther
-
-		for _, nzb := range remuxCandidates {
-			resolution := s.getResolution(nzb.Title)
-
-			// Better resolution found
-			if resolution < bestRemuxResolution {
-				bestRemuxResolution = resolution
-				bestRemux = nzb
-			} else if resolution == bestRemuxResolution && (bestRemux == nil || nzb.Length > bestRemux.Length) {
-				// Same resolution but larger size
-				bestRemux = nzb
-			}
-		}
-
-		// In test mode, only output the selected NZB
-		if s.testMode {
-			fmt.Printf("Selected remux NZB: %s (%.2f GB, %s)\n", 
-				bestRemux.Title, 
-				float64(bestRemux.Length) / (1024 * 1024 * 1024),
-				s.getResolutionName(bestRemuxResolution))
-		} else {
-			log.WithFields(log.Fields{
-				"trakt":      traktID,
-				"title":      bestRemux.Title,
-				"size_gb":    float64(bestRemux.Length) / (1024 * 1024 * 1024),
-				"resolution": s.getResolutionName(bestRemuxResolution),
-				"quality":    "remux",
-			}).Debug("Selected remux NZB")
-		}
-		return bestRemux, nil
-	}
-
-	// Step 2: If no remux available, find web-dl candidates
-	var webDLCandidates []*models.NZB
-	for _, nzb := range validNZBs {
-		if s.matchesQuality(nzb.Title, QualityWebDL) {
-			webDLCandidates = append(webDLCandidates, nzb)
-		}
-	}
-
-	// If we have web-dl candidates, find the best one by resolution then size
-	if len(webDLCandidates) > 0 {
-		// Group web-dl NZBs by resolution
-		var candidates = map[Resolution]*models.NZB{
-			Resolution2160p: nil,
-			Resolution1080p: nil,
-			Resolution720p:  nil,
-			ResolutionOther: nil,
-		}
-
-		for _, nzb := range webDLCandidates {
-			resolution := s.getResolution(nzb.Title)
-
-			// Keep the biggest file for each resolution
-			if candidates[resolution] == nil || nzb.Length > candidates[resolution].Length {
-				candidates[resolution] = nzb
-			}
-		}
-
-		// Return highest priority resolution available
-		resolutionPriority := []Resolution{Resolution2160p, Resolution1080p, Resolution720p, ResolutionOther}
-		for _, resolution := range resolutionPriority {
-			if candidates[resolution] != nil {
-				// In test mode, only output the selected NZB
-				if s.testMode {
-					fmt.Printf("Selected web-dl NZB: %s (%.2f GB, %s)\n", 
-						candidates[resolution].Title, 
-						float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
-						s.getResolutionName(resolution))
-				} else {
-					log.WithFields(log.Fields{
-						"trakt":      traktID,
-						"title":      candidates[resolution].Title,
-						"size_gb":    float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
-						"resolution": s.getResolutionName(resolution),
-						"quality":    "web-dl",
-					}).Debug("Selected web-dl NZB by resolution and size")
-				}
-				return candidates[resolution], nil
-			}
-		}
-	}
-
-	// Step 3: If no remux or web-dl, just find the biggest file in the highest resolution
-	var candidates = map[Resolution]*models.NZB{
-		Resolution2160p: nil,
-		Resolution1080p: nil,
-		Resolution720p:  nil,
-		ResolutionOther: nil,
-	}
-
-	for _, nzb := range validNZBs {
-		resolution := s.getResolution(nzb.Title)
-
-		// Keep the biggest file for each resolution
-		if candidates[resolution] == nil || nzb.Length > candidates[resolution].Length {
-			candidates[resolution] = nzb
-		}
-	}
-
-	// Return highest priority resolution available
-	resolutionPriority := []Resolution{Resolution2160p, Resolution1080p, Resolution720p, ResolutionOther}
-	for _, resolution := range resolutionPriority {
-		if candidates[resolution] != nil {
-			// In test mode, only output the selected NZB
-			if s.testMode {
-				fmt.Printf("Selected NZB: %s (%.2f GB, %s)\n", 
-					candidates[resolution].Title, 
-					float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
-					s.getResolutionName(resolution))
-			} else {
-				log.WithFields(log.Fields{
-					"trakt":      traktID,
-					"title":      candidates[resolution].Title,
-					"size_gb":    float64(candidates[resolution].Length) / (1024 * 1024 * 1024),
-					"resolution": s.getResolutionName(resolution),
-					"quality":    "other",
-				}).Debug("Selected NZB by resolution and size")
-			}
-			return candidates[resolution], nil
-		}
-	}
-
-	return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
-}
-
-// getResolution determines the resolution priority of an NZB title
-func (s *NZBService) getResolution(title string) Resolution {
-	if resolution2160pRegex.MatchString(title) {
-		return Resolution2160p
-	}
-	if resolution1080pRegex.MatchString(title) {
-		return Resolution1080p
-	}
-	if resolution720pRegex.MatchString(title) {
-		return Resolution720p
-	}
-	return ResolutionOther
-}
-
-// getResolutionName returns a human-readable name for a resolution
-func (s *NZBService) getResolutionName(resolution Resolution) string {
-	switch resolution {
-	case Resolution2160p:
-		return "2160p/4K"
-	case Resolution1080p:
-		return "1080p"
-	case Resolution720p:
-		return "720p"
-	case ResolutionOther:
-		return "Other"
-	default:
-		return "Unknown"
-	}
-}
-
-// findNZBByQuality finds NZB by quality preference (deprecated - use GetNZBFromDB instead)
-// This function is kept for backward compatibility but is no longer used internally
-
-// matchesQuality checks if the title matches the quality preference
-func (s *NZBService) matchesQuality(title string, quality Quality) bool {
-	switch quality {
-	case QualityRemux:
-		return remuxRegex.MatchString(title)
-	case QualityWebDL:
-		return webDLRegex.MatchString(title)
-	case QualityAny:
-		return true
-	}
-	return false
+	return s.repo.GetNZB(traktID)
 }
 
 // PopulateNZB populates NZB entries for media not on disk with concurrent processing
@@ -283,9 +48,8 @@ func (s *NZBService) PopulateNZB() error {
 
 // PopulateNZBWithContext populates NZB entries for media not on disk with concurrent processing and context
 func (s *NZBService) PopulateNZBWithContext(ctx context.Context) error {
-	// Process media in batches to manage memory usage
+
 	return s.repo.ProcessMediaBatches(50, func(batch []*models.Media) error {
-		// Filter for media not on disk
 		var notOnDiskMedia []*models.Media
 		for _, media := range batch {
 			if !media.OnDisk {
@@ -299,8 +63,7 @@ func (s *NZBService) PopulateNZBWithContext(ctx context.Context) error {
 
 		log.WithField("count", len(notOnDiskMedia)).Info("Processing NZB batch for media not on disk")
 
-		// Process batch with controlled concurrency
-		return s.processBatchConcurrently(ctx, notOnDiskMedia, 5) // Limit to 5 concurrent operations
+		return s.processBatchConcurrently(ctx, notOnDiskMedia, 5)
 	})
 }
 
@@ -321,7 +84,6 @@ func (s *NZBService) processBatchConcurrently(ctx context.Context, medias []*mod
 		go func(m *models.Media) {
 			defer wg.Done()
 
-			// Acquire semaphore
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
@@ -335,11 +97,8 @@ func (s *NZBService) processBatchConcurrently(ctx context.Context, medias []*mod
 		}(media)
 	}
 
-	// Wait for all goroutines to complete
 	wg.Wait()
 	close(errChan)
-
-	// Check for any errors (optional - could choose to continue on errors)
 	var errors []error
 	for err := range errChan {
 		errors = append(errors, err)
@@ -367,17 +126,16 @@ func (s *NZBService) populateNZBForMedia(media *models.Media) error {
 		return nil
 	}
 
+	// Insert into database
 	if err := s.insertNZBItems(media, feed.Channel.Items); err != nil {
 		return fmt.Errorf("inserting NZB items: %w", err)
 	}
 
-	if !s.testMode {
-		log.WithFields(log.Fields{
-			"trakt": media.Trakt,
-			"title": media.Title,
-			"count": len(feed.Channel.Items),
-		}).Debug("Successfully populated NZB items for media")
-	}
+	log.WithFields(log.Fields{
+		"trakt": media.Trakt,
+		"title": media.Title,
+		"count": len(feed.Channel.Items),
+	}).Debug("Successfully populated NZB items for media")
 
 	return nil
 }
@@ -416,12 +174,10 @@ func (s *NZBService) insertNZBItems(media *models.Media, items []newsnab.Item) e
 
 	for _, item := range items {
 		if s.isBlacklisted(item.Title, blacklist) {
-			if !s.testMode {
-				log.WithFields(log.Fields{
-					"title": item.Title,
-					"trakt": media.Trakt,
-				}).Debug("Skipping blacklisted NZB item")
-			}
+			log.WithFields(log.Fields{
+				"title": item.Title,
+				"trakt": media.Trakt,
+			}).Debug("Skipping blacklisted NZB item")
 			continue
 		}
 
@@ -451,17 +207,8 @@ func (s *NZBService) insertNZBItem(media *models.Media, item newsnab.Item) error
 		UpdatedAt: time.Now(),
 	}
 
-	if s.testMode {
-		// Test mode: skip saving to database and suppress debug logs
-		// Only selected NZBs are output during download phase in GetNZBFromDB
-		return nil
-	}
-
 	if err := s.repo.SaveNZB(nzb); err != nil {
-		// Handle duplicate key error gracefully
-		if !strings.Contains(err.Error(), "already exists") {
-			return fmt.Errorf("saving NZB to database: %w", err)
-		}
+		return fmt.Errorf("saving NZB to database: %w", err)
 	}
 
 	return nil
@@ -469,9 +216,8 @@ func (s *NZBService) insertNZBItem(media *models.Media, item newsnab.Item) error
 
 // getBlacklist retrieves the blacklist with thread-safe caching
 func (s *NZBService) getBlacklist() ([]string, error) {
-	// Check if cache is still valid (read lock)
 	s.blacklistMu.RLock()
-	if time.Since(s.blacklistCacheTime) < blacklistCacheDuration && len(s.blacklistCache) > 0 {
+	if len(s.blacklistCache) > 0 {
 		cachedList := make([]string, len(s.blacklistCache))
 		copy(cachedList, s.blacklistCache)
 		s.blacklistMu.RUnlock()
@@ -479,28 +225,22 @@ func (s *NZBService) getBlacklist() ([]string, error) {
 	}
 	s.blacklistMu.RUnlock()
 
-	// Need to refresh cache (write lock)
 	s.blacklistMu.Lock()
 	defer s.blacklistMu.Unlock()
 
-	// Double-check pattern - another goroutine might have updated the cache
-	if time.Since(s.blacklistCacheTime) < blacklistCacheDuration && len(s.blacklistCache) > 0 {
+	if len(s.blacklistCache) > 0 {
 		cachedList := make([]string, len(s.blacklistCache))
 		copy(cachedList, s.blacklistCache)
 		return cachedList, nil
 	}
 
-	// Read fresh blacklist
 	blacklist, err := s.readBlacklist()
 	if err != nil {
 		return nil, err
 	}
 
-	// Update cache
 	s.blacklistCache = blacklist
-	s.blacklistCacheTime = time.Now()
 
-	// Return copy to avoid concurrent access issues
 	result := make([]string, len(blacklist))
 	copy(result, blacklist)
 	return result, nil
@@ -550,7 +290,6 @@ func (s *NZBService) isBlacklisted(title string, blacklist []string) bool {
 	return false
 }
 
-// MarkNZBFailed marks an NZB as failed
 func (s *NZBService) MarkNZBFailed(traktID int64) error {
 	nzb, err := s.repo.GetNZB(traktID)
 	if err != nil {
@@ -568,16 +307,4 @@ func (s *NZBService) MarkNZBFailed(traktID int64) error {
 	}).Info("Marked NZB as failed")
 
 	return nil
-}
-
-// TestResolutionDetection is a helper function to test resolution detection
-func (s *NZBService) TestResolutionDetection(titles []string) {
-	log.Info("Testing resolution detection:")
-	for _, title := range titles {
-		resolution := s.getResolution(title)
-		log.WithFields(log.Fields{
-			"title":               title,
-			"detected_resolution": s.getResolutionName(resolution),
-		}).Info("Resolution test")
-	}
 }

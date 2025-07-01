@@ -16,22 +16,20 @@ import (
 
 // DownloadService handles download operations
 type DownloadService struct {
-	repo      repository.Repository
-	nzbGet    *nzbget.NZBGet
+	repo       repository.Repository
+	nzbGet     *nzbget.NZBGet
 	nzbService *NZBService
 	httpClient *http.Client
 	category   string
 	dupeMode   string
-	testMode   bool // When true, only outputs selected NZBs without downloading
 }
 
 // NewDownloadService creates a new DownloadService
-func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbService *NZBService, testMode bool) *DownloadService {
+func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbService *NZBService) *DownloadService {
 	return &DownloadService{
 		repo:       repo,
 		nzbGet:     nzbGet,
 		nzbService: nzbService,
-		testMode:   testMode,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -44,11 +42,6 @@ func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbSe
 		category: "momenarr",
 		dupeMode: "score",
 	}
-}
-
-// IsTestMode returns whether the service is running in test mode
-func (s *DownloadService) IsTestMode() bool {
-	return s.testMode
 }
 
 // DownloadNotOnDisk downloads all media that is not on disk
@@ -81,23 +74,11 @@ func (s *DownloadService) processMediaDownload(media *models.Media) error {
 		return fmt.Errorf("getting NZB from database: %w", err)
 	}
 
-	if s.testMode {
-		// Test mode: only output the selected NZB information
-		log.WithFields(log.Fields{
-			"trakt":       media.Trakt,
-			"media_title": media.Title,
-			"nzb_title":   nzb.Title,
-			"size_gb":     float64(nzb.Length) / (1024 * 1024 * 1024),
-			"nzb_link":    nzb.Link,
-		}).Warn("🧪 TEST MODE: Would download this NZB")
-		return nil
-	}
-
 	log.WithFields(log.Fields{
-		"trakt": media.Trakt,
+		"trakt":       media.Trakt,
 		"media_title": media.Title,
-		"nzb_title": nzb.Title,
-		"size_gb": float64(nzb.Length) / (1024 * 1024 * 1024),
+		"nzb_title":   nzb.Title,
+		"size_gb":     float64(nzb.Length) / (1024 * 1024 * 1024),
 	}).Info("Selected NZB for download")
 
 	if err := s.CreateDownload(media.Trakt, nzb); err != nil {
@@ -181,12 +162,12 @@ func (s *DownloadService) createNZBGetInput(nzb *models.NZB, traktID int64) (*nz
 	}
 
 	encodedContent := base64.StdEncoding.EncodeToString(content)
-	
+
 	return &nzbget.AppendInput{
-		Filename:   nzb.Title + ".nzb",
-		Content:    encodedContent,
-		Category:   s.category,
-		DupeMode:   s.dupeMode,
+		Filename: nzb.Title + ".nzb",
+		Content:  encodedContent,
+		Category: s.category,
+		DupeMode: s.dupeMode,
 		Parameters: []*nzbget.Parameter{
 			{
 				Name:  "Trakt",

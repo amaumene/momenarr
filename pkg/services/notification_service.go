@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	categoryMomenarr = "momenarr"
+	categoryMomenarr  = "momenarr"
 	maxHistoryRetries = 3
 	historyRetryDelay = 10 * time.Second
 )
@@ -192,19 +192,19 @@ func (s *NotificationService) findBiggestFile(dir string) (string, error) {
 		if entry.IsDir() {
 			continue
 		}
-		
+
 		info, err := entry.Info()
 		if err != nil {
 			log.WithError(err).WithField("file", entry.Name()).Debug("Failed to get file info")
 			continue
 		}
-		
+
 		if info.Size() > maxSize {
 			biggestFile = filepath.Join(dir, entry.Name())
 			maxSize = info.Size()
 		}
 	}
-	
+
 	if biggestFile == "" {
 		return "", fmt.Errorf("no files found in directory %s", dir)
 	}

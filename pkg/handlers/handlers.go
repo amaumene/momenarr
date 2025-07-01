@@ -17,14 +17,12 @@ type Handler struct {
 	appService *services.AppService
 }
 
-// NewHandler creates a new Handler
 func NewHandler(appService *services.AppService) *Handler {
 	return &Handler{
 		appService: appService,
 	}
 }
 
-// ServeHTTP implements the http.Handler interface
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/notify":
@@ -41,6 +39,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleCancelDownload(w, r)
 	case "/api/download/status":
 		h.handleDownloadStatus(w, r)
+	case "/api/nzb/list":
+		h.handleNZBList(w, r)
+	case "/api/media/status":
+		h.handleMediaStatus(w, r)
 	case "/api/refresh":
 		h.handleRefresh(w, r)
 	case "/health":
@@ -50,7 +52,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// SetupRoutes sets up all HTTP routes
 func (h *Handler) SetupRoutes() {
 	http.HandleFunc("/api/notify", h.handleNotify)
 	http.HandleFunc("/api/media", h.handleMedia)
@@ -59,6 +60,8 @@ func (h *Handler) SetupRoutes() {
 	http.HandleFunc("/api/download/retry", h.handleRetryDownload)
 	http.HandleFunc("/api/download/cancel", h.handleCancelDownload)
 	http.HandleFunc("/api/download/status", h.handleDownloadStatus)
+	http.HandleFunc("/api/nzb/list", h.handleNZBList)
+	http.HandleFunc("/api/media/status", h.handleMediaStatus)
 	http.HandleFunc("/api/refresh", h.handleRefresh)
 	http.HandleFunc("/health", h.handleHealth)
 }
@@ -75,17 +78,15 @@ type ResponseSuccess struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-// writeJSONResponse writes a JSON response
 func (h *Handler) writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	
+
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		log.WithError(err).Error("Failed to encode JSON response")
 	}
 }
 
-// writeErrorResponse writes an error response
 func (h *Handler) writeErrorResponse(w http.ResponseWriter, status int, message, details string) {
 	response := ResponseError{
 		Error:   message,
@@ -94,7 +95,6 @@ func (h *Handler) writeErrorResponse(w http.ResponseWriter, status int, message,
 	h.writeJSONResponse(w, status, response)
 }
 
-// writeSuccessResponse writes a success response
 func (h *Handler) writeSuccessResponse(w http.ResponseWriter, message string, data interface{}) {
 	response := ResponseSuccess{
 		Message: message,
@@ -294,4 +294,59 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeSuccessResponse(w, "Service is healthy", health)
+}
+
+// handleNZBList handles NZB listing requests for a specific Trakt ID
+func (h *Handler) handleNZBList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+		return
+	}
+
+	traktIDStr := r.URL.Query().Get("trakt_id")
+	if traktIDStr == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Missing parameter", "trakt_id parameter is required")
+		return
+	}
+
+	traktID, err := strconv.ParseInt(traktIDStr, 10, 64)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid integer")
+		return
+	}
+
+	nzbs, err := h.appService.GetNZBsByTraktID(traktID)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get NZBs", err.Error())
+		return
+	}
+
+	data := map[string]interface{}{
+		"trakt_id": traktID,
+		"count":    len(nzbs),
+		"nzbs":     nzbs,
+	}
+
+	h.writeSuccessResponse(w, "NZBs retrieved successfully", data)
+}
+
+// handleMediaStatus handles media status listing requests
+func (h *Handler) handleMediaStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+		return
+	}
+
+	mediaStatus, err := h.appService.GetMediaStatus()
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get media status", err.Error())
+		return
+	}
+
+	data := map[string]interface{}{
+		"total_items": len(mediaStatus),
+		"media":       mediaStatus,
+	}
+
+	h.writeSuccessResponse(w, "Media status retrieved successfully", data)
 }

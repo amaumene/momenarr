@@ -22,12 +22,10 @@ import (
 )
 
 func main() {
-	// Setup logging
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.InfoLevel)
 	log.Info("Starting Momenarr application")
 
-	// Load configuration
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.WithError(err).Fatal("Failed to load configuration")
@@ -37,12 +35,6 @@ func main() {
 		log.WithError(err).Fatal("Invalid configuration")
 	}
 
-	// Log test mode status
-	if cfg.TestMode {
-		log.Warn("🧪 RUNNING IN TEST MODE - No downloads will be created, no data will be stored in database")
-	}
-
-	// Initialize database
 	dbPath := filepath.Join(cfg.DataDir, "data.db")
 	store, err := bolthold.Open(dbPath, 0666, nil)
 	if err != nil {
@@ -54,17 +46,14 @@ func main() {
 		}
 	}()
 
-	// Initialize repository
 	repo := repository.NewBoltRepository(store)
 
-	// Initialize NZBGet client
 	nzbGetClient := nzbget.New(&nzbget.Config{
 		URL:  cfg.GetNZBGetURL(),
 		User: cfg.NZBGetUsername,
 		Pass: cfg.NZBGetPassword,
 	})
 
-	// Initialize Trakt token service and get token
 	trakt.Key = cfg.TraktAPIKey
 	tokenService := services.NewTraktTokenService(cfg.DataDir, cfg.TraktClientSecret)
 	traktToken, err := tokenService.GetToken()
@@ -72,51 +61,42 @@ func main() {
 		log.WithError(err).Fatal("Failed to get Trakt token")
 	}
 
-	// Initialize services  
 	nzbService := services.NewNZBService(
 		repo,
 		cfg.NewsNabHost,
 		cfg.NewsNabAPIKey,
 		filepath.Join(cfg.DataDir, cfg.BlacklistFile),
-		cfg.TestMode,
 	)
-	downloadService := services.NewDownloadService(repo, nzbGetClient, nzbService, cfg.TestMode)
+	downloadService := services.NewDownloadService(repo, nzbGetClient, nzbService)
 	notificationService := services.NewNotificationService(repo, nzbGetClient, downloadService, cfg.DownloadDir)
 
 	// Initialize main application service (we'll pass TraktService later)
 	appService := services.NewAppService(
 		repo,
-		nil, // Will be set after token refresh handling is setup
+		nil,
 		nzbService,
 		downloadService,
 		notificationService,
-		nil, // Will be set after token refresh handling is setup
+		nil,
 	)
 
-	// Initialize HTTP handlers
 	handler := handlers.NewHandler(appService)
 	handler.SetupRoutes()
 
-	// Initialize initial Trakt services
 	traktService := services.NewTraktService(repo, traktToken)
 	cleanupService := services.NewCleanupService(repo, traktToken)
 	appService.UpdateTraktServices(traktService, cleanupService)
 
-	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Wait group for tracking goroutines
 	var wg sync.WaitGroup
-
-	// Start background tasks with context
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		startBackgroundTasks(ctx, appService, tokenService, traktToken, repo, cfg)
 	}()
 
-	// Start HTTP server
 	server := &http.Server{
 		Addr:         cfg.GetServerAddress(),
 		Handler:      handler,
@@ -135,7 +115,6 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal
 	waitForShutdown(ctx, cancel, server, appService, &wg)
 }
 
@@ -150,7 +129,6 @@ func startBackgroundTasks(ctx context.Context, appService *services.AppService, 
 	ticker := time.NewTicker(syncInterval)
 	defer ticker.Stop()
 
-	// Run tasks immediately on startup
 	if err := runTasksWithTokenRefresh(ctx, appService, tokenService, &currentToken, repo); err != nil {
 		log.WithError(err).Error("Failed to run initial tasks")
 	}
