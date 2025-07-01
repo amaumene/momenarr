@@ -65,8 +65,7 @@ func main() {
 		log.WithError(err).Fatal("Failed to get Trakt token")
 	}
 
-	// Initialize services
-	traktService := services.NewTraktService(repo, traktToken)
+	// Initialize services  
 	nzbService := services.NewNZBService(
 		repo,
 		cfg.NewsNabHost,
@@ -75,24 +74,28 @@ func main() {
 	)
 	downloadService := services.NewDownloadService(repo, nzbGetClient, nzbService)
 	notificationService := services.NewNotificationService(repo, nzbGetClient, downloadService, cfg.DownloadDir)
-	cleanupService := services.NewCleanupService(repo, traktToken)
 
-	// Initialize main application service
+	// Initialize main application service (we'll pass TraktService later)
 	appService := services.NewAppService(
 		repo,
-		traktService,
+		nil, // Will be set after token refresh handling is setup
 		nzbService,
 		downloadService,
 		notificationService,
-		cleanupService,
+		nil, // Will be set after token refresh handling is setup
 	)
 
 	// Initialize HTTP handlers
 	handler := handlers.NewHandler(appService)
 	handler.SetupRoutes()
 
+	// Initialize initial Trakt services
+	traktService := services.NewTraktService(repo, traktToken)
+	cleanupService := services.NewCleanupService(repo, traktToken)
+	appService.UpdateTraktServices(traktService, cleanupService)
+
 	// Start background tasks
-	go startBackgroundTasks(appService, tokenService, traktToken, cfg)
+	go startBackgroundTasks(appService, tokenService, traktToken, repo, cfg)
 
 	// Start HTTP server
 	server := &http.Server{
@@ -115,7 +118,7 @@ func main() {
 }
 
 // startBackgroundTasks starts the background task loop
-func startBackgroundTasks(appService *services.AppService, tokenService *services.TraktTokenService, currentToken *trakt.Token, cfg *config.Config) {
+func startBackgroundTasks(appService *services.AppService, tokenService *services.TraktTokenService, currentToken *trakt.Token, repo repository.Repository, cfg *config.Config) {
 	syncInterval, err := time.ParseDuration(cfg.SyncInterval)
 	if err != nil {
 		log.WithError(err).Error("Invalid sync interval, using default 6h")
@@ -126,21 +129,26 @@ func startBackgroundTasks(appService *services.AppService, tokenService *service
 	defer ticker.Stop()
 
 	// Run tasks immediately on startup
-	runTasksWithTokenRefresh(appService, tokenService, currentToken)
+	runTasksWithTokenRefresh(appService, tokenService, &currentToken, repo)
 
 	for range ticker.C {
-		runTasksWithTokenRefresh(appService, tokenService, currentToken)
+		runTasksWithTokenRefresh(appService, tokenService, &currentToken, repo)
 	}
 }
 
 // runTasksWithTokenRefresh runs tasks and handles token refresh
-func runTasksWithTokenRefresh(appService *services.AppService, tokenService *services.TraktTokenService, currentToken *trakt.Token) {
+func runTasksWithTokenRefresh(appService *services.AppService, tokenService *services.TraktTokenService, currentToken **trakt.Token, repo repository.Repository) {
 	// Refresh token before running tasks
-	refreshedToken, err := tokenService.RefreshToken(currentToken)
+	refreshedToken, err := tokenService.RefreshToken(*currentToken)
 	if err != nil {
 		log.WithError(err).Error("Failed to refresh Trakt token, using current token")
 	} else {
-		currentToken = refreshedToken
+		*currentToken = refreshedToken
+		// Update services with the new token
+		traktService := services.NewTraktService(repo, refreshedToken)
+		cleanupService := services.NewCleanupService(repo, refreshedToken)
+		appService.UpdateTraktServices(traktService, cleanupService)
+		log.Debug("Updated Trakt services with refreshed token")
 	}
 
 	// Run main application tasks

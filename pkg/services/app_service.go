@@ -180,6 +180,12 @@ func (s *AppService) GetDownloadStatus(downloadID int64) (string, error) {
 }
 
 
+// UpdateTraktServices updates the Trakt-related services with new token
+func (s *AppService) UpdateTraktServices(traktService *TraktService, cleanupService *CleanupService) {
+	s.traktService = traktService
+	s.cleanupService = cleanupService
+}
+
 // Close gracefully shuts down the application service
 func (s *AppService) Close() error {
 	log.Info("Shutting down application service")
