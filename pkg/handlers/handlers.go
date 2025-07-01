@@ -244,11 +244,6 @@ func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleRefresh handles manual refresh requests
 func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
-		return
-	}
-
 	// Run tasks asynchronously
 	go func() {
 		if err := h.appService.RunTasks(); err != nil {
