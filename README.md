@@ -1,67 +1,122 @@
 # Momenarr
 
-This is my alternative to Sonarr/Radarr. It's much more lightweight in terms of features but also resources consumption. I run it on my OpenWRT router.
-This is very much work in progress, probably very ugly code, I don't know that my first try at writing Go.
+A lightweight alternative to Sonarr/Radarr with minimal resource consumption. Perfect for running on resource-constrained devices like OpenWRT routers.
 
 ## Table of Contents
 
-- [How do it work?](#how-do-it-work)
-- [Requirements](#requirements)
-- [Container usage](#container-usage)
+- [Features](#features)
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+  - [Container Usage](#container-usage)
+  - [Building from Source](#building-from-source)
+- [Configuration](#configuration)
+- [API Endpoints](#api-endpoints)
 - [License](#license)
 
-## How do it work?
+## Features
 
-It uses Trakt's watchlist/favorites and also watch history to delete watched medias. It checks periodically for any
-updates. It will then search your NZB indexer (newsnab) and send this NZB to NZBGet. Once the download is completed, it
-copies the file to DownloadDir. It will also periodically check for your watch history to clean up watched medias.
+- **Lightweight**: Minimal resource usage compared to traditional *arr applications
+- **Trakt Integration**: Uses Trakt watchlists, favorites, and watch history
+- **Automated Downloads**: Searches NZB indexers and sends to NZBGet
+- **Smart Quality Selection**: Prioritizes REMUX files, falls back to WEB-DL
+- **Automatic Cleanup**: Removes watched media after 5 days
+- **TV Show Management**: Downloads next episodes based on watchlist/favorites status
 
-For a tv show in the watchlist it will download the first non watched episode. If the tv show is added to the favorites
-list, it will download the next 3 episodes.
-For a movie, it doesn't matter if it's in watchlist or favorites.
+## How It Works
 
-In both cases, once the media is watched, it will be deleted from disk. Only the watched medias in the last 5 days are
-deleted.
+Momenarr integrates with Trakt to manage your media library automatically:
 
-It selects the biggest REMUX file first and if the download fails, the second biggest, etc..
-If there are no REMUX it will pick the WEB-DL version.
+1. **Monitoring**: Periodically checks Trakt watchlists, favorites, and watch history
+2. **Searching**: Searches your Newznab indexer for requested content
+3. **Downloading**: Sends NZB files to NZBGet for download
+4. **Processing**: Copies completed downloads to your media directory
+5. **Cleanup**: Removes watched media from disk after 5 days
 
-It exposes to endpoint API:
+### TV Shows
+- **Watchlist**: Downloads the first unwatched episode
+- **Favorites**: Downloads the next 3 episodes
 
-* /api/notify for NZBGet to notify of a completed download.
-* /refresh to triggers a full refresh manually (i.e pulls watchlist/favorites from Trakt and clean watched medias)
+### Movies
+- Downloads regardless of watchlist or favorites status
 
-Very simple diagram explaining how it works:
-![](momenarr.svg)
+### Quality Selection
+1. Prioritizes largest REMUX files first
+2. Falls back to smaller REMUX files if download fails
+3. Uses WEB-DL versions if no REMUX available
 
-## Requirements
+![Workflow Diagram](momenarr.svg)
 
-This is how I use it:
-1. I use an newsnab indexer
-2. I use NZBGet to download nzb
-3. I use Infuse (connected to Trakt) to watch my content
-4. I created a Trakt application to use its API
-5. I download the media locally and expose the medias through [WebDav](https://github.com/amaumene/my_webdav)
+## Prerequisites
 
-You can run the container or compile it locally.
+To use Momenarr, you'll need:
 
-## Container usage
+1. **Newznab Indexer**: For searching NZB files
+2. **NZBGet**: For downloading NZB files
+3. **Trakt Account**: With API application created
+4. **Media Player**: That supports Trakt (like Infuse)
+5. **Media Server** (optional): Such as [WebDAV](https://github.com/amaumene/my_webdav)
 
-```aiignore
+## Installation
+
+### Container Usage
+
+> **Note**: You can replace `podman` with `docker` in the command below if you prefer to use Docker.
+
+```bash
 podman run --restart unless-stopped -d --name momenarr \
   -v $WHERE_TO_STORE_MEDIAS:/data \
   -v $WHERE_TO_STORE_DB_AND_TRAKT_TOKEN:/config \
   -e DOWNLOAD_DIR="/data/momenarr" \
   -e DATA_DIR="/config" \
-  -e NEWSNAB_API_KEY="$YOUR_NEWSNAB_API" \
+  -e NEWSNAB_API_KEY="$YOUR_NEWSNAB_API_KEY" \
   -e NEWSNAB_HOST="$YOUR_NEWSNAB_HOST" \
+  -e NZBGET_HOST="$YOUR_NZBGET_HOST" \
+  -e NZBGET_PORT="$YOUR_NZBGET_PORT" \
+  -e NZBGET_USERNAME="$YOUR_NZBGET_USERNAME" \
+  -e NZBGET_PASSWORD="$YOUR_NZBGET_PASSWORD" \
   -e TRAKT_API_KEY="$YOUR_TRAKT_API_KEY" \
   -e TRAKT_CLIENT_SECRET="$YOUR_TRAKT_CLIENT_SECRET" \
-  -e NZBGET_URL="$NZBGET_URL" \
-  -e NZBGET_USER="$NZGET_USER" \
-  -e NZBGET_PASS="$NZBGET_PASS" \
-ghcr.io/amaumene/momenarr:main
+  ghcr.io/amaumene/momenarr:main
 ```
+
+### Building from Source
+
+```bash
+git clone https://github.com/amaumene/momenarr.git
+cd momenarr
+go build -o momenarr
+```
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `DOWNLOAD_DIR` | Directory to store downloaded media | Yes |
+| `DATA_DIR` | Directory for database and tokens | Yes |
+| `NEWSNAB_API_KEY` | Your Newznab indexer API key | Yes |
+| `NEWSNAB_HOST` | Your Newznab indexer hostname | Yes |
+| `NZBGET_HOST` | NZBGet server hostname | Yes |
+| `NZBGET_PORT` | NZBGet server port | Yes |
+| `NZBGET_USERNAME` | NZBGet username | Yes |
+| `NZBGET_PASSWORD` | NZBGet password | Yes |
+| `TRAKT_API_KEY` | Your Trakt API key | Yes |
+| `TRAKT_CLIENT_SECRET` | Your Trakt client secret | Yes |
+
+### Trakt Setup
+
+1. Create a Trakt application at [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications)
+2. Note your Client ID and Client Secret
+3. Configure your media player to sync with Trakt
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/notify` | POST | NZBGet notification endpoint for completed downloads |
+| `/refresh` | GET | Manually trigger a full refresh of watchlists and cleanup |
 
 ## License
 
