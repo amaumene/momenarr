@@ -1,11 +1,18 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/pkg/models"
+)
+
+// Pre-compiled regex patterns for better performance
+var (
+	remuxRegex = regexp.MustCompile("(?i)remux")
+	webDLRegex = regexp.MustCompile("(?i)web-dl")
 )
 
 // Repository defines the interface for data access operations
@@ -17,6 +24,9 @@ type Repository interface {
 	FindMediaNotOnDisk() ([]*models.Media, error)
 	FindMediaBatch(traktIDs []int64) ([]*models.Media, error)
 	ProcessMediaBatches(batchSize int, processor func([]*models.Media) error) error
+	ProcessMediaBatchesWithContext(ctx context.Context, batchSize int, processor func([]*models.Media) error) error
+	StreamMedia(processor func(*models.Media) error) error
+	StreamMediaWithContext(ctx context.Context, processor func(*models.Media) error) error
 	UpdateMediaDownloadID(traktID, downloadID int64) error
 	RemoveMedia(traktID int64) error
 	FindAllMedia() ([]*models.Media, error)
@@ -80,7 +90,14 @@ func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
-	defer tx.Rollback()
+	
+	// Track whether we've committed successfully
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
 
 	for _, media := range medias {
 		if err := r.store.TxUpsert(tx, media.Trakt, media); err != nil {
@@ -91,6 +108,7 @@ func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}
+	committed = true
 	return nil
 }
 
@@ -112,14 +130,13 @@ func (r *BoltRepository) FindMediaBatch(traktIDs []int64) ([]*models.Media, erro
 
 // ProcessMediaBatches processes all media in batches to avoid loading everything into memory
 func (r *BoltRepository) ProcessMediaBatches(batchSize int, processor func([]*models.Media) error) error {
-	var offset int
+	var lastID int64 = -1
 
 	for {
 		var batch []*models.Media
 
-		// Use Skip and Limit for pagination - note: this is a simplified approach
-		// In a real scenario, you might want to use a more efficient cursor-based approach
-		if err := r.store.Find(&batch, bolthold.Where("Trakt").Ge(int64(0)).Skip(offset).Limit(batchSize)); err != nil {
+		// Use cursor-based pagination for better performance
+		if err := r.store.Find(&batch, bolthold.Where("Trakt").Gt(lastID).SortBy("Trakt").Limit(batchSize)); err != nil {
 			return fmt.Errorf("failed to find media batch: %w", err)
 		}
 
@@ -131,7 +148,8 @@ func (r *BoltRepository) ProcessMediaBatches(batchSize int, processor func([]*mo
 			return fmt.Errorf("failed to process media batch: %w", err)
 		}
 
-		offset += batchSize
+		// Update lastID for next iteration
+		lastID = batch[len(batch)-1].Trakt
 
 		// If we got fewer records than batch size, we're done
 		if len(batch) < batchSize {
@@ -140,6 +158,74 @@ func (r *BoltRepository) ProcessMediaBatches(batchSize int, processor func([]*mo
 	}
 
 	return nil
+}
+
+// ProcessMediaBatchesWithContext processes all media in batches with context support
+func (r *BoltRepository) ProcessMediaBatchesWithContext(ctx context.Context, batchSize int, processor func([]*models.Media) error) error {
+	var lastID int64 = -1
+
+	for {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		var batch []*models.Media
+
+		// Use cursor-based pagination for better performance
+		if err := r.store.Find(&batch, bolthold.Where("Trakt").Gt(lastID).SortBy("Trakt").Limit(batchSize)); err != nil {
+			return fmt.Errorf("failed to find media batch: %w", err)
+		}
+
+		if len(batch) == 0 {
+			break // No more records
+		}
+
+		if err := processor(batch); err != nil {
+			return fmt.Errorf("failed to process media batch: %w", err)
+		}
+
+		// Update lastID for next iteration
+		lastID = batch[len(batch)-1].Trakt
+
+		// If we got fewer records than batch size, we're done
+		if len(batch) < batchSize {
+			break
+		}
+	}
+
+	return nil
+}
+
+// StreamMedia processes media one by one without loading all into memory
+func (r *BoltRepository) StreamMedia(processor func(*models.Media) error) error {
+	return r.store.ForEach(nil, func(record interface{}) error {
+		media, ok := record.(*models.Media)
+		if !ok {
+			return fmt.Errorf("unexpected type: %T", record)
+		}
+		return processor(media)
+	})
+}
+
+// StreamMediaWithContext processes media one by one with context support
+func (r *BoltRepository) StreamMediaWithContext(ctx context.Context, processor func(*models.Media) error) error {
+	return r.store.ForEach(nil, func(record interface{}) error {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		media, ok := record.(*models.Media)
+		if !ok {
+			return fmt.Errorf("unexpected type: %T", record)
+		}
+		return processor(media)
+	})
 }
 
 func (r *BoltRepository) UpdateMediaDownloadID(traktID, downloadID int64) error {
@@ -184,7 +270,7 @@ func (r *BoltRepository) GetNZB(traktID int64) (*models.NZB, error) {
 	
 	// Step 1: Look for remux files (highest priority)
 	err := r.store.Find(&nzb, bolthold.Where("Trakt").Eq(traktID).And("Title").
-		RegExp(regexp.MustCompile("(?i)remux")).
+		RegExp(remuxRegex).
 		And("Failed").Eq(false).
 		SortBy("Length").Reverse().Limit(1))
 	if err != nil {
@@ -197,7 +283,7 @@ func (r *BoltRepository) GetNZB(traktID int64) (*models.NZB, error) {
 	// Step 2: Look for web-dl files (medium priority)
 	nzb = nil // Clear the slice
 	err = r.store.Find(&nzb, bolthold.Where("Trakt").Eq(traktID).And("Title").
-		RegExp(regexp.MustCompile("(?i)web-dl")).
+		RegExp(webDLRegex).
 		And("Failed").Eq(false).
 		SortBy("Length").Reverse().Limit(1))
 	if err != nil {
@@ -255,7 +341,14 @@ func (r *BoltRepository) SaveNZBBatch(nzbs []*models.NZB) error {
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
-	defer tx.Rollback()
+	
+	// Track whether we've committed successfully
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
 
 	for _, nzb := range nzbs {
 		if nzb.ID == "" {
@@ -269,6 +362,7 @@ func (r *BoltRepository) SaveNZBBatch(nzbs []*models.NZB) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit NZB batch transaction: %w", err)
 	}
+	committed = true
 	return nil
 }
 

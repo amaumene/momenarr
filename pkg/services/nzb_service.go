@@ -23,16 +23,17 @@ type NZBService struct {
 	newsNabHost    string
 	newsNabAPIKey  string
 	blacklistFile  string
-	blacklistCache []string
+	blacklistCache map[string]struct{} // Use map for O(1) lookups
 	blacklistMu    sync.RWMutex
 }
 
 func NewNZBService(repo repository.Repository, newsNabHost, newsNabAPIKey, blacklistFile string) *NZBService {
 	return &NZBService{
-		repo:          repo,
-		newsNabHost:   newsNabHost,
-		newsNabAPIKey: newsNabAPIKey,
-		blacklistFile: blacklistFile,
+		repo:           repo,
+		newsNabHost:    newsNabHost,
+		newsNabAPIKey:  newsNabAPIKey,
+		blacklistFile:  blacklistFile,
+		blacklistCache: make(map[string]struct{}),
 	}
 }
 
@@ -215,34 +216,49 @@ func (s *NZBService) insertNZBItem(media *models.Media, item newsnab.Item) error
 }
 
 // getBlacklist retrieves the blacklist with thread-safe caching
-func (s *NZBService) getBlacklist() ([]string, error) {
+func (s *NZBService) getBlacklist() (map[string]struct{}, error) {
 	s.blacklistMu.RLock()
 	if len(s.blacklistCache) > 0 {
-		cachedList := make([]string, len(s.blacklistCache))
-		copy(cachedList, s.blacklistCache)
+		// Return a copy to prevent external modifications
+		cachedMap := make(map[string]struct{}, len(s.blacklistCache))
+		for k := range s.blacklistCache {
+			cachedMap[k] = struct{}{}
+		}
 		s.blacklistMu.RUnlock()
-		return cachedList, nil
+		return cachedMap, nil
 	}
 	s.blacklistMu.RUnlock()
 
 	s.blacklistMu.Lock()
 	defer s.blacklistMu.Unlock()
 
+	// Double-check after acquiring write lock
 	if len(s.blacklistCache) > 0 {
-		cachedList := make([]string, len(s.blacklistCache))
-		copy(cachedList, s.blacklistCache)
-		return cachedList, nil
+		cachedMap := make(map[string]struct{}, len(s.blacklistCache))
+		for k := range s.blacklistCache {
+			cachedMap[k] = struct{}{}
+		}
+		return cachedMap, nil
 	}
 
-	blacklist, err := s.readBlacklist()
+	blacklistWords, err := s.readBlacklist()
 	if err != nil {
 		return nil, err
 	}
 
-	s.blacklistCache = blacklist
+	// Convert to map for O(1) lookups
+	blacklistMap := make(map[string]struct{}, len(blacklistWords))
+	for _, word := range blacklistWords {
+		blacklistMap[strings.ToLower(word)] = struct{}{}
+	}
 
-	result := make([]string, len(blacklist))
-	copy(result, blacklist)
+	s.blacklistCache = blacklistMap
+
+	// Return a copy
+	result := make(map[string]struct{}, len(blacklistMap))
+	for k := range blacklistMap {
+		result[k] = struct{}{}
+	}
 	return result, nil
 }
 
@@ -279,11 +295,13 @@ func (s *NZBService) readBlacklist() ([]string, error) {
 	return blacklist, nil
 }
 
-// isBlacklisted checks if a title is blacklisted
-func (s *NZBService) isBlacklisted(title string, blacklist []string) bool {
+// isBlacklisted checks if a title is blacklisted using optimized map lookup
+func (s *NZBService) isBlacklisted(title string, blacklist map[string]struct{}) bool {
 	titleLower := strings.ToLower(title)
-	for _, word := range blacklist {
-		if strings.Contains(titleLower, strings.ToLower(word)) {
+	
+	// Check each word in the blacklist map
+	for word := range blacklist {
+		if strings.Contains(titleLower, word) {
 			return true
 		}
 	}

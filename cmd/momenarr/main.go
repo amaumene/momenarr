@@ -168,8 +168,8 @@ func runTasksWithTokenRefresh(ctx context.Context, appService *services.AppServi
 		log.Debug("Updated Trakt services with refreshed token")
 	}
 
-	// Run main application tasks
-	if err := appService.RunTasks(); err != nil {
+	// Run main application tasks with context
+	if err := appService.RunTasks(ctx); err != nil {
 		return fmt.Errorf("running application tasks: %w", err)
 	}
 

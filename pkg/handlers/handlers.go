@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,11 @@ import (
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/services"
 	log "github.com/sirupsen/logrus"
+)
+
+const (
+	// MaxRequestSize is the maximum allowed request body size (1MB)
+	MaxRequestSize = 1 << 20
 )
 
 // Handler contains all HTTP handlers
@@ -24,6 +30,18 @@ func NewHandler(appService *services.AppService) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Add panic recovery
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.WithFields(log.Fields{
+				"panic": rec,
+				"path":  r.URL.Path,
+				"method": r.Method,
+			}).Error("Panic recovered in HTTP handler")
+			h.writeErrorResponse(w, http.StatusInternalServerError, "Internal server error", "An unexpected error occurred")
+		}
+	}()
+
 	switch r.URL.Path {
 	case "/api/notify":
 		h.handleNotify(w, r)
@@ -110,16 +128,33 @@ func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit request body size
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestSize)
+	defer r.Body.Close()
+
 	var notification models.Notification
 	if err := json.NewDecoder(r.Body).Decode(&notification); err != nil {
 		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON", fmt.Sprintf("Failed to parse request body: %v", err))
 		return
 	}
-	defer r.Body.Close()
 
-	// Process notification asynchronously
+	// Process notification asynchronously with panic recovery
 	go func() {
-		if err := h.appService.ProcessNotification(&notification); err != nil {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.WithFields(log.Fields{
+					"panic":    rec,
+					"name":     notification.Name,
+					"category": notification.Category,
+					"status":   notification.Status,
+				}).Error("Panic recovered in notification processor")
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		if err := h.appService.ProcessNotificationWithContext(ctx, &notification); err != nil {
 			log.WithError(err).WithFields(log.Fields{
 				"name":     notification.Name,
 				"category": notification.Category,
@@ -270,9 +305,23 @@ func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleRefresh handles manual refresh requests
 func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	// Run tasks asynchronously
+	if r.Method != http.MethodPost {
+		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
+		return
+	}
+
+	// Run tasks asynchronously with panic recovery
 	go func() {
-		if err := h.appService.RunTasks(); err != nil {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.WithField("panic", rec).Error("Panic recovered in refresh handler")
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+
+		if err := h.appService.RunTasks(ctx); err != nil {
 			log.WithError(err).Error("Failed to run refresh tasks")
 		}
 	}()

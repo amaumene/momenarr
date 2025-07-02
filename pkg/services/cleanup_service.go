@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -51,6 +52,53 @@ func (s *CleanupService) CleanWatched() error {
 	var cleanedCount int
 
 	for iterator.Next() {
+		item, err := iterator.History()
+		if err != nil {
+			log.WithError(err).Error("Failed to scan watch history item")
+			continue
+		}
+
+		if err := s.processWatchedItem(item); err != nil {
+			log.WithError(err).WithField("type", string(item.Type)).Error("Failed to process watched item")
+			continue
+		}
+
+		cleanedCount++
+	}
+
+	if err := iterator.Err(); err != nil {
+		return fmt.Errorf("iterating watch history: %w", err)
+	}
+
+	log.WithFields(log.Fields{
+		"cleaned_count": cleanedCount,
+		"days_back":     s.watchedDays,
+	}).Info("Successfully cleaned watched media")
+
+	return nil
+}
+
+// CleanWatchedWithContext removes media that has been watched recently with context support
+func (s *CleanupService) CleanWatchedWithContext(ctx context.Context) error {
+	params := trakt.ListParams{OAuth: s.token.AccessToken}
+
+	historyParams := &trakt.ListHistoryParams{
+		ListParams: params,
+		EndAt:      time.Now(),
+		StartAt:    time.Now().AddDate(0, 0, -s.watchedDays),
+	}
+
+	iterator := sync.History(historyParams)
+	var cleanedCount int
+
+	for iterator.Next() {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		item, err := iterator.History()
 		if err != nil {
 			log.WithError(err).Error("Failed to scan watch history item")
@@ -168,6 +216,34 @@ func (s *CleanupService) removeNZBRecords(traktID int64) error {
 
 // RemoveMediaManually allows manual removal of media
 func (s *CleanupService) RemoveMediaManually(traktID int64, reason string) error {
+	media, err := s.repo.GetMedia(traktID)
+	if err != nil {
+		return fmt.Errorf("finding media %d: %w", traktID, err)
+	}
+
+	mediaType := media.GetType()
+	if err := s.removeMedia(traktID, media.Title, mediaType); err != nil {
+		return fmt.Errorf("removing media: %w", err)
+	}
+
+	log.WithFields(log.Fields{
+		"trakt":  traktID,
+		"title":  media.Title,
+		"reason": reason,
+	}).Info("Manually removed media")
+
+	return nil
+}
+
+// RemoveMediaManuallyWithContext allows manual removal of media with context support
+func (s *CleanupService) RemoveMediaManuallyWithContext(ctx context.Context, traktID int64, reason string) error {
+	// Check for context cancellation
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	media, err := s.repo.GetMedia(traktID)
 	if err != nil {
 		return fmt.Errorf("finding media %d: %w", traktID, err)

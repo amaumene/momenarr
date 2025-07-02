@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -60,11 +61,80 @@ func (s *TraktService) SyncFromTrakt() ([]int64, error) {
 	return merged, nil
 }
 
+// SyncFromTraktWithContext synchronizes movies and episodes from Trakt with context support
+func (s *TraktService) SyncFromTraktWithContext(ctx context.Context) ([]int64, error) {
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	movies, err := s.syncMoviesFromTraktWithContext(ctx)
+	if err != nil {
+		log.WithError(err).Error("Failed to sync movies from Trakt")
+		return nil, fmt.Errorf("syncing movies from Trakt: %w", err)
+	}
+
+	// Check context between operations
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	episodes, err := s.syncEpisodesFromTraktWithContext(ctx)
+	if err != nil {
+		log.WithError(err).Error("Failed to sync episodes from Trakt")
+		return nil, fmt.Errorf("syncing episodes from Trakt: %w", err)
+	}
+
+	merged := append(movies, episodes...)
+	if len(merged) == 0 {
+		return nil, fmt.Errorf("no media found during sync")
+	}
+
+	log.WithFields(log.Fields{
+		"movies":   len(movies),
+		"episodes": len(episodes),
+		"total":    len(merged),
+	}).Info("Successfully synced media from Trakt")
+
+	return merged, nil
+}
+
 // syncMoviesFromTrakt syncs movies from both watchlist and favorites
 func (s *TraktService) syncMoviesFromTrakt() ([]int64, error) {
 	watchlist, err := s.syncMoviesFromWatchlist()
 	if err != nil {
 		return nil, fmt.Errorf("syncing movies from watchlist: %w", err)
+	}
+
+	favorites, err := s.syncMoviesFromFavorites()
+	if err != nil {
+		return nil, fmt.Errorf("syncing movies from favorites: %w", err)
+	}
+
+	merged := append(watchlist, favorites...)
+	if len(merged) == 0 {
+		return nil, fmt.Errorf("no movies found")
+	}
+
+	return merged, nil
+}
+
+// syncMoviesFromTraktWithContext syncs movies from both watchlist and favorites with context
+func (s *TraktService) syncMoviesFromTraktWithContext(ctx context.Context) ([]int64, error) {
+	watchlist, err := s.syncMoviesFromWatchlist()
+	if err != nil {
+		return nil, fmt.Errorf("syncing movies from watchlist: %w", err)
+	}
+
+	// Check context between operations
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	favorites, err := s.syncMoviesFromFavorites()
@@ -89,47 +159,7 @@ func (s *TraktService) syncMoviesFromWatchlist() ([]int64, error) {
 	}
 
 	iterator := sync.WatchList(watchListParams)
-	var movieIDs []int64
-	var mediaBatch []*models.Media
-	const batchSize = 50
-
-	for iterator.Next() {
-		item, err := iterator.Entry()
-		if err != nil {
-			log.WithError(err).Error("Failed to scan movie item from watchlist")
-			continue
-		}
-
-		media, err := s.createMovieMedia(item.Movie)
-		if err != nil {
-			log.WithError(err).WithField("movie", item.Movie.Title).Error("Failed to create movie media")
-			continue
-		}
-
-		mediaBatch = append(mediaBatch, media)
-		movieIDs = append(movieIDs, int64(item.Movie.Trakt))
-
-		// Save batch when it reaches batch size
-		if len(mediaBatch) >= batchSize {
-			if err := s.repo.SaveMediaBatch(mediaBatch); err != nil {
-				log.WithError(err).Error("Failed to save movie batch")
-			}
-			mediaBatch = nil
-		}
-	}
-
-	// Save remaining items in batch
-	if len(mediaBatch) > 0 {
-		if err := s.repo.SaveMediaBatch(mediaBatch); err != nil {
-			log.WithError(err).Error("Failed to save final movie batch")
-		}
-	}
-
-	if err := iterator.Err(); err != nil {
-		return nil, fmt.Errorf("iterating movie watchlist: %w", err)
-	}
-
-	return movieIDs, nil
+	return s.processMovieIterator(iterator, "watchlist")
 }
 
 // syncMoviesFromFavorites syncs movies from Trakt favorites using batch operations
@@ -141,30 +171,70 @@ func (s *TraktService) syncMoviesFromFavorites() ([]int64, error) {
 	}
 
 	iterator := sync.Favorites(params)
+	return s.processMovieIterator(iterator, "favorites")
+}
+
+// processMovieIterator processes a movie iterator and saves movies in batches
+func (s *TraktService) processMovieIterator(iterator interface{}, source string) ([]int64, error) {
 	var movieIDs []int64
 	var mediaBatch []*models.Media
 	const batchSize = 50
 
-	for iterator.Next() {
-		item, err := iterator.Entry()
-		if err != nil {
-			log.WithError(err).Error("Failed to scan movie item from favorites")
+	// Type assertion for different iterator types
+	var next func() bool
+	var err func() error
+
+	switch it := iterator.(type) {
+	case *trakt.WatchListEntryIterator:
+		next = it.Next
+		err = it.Err
+	case *trakt.FavoritesEntryIterator:
+		next = it.Next
+		err = it.Err
+	default:
+		return nil, fmt.Errorf("unsupported iterator type: %T", iterator)
+	}
+
+	for next() {
+		var movie *trakt.Movie
+		var scanErr error
+
+		// Get the movie from the appropriate iterator type
+		switch it := iterator.(type) {
+		case *trakt.WatchListEntryIterator:
+			item, err := it.Entry()
+			if err != nil {
+				scanErr = err
+			} else {
+				movie = item.Movie
+			}
+		case *trakt.FavoritesEntryIterator:
+			item, err := it.Entry()
+			if err != nil {
+				scanErr = err
+			} else {
+				movie = item.Movie
+			}
+		}
+
+		if scanErr != nil {
+			log.WithError(scanErr).Errorf("Failed to scan movie item from %s", source)
 			continue
 		}
 
-		media, err := s.createMovieMedia(item.Movie)
-		if err != nil {
-			log.WithError(err).WithField("movie", item.Movie.Title).Error("Failed to create movie media")
+		media, createErr := s.createMovieMedia(movie)
+		if createErr != nil {
+			log.WithError(createErr).WithField("movie", movie.Title).Errorf("Failed to create movie media from %s", source)
 			continue
 		}
 
 		mediaBatch = append(mediaBatch, media)
-		movieIDs = append(movieIDs, int64(item.Movie.Trakt))
+		movieIDs = append(movieIDs, int64(movie.Trakt))
 
 		// Save batch when it reaches batch size
 		if len(mediaBatch) >= batchSize {
-			if err := s.repo.SaveMediaBatch(mediaBatch); err != nil {
-				log.WithError(err).Error("Failed to save movie batch")
+			if saveErr := s.repo.SaveMediaBatch(mediaBatch); saveErr != nil {
+				log.WithError(saveErr).Errorf("Failed to save movie batch from %s", source)
 			}
 			mediaBatch = nil
 		}
@@ -172,13 +242,13 @@ func (s *TraktService) syncMoviesFromFavorites() ([]int64, error) {
 
 	// Save remaining items in batch
 	if len(mediaBatch) > 0 {
-		if err := s.repo.SaveMediaBatch(mediaBatch); err != nil {
-			log.WithError(err).Error("Failed to save final movie batch")
+		if saveErr := s.repo.SaveMediaBatch(mediaBatch); saveErr != nil {
+			log.WithError(saveErr).Errorf("Failed to save final movie batch from %s", source)
 		}
 	}
 
-	if err := iterator.Err(); err != nil {
-		return nil, fmt.Errorf("iterating movie favorites: %w", err)
+	if iterErr := err(); iterErr != nil {
+		return nil, fmt.Errorf("iterating movie %s: %w", source, iterErr)
 	}
 
 	return movieIDs, nil
@@ -223,6 +293,33 @@ func (s *TraktService) syncEpisodesFromTrakt() ([]int64, error) {
 	watchlist, err := s.syncEpisodesFromWatchlist()
 	if err != nil {
 		return nil, fmt.Errorf("syncing episodes from watchlist: %w", err)
+	}
+
+	favorites, err := s.syncEpisodesFromFavorites()
+	if err != nil {
+		return nil, fmt.Errorf("syncing episodes from favorites: %w", err)
+	}
+
+	merged := append(watchlist, favorites...)
+	if len(merged) == 0 {
+		return nil, fmt.Errorf("no episodes found")
+	}
+
+	return merged, nil
+}
+
+// syncEpisodesFromTraktWithContext syncs episodes from both watchlist and favorites with context
+func (s *TraktService) syncEpisodesFromTraktWithContext(ctx context.Context) ([]int64, error) {
+	watchlist, err := s.syncEpisodesFromWatchlist()
+	if err != nil {
+		return nil, fmt.Errorf("syncing episodes from watchlist: %w", err)
+	}
+
+	// Check context between operations
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	favorites, err := s.syncEpisodesFromFavorites()
