@@ -162,17 +162,52 @@ func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
 	h.writeSuccessResponse(w, "Notification received and processing started", nil)
 }
 
+// writeHTMLErrorResponse writes an HTML error response instead of JSON
+func (h *Handler) writeHTMLErrorResponse(w http.ResponseWriter, status int, message, details string) {
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(status)
+	
+	errorHTML := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Error - Momenarr</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .error { background-color: #f8d7da; color: #721c24; padding: 20px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="error">
+        <h2>%s</h2>
+        <p>%s</p>
+    </div>
+</body>
+</html>`, message, details)
+	
+	fmt.Fprint(w, errorHTML)
+}
+
 // handleMedia handles media listing requests and returns an HTML page
 func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+		h.writeHTMLErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
 	}
 
 	// Get all media with their status
 	mediaList, err := h.appService.GetAllMedia()
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get media", err.Error())
+		log.WithError(err).Error("Failed to get all media")
+		h.writeHTMLErrorResponse(w, http.StatusInternalServerError, "Failed to get media", "There was an error retrieving the media list")
+		return
+	}
+
+	// Get statistics
+	stats, err := h.appService.GetMediaStats()
+	if err != nil {
+		log.WithError(err).Error("Failed to get media stats")
+		h.writeHTMLErrorResponse(w, http.StatusInternalServerError, "Failed to get stats", "There was an error retrieving media statistics")
 		return
 	}
 
@@ -297,33 +332,75 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 </html>
 `
 
-	// Parse and execute template
+	// Parse template
 	t, err := template.New("media").Parse(tmpl)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Template error", err.Error())
+		log.WithError(err).Error("Failed to parse template")
+		h.writeHTMLErrorResponse(w, http.StatusInternalServerError, "Template error", "There was an error creating the page template")
 		return
 	}
 
-	// Get statistics
-	stats, err := h.appService.GetMediaStats()
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get stats", err.Error())
-		return
+	// Prepare safe data for template - create a simple struct to avoid reflection issues
+	type SafeMediaData struct {
+		Trakt      int64
+		Title      string
+		Year       int64
+		Season     int64
+		Number     int64
+		OnDisk     bool
+		File       string
+		DownloadID int64
+		IsMovie    bool
+		CreatedAt  time.Time
+		UpdatedAt  time.Time
 	}
 
-	// Prepare data for template
+	type SafeStats struct {
+		Total       int
+		OnDisk      int
+		NotOnDisk   int
+		Movies      int
+		Episodes    int
+		Downloading int
+	}
+
+	var safeMediaList []SafeMediaData
+	for _, media := range mediaList {
+		safeMediaList = append(safeMediaList, SafeMediaData{
+			Trakt:      media.Trakt,
+			Title:      media.Title,
+			Year:       media.Year,
+			Season:     media.Season,
+			Number:     media.Number,
+			OnDisk:     media.OnDisk,
+			File:       media.File,
+			DownloadID: media.DownloadID,
+			IsMovie:    media.IsMovie(),
+			CreatedAt:  media.CreatedAt,
+			UpdatedAt:  media.UpdatedAt,
+		})
+	}
+
 	data := struct {
-		Media []*models.Media
-		Stats *services.MediaStats
+		Media []SafeMediaData
+		Stats SafeStats
 	}{
-		Media: mediaList,
-		Stats: stats,
+		Media: safeMediaList,
+		Stats: SafeStats{
+			Total:       stats.Total,
+			OnDisk:      stats.OnDisk,
+			NotOnDisk:   stats.NotOnDisk,
+			Movies:      stats.Movies,
+			Episodes:    stats.Episodes,
+			Downloading: stats.Downloading,
+		},
 	}
 
 	// Set content type and execute template
 	w.Header().Set("Content-Type", "text/html")
 	if err := t.Execute(w, data); err != nil {
 		log.WithError(err).Error("Failed to execute template")
+		// Don't try to write another response here as headers are already sent
 	}
 }
 
