@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-querystring/query"
+	"github.com/amaumene/momenarr/internal/querystring"
 )
 
 // APIVersion is the currently supported API version
@@ -293,7 +293,7 @@ func (s *backendImplementation) callRaw(method, path, key string, params ParamsC
 			return encodeErr
 		}
 	} else {
-		uv, err := query.Values(params)
+		uv, err := querystring.Values(params)
 		if err != nil {
 			return err
 		}

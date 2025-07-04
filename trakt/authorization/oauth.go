@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/google/go-querystring/query"
+	"github.com/amaumene/momenarr/internal/querystring"
 
 	"github.com/amaumene/momenarr/trakt"
 )
@@ -54,7 +54,7 @@ func (c *client) AuthorizeURL(params *trakt.AuthorizationURLParams) (string, err
 	if params == nil {
 		return "", errors.New("params cannot be nil")
 	}
-	uv, err := query.Values(wrappedAuthorizeURLParams{
+	uv, err := querystring.Values(wrappedAuthorizeURLParams{
 		AuthorizationURLParams: *params,
 		ClientID:               c.b.Key(),
 		ResponseType:           "code",

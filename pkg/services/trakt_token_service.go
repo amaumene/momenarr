@@ -117,11 +117,11 @@ func (s *TraktTokenService) generateNewToken() (*trakt.Token, error) {
 func (s *TraktTokenService) saveTokenToFile(token *trakt.Token) error {
 	// Ensure directory exists
 	dir := filepath.Dir(s.tokenFile)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating token directory %s: %w", dir, err)
 	}
 
-	file, err := os.Create(s.tokenFile)
+	file, err := os.OpenFile(s.tokenFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("creating token file %s: %w", s.tokenFile, err)
 	}

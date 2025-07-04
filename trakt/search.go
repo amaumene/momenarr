@@ -3,7 +3,7 @@ package trakt
 import (
 	"net/url"
 
-	"github.com/google/go-querystring/query"
+	"github.com/amaumene/momenarr/internal/querystring"
 )
 
 type SearchField string
@@ -63,12 +63,12 @@ type SearchQueryParams struct {
 // EncodeValues implements the query.Encoder interface.
 func (s *SearchQueryParams) EncodeValues(_ string, v *url.Values) error {
 	type A SearchQueryParams
-	fv, err := query.Values(s.Filters)
+	fv, err := querystring.Values(s.Filters)
 	if err != nil {
 		return err
 	}
 
-	pv, err := query.Values(A(*s))
+	pv, err := querystring.Values(A(*s))
 	if err != nil {
 		return err
 	}

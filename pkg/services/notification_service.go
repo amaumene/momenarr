@@ -39,49 +39,7 @@ func NewNotificationService(repo repository.Repository, nzbGet *nzbget.NZBGet, d
 
 // ProcessNotification processes a download notification
 func (s *NotificationService) ProcessNotification(notification *models.Notification) error {
-	if notification.Category != categoryMomenarr {
-		log.WithField("category", notification.Category).Debug("Ignoring notification for different category")
-		return nil
-	}
-
-	traktID, err := notification.GetTraktID()
-	if err != nil {
-		return fmt.Errorf("parsing Trakt ID: %w", err)
-	}
-
-	media, err := s.repo.GetMedia(traktID)
-	if err != nil {
-		return fmt.Errorf("finding media for Trakt ID %d: %w", traktID, err)
-	}
-
-	processedNotification := &models.ProcessedNotification{
-		Notification: notification,
-		TraktID:      traktID,
-		ProcessedAt:  time.Now(),
-	}
-
-	if notification.IsSuccess() {
-		if err := s.handleDownloadSuccess(processedNotification, media); err != nil {
-			return fmt.Errorf("handling download success: %w", err)
-		}
-	} else {
-		if err := s.handleDownloadFailure(processedNotification); err != nil {
-			return fmt.Errorf("handling download failure: %w", err)
-		}
-	}
-
-	if err := s.deleteFromHistory(media); err != nil {
-		log.WithError(err).WithField("trakt", traktID).Error("Failed to delete from history")
-		// Don't return error as this is not critical
-	}
-
-	log.WithFields(log.Fields{
-		"trakt":  traktID,
-		"title":  media.Title,
-		"status": notification.Status,
-	}).Info("Successfully processed notification")
-
-	return nil
+	return s.ProcessNotificationWithContext(context.Background(), notification)
 }
 
 // ProcessNotificationWithContext processes a download notification with context support
@@ -100,13 +58,33 @@ func (s *NotificationService) ProcessNotificationWithContext(ctx context.Context
 
 	traktID, err := notification.GetTraktID()
 	if err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"name":     notification.Name,
+			"category": notification.Category,
+			"status":   notification.Status,
+			"trakt":    notification.Trakt,
+		}).Error("Failed to parse Trakt ID from notification")
 		return fmt.Errorf("parsing Trakt ID: %w", err)
 	}
 
 	media, err := s.repo.GetMedia(traktID)
 	if err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"trakt":    traktID,
+			"name":     notification.Name,
+			"category": notification.Category,
+		}).Error("Failed to find media record for Trakt ID")
 		return fmt.Errorf("finding media for Trakt ID %d: %w", traktID, err)
 	}
+
+	log.WithFields(log.Fields{
+		"trakt":          traktID,
+		"media_title":    media.Title,
+		"media_on_disk":  media.OnDisk,
+		"download_id":    media.DownloadID,
+		"notification":   notification.Name,
+		"status":         notification.Status,
+	}).Info("Processing notification for media")
 
 	processedNotification := &models.ProcessedNotification{
 		Notification: notification,
@@ -140,40 +118,7 @@ func (s *NotificationService) ProcessNotificationWithContext(ctx context.Context
 
 // handleDownloadSuccess handles successful download notifications
 func (s *NotificationService) handleDownloadSuccess(notification *models.ProcessedNotification, media *models.Media) error {
-	// Find the biggest file in the download directory
-	biggestFile, err := s.findBiggestFile(notification.Dir)
-	if err != nil {
-		return fmt.Errorf("finding biggest file in %s: %w", notification.Dir, err)
-	}
-
-	// Move file to final destination
-	destPath := filepath.Join(s.downloadDir, filepath.Base(biggestFile))
-	if err := os.Rename(biggestFile, destPath); err != nil {
-		return fmt.Errorf("moving file from %s to %s: %w", biggestFile, destPath, err)
-	}
-
-	// Clean up the download directory
-	if err := os.RemoveAll(notification.Dir); err != nil {
-		log.WithError(err).WithField("dir", notification.Dir).Error("Failed to remove download directory")
-		// Don't return error as file has already been moved
-	}
-
-	// Update media record
-	media.File = destPath
-	media.OnDisk = true
-	media.UpdatedAt = time.Now()
-
-	if err := s.repo.SaveMedia(media); err != nil {
-		return fmt.Errorf("updating media record: %w", err)
-	}
-
-	log.WithFields(log.Fields{
-		"trakt":     notification.TraktID,
-		"title":     media.Title,
-		"file_path": destPath,
-	}).Info("Successfully processed download success")
-
-	return nil
+	return s.handleDownloadSuccessWithContext(context.Background(), notification, media)
 }
 
 // handleDownloadSuccessWithContext handles successful download notifications with context support
@@ -188,12 +133,21 @@ func (s *NotificationService) handleDownloadSuccessWithContext(ctx context.Conte
 	// Find the biggest file in the download directory
 	biggestFile, err := s.findBiggestFile(notification.Dir)
 	if err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"trakt": notification.TraktID,
+			"dir":   notification.Dir,
+		}).Error("Failed to find biggest file in download directory")
 		return fmt.Errorf("finding biggest file in %s: %w", notification.Dir, err)
 	}
 
 	// Move file to final destination
 	destPath := filepath.Join(s.downloadDir, filepath.Base(biggestFile))
 	if err := os.Rename(biggestFile, destPath); err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"trakt":    notification.TraktID,
+			"src":      biggestFile,
+			"dest":     destPath,
+		}).Error("Failed to move file to final destination")
 		return fmt.Errorf("moving file from %s to %s: %w", biggestFile, destPath, err)
 	}
 
@@ -203,14 +157,32 @@ func (s *NotificationService) handleDownloadSuccessWithContext(ctx context.Conte
 		// Don't return error as file has already been moved
 	}
 
-	// Update media record
+	// Update media record - do this even if file operations had issues
+	log.WithFields(log.Fields{
+		"trakt":     notification.TraktID,
+		"old_file":  media.File,
+		"new_file":  destPath,
+		"old_disk":  media.OnDisk,
+		"new_disk":  true,
+	}).Info("About to update media record")
+
 	media.File = destPath
 	media.OnDisk = true
 	media.UpdatedAt = time.Now()
 
 	if err := s.repo.SaveMedia(media); err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"trakt": notification.TraktID,
+			"file":  destPath,
+		}).Error("Failed to update media record in database")
 		return fmt.Errorf("updating media record: %w", err)
 	}
+
+	log.WithFields(log.Fields{
+		"trakt":   notification.TraktID,
+		"file":    destPath,
+		"on_disk": true,
+	}).Info("Successfully updated media record in database")
 
 	log.WithFields(log.Fields{
 		"trakt":     notification.TraktID,
@@ -223,18 +195,7 @@ func (s *NotificationService) handleDownloadSuccessWithContext(ctx context.Conte
 
 // handleDownloadFailure handles failed download notifications
 func (s *NotificationService) handleDownloadFailure(notification *models.ProcessedNotification) error {
-	// Retry download with a different NZB
-	if err := s.downloadService.RetryFailedDownload(notification.TraktID); err != nil {
-		log.WithError(err).WithField("trakt", notification.TraktID).Error("Failed to retry download")
-		// Don't return error as the main failure handling is complete
-	}
-
-	log.WithFields(log.Fields{
-		"trakt": notification.TraktID,
-		"title": notification.Name,
-	}).Info("Successfully processed download failure")
-
-	return nil
+	return s.handleDownloadFailureWithContext(context.Background(), notification)
 }
 
 // handleDownloadFailureWithContext handles failed download notifications with context support

@@ -130,34 +130,7 @@ func (r *BoltRepository) FindMediaBatch(traktIDs []int64) ([]*models.Media, erro
 
 // ProcessMediaBatches processes all media in batches to avoid loading everything into memory
 func (r *BoltRepository) ProcessMediaBatches(batchSize int, processor func([]*models.Media) error) error {
-	var lastID int64 = -1
-
-	for {
-		var batch []*models.Media
-
-		// Use cursor-based pagination for better performance
-		if err := r.store.Find(&batch, bolthold.Where("Trakt").Gt(lastID).SortBy("Trakt").Limit(batchSize)); err != nil {
-			return fmt.Errorf("failed to find media batch: %w", err)
-		}
-
-		if len(batch) == 0 {
-			break // No more records
-		}
-
-		if err := processor(batch); err != nil {
-			return fmt.Errorf("failed to process media batch: %w", err)
-		}
-
-		// Update lastID for next iteration
-		lastID = batch[len(batch)-1].Trakt
-
-		// If we got fewer records than batch size, we're done
-		if len(batch) < batchSize {
-			break
-		}
-	}
-
-	return nil
+	return r.ProcessMediaBatchesWithContext(context.Background(), batchSize, processor)
 }
 
 // ProcessMediaBatchesWithContext processes all media in batches with context support
@@ -201,13 +174,7 @@ func (r *BoltRepository) ProcessMediaBatchesWithContext(ctx context.Context, bat
 
 // StreamMedia processes media one by one without loading all into memory
 func (r *BoltRepository) StreamMedia(processor func(*models.Media) error) error {
-	return r.store.ForEach(nil, func(record interface{}) error {
-		media, ok := record.(*models.Media)
-		if !ok {
-			return fmt.Errorf("unexpected type: %T", record)
-		}
-		return processor(media)
-	})
+	return r.StreamMediaWithContext(context.Background(), processor)
 }
 
 // StreamMediaWithContext processes media one by one with context support
@@ -265,47 +232,48 @@ func (r *BoltRepository) SaveNZB(nzb *models.NZB) error {
 }
 
 func (r *BoltRepository) GetNZB(traktID int64) (*models.NZB, error) {
-	// Try BoltDB sorting approach since it should work with proper numeric sorting
-	var nzb []*models.NZB
+	// Get all non-failed NZBs for this Trakt ID in a single query
+	var nzbs []*models.NZB
+	err := r.store.Find(&nzbs, bolthold.Where("Trakt").Eq(traktID).
+		And("Failed").Eq(false))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get NZBs: %w", err)
+	}
 	
-	// Step 1: Look for remux files (highest priority)
-	err := r.store.Find(&nzb, bolthold.Where("Trakt").Eq(traktID).And("Title").
-		RegExp(remuxRegex).
-		And("Failed").Eq(false).
-		SortBy("Length").Reverse().Limit(1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get remux NZB: %w", err)
+	if len(nzbs) == 0 {
+		return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
 	}
-	if len(nzb) > 0 {
-		return nzb[0], nil
+	
+	// Sort and select best NZB in memory (more efficient than multiple queries)
+	var bestNZB *models.NZB
+	var bestScore int
+	
+	for _, nzb := range nzbs {
+		score := 0
+		
+		// Prioritize by quality
+		if remuxRegex.MatchString(nzb.Title) {
+			score = 3000000000 // 3 billion base score for remux
+		} else if webDLRegex.MatchString(nzb.Title) {
+			score = 2000000000 // 2 billion base score for web-dl
+		} else {
+			score = 1000000000 // 1 billion base score for others
+		}
+		
+		// Add size to score (up to 1 billion for size)
+		if nzb.Length < 1000000000 {
+			score += int(nzb.Length)
+		} else {
+			score += 999999999
+		}
+		
+		if score > bestScore {
+			bestScore = score
+			bestNZB = nzb
+		}
 	}
-
-	// Step 2: Look for web-dl files (medium priority)
-	nzb = nil // Clear the slice
-	err = r.store.Find(&nzb, bolthold.Where("Trakt").Eq(traktID).And("Title").
-		RegExp(webDLRegex).
-		And("Failed").Eq(false).
-		SortBy("Length").Reverse().Limit(1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get web-dl NZB: %w", err)
-	}
-	if len(nzb) > 0 {
-		return nzb[0], nil
-	}
-
-	// Step 3: Get largest file overall (fallback)
-	nzb = nil // Clear the slice
-	err = r.store.Find(&nzb, bolthold.Where("Trakt").Eq(traktID).
-		And("Failed").Eq(false).
-		SortBy("Length").Reverse().Limit(1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get any NZB: %w", err)
-	}
-	if len(nzb) > 0 {
-		return nzb[0], nil
-	}
-
-	return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
+	
+	return bestNZB, nil
 }
 
 func (r *BoltRepository) FindAllNZBsByTraktID(traktID int64) ([]*models.NZB, error) {

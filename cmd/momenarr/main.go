@@ -36,7 +36,7 @@ func main() {
 	}
 
 	dbPath := filepath.Join(cfg.DataDir, "data.db")
-	store, err := bolthold.Open(dbPath, 0666, nil)
+	store, err := bolthold.Open(dbPath, 0600, nil)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to open database")
 	}

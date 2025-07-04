@@ -50,7 +50,7 @@ func (s *NZBService) PopulateNZB() error {
 // PopulateNZBWithContext populates NZB entries for media not on disk with concurrent processing and context
 func (s *NZBService) PopulateNZBWithContext(ctx context.Context) error {
 
-	return s.repo.ProcessMediaBatches(50, func(batch []*models.Media) error {
+	return s.repo.ProcessMediaBatches(100, func(batch []*models.Media) error {
 		var notOnDiskMedia []*models.Media
 		for _, media := range batch {
 			if !media.OnDisk {
@@ -85,8 +85,21 @@ func (s *NZBService) processBatchConcurrently(ctx context.Context, medias []*mod
 		go func(m *models.Media) {
 			defer wg.Done()
 
-			semaphore <- struct{}{}
+			select {
+			case semaphore <- struct{}{}:
+			case <-ctx.Done():
+				errChan <- ctx.Err()
+				return
+			}
 			defer func() { <-semaphore }()
+
+			// Check context before processing
+			select {
+			case <-ctx.Done():
+				errChan <- ctx.Err()
+				return
+			default:
+			}
 
 			if err := s.populateNZBForMedia(m); err != nil {
 				log.WithError(err).WithFields(log.Fields{
@@ -297,10 +310,12 @@ func (s *NZBService) readBlacklist() ([]string, error) {
 
 // isBlacklisted checks if a title is blacklisted using optimized map lookup
 func (s *NZBService) isBlacklisted(title string, blacklist map[string]struct{}) bool {
+	// Convert to lowercase once at the beginning
 	titleLower := strings.ToLower(title)
 	
 	// Check each word in the blacklist map
 	for word := range blacklist {
+		// word is already lowercase from when we built the blacklist
 		if strings.Contains(titleLower, word) {
 			return true
 		}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/rpc/json"
+	"github.com/amaumene/momenarr/internal/jsonrpc"
 )
 
 // Package defaults.
@@ -62,7 +62,7 @@ func New(config *Config) *NZBGet {
 
 // GetInto is a helper method to make a JSON-RPC request and turn the response into structured data.
 func (n *NZBGet) GetInto(ctx context.Context, method string, output interface{}, args ...interface{}) error {
-	message, err := json.EncodeClientRequest(method, args)
+	message, err := jsonrpc.EncodeClientRequest(method, args)
 	if err != nil {
 		return fmt.Errorf("encoding request: %w", err)
 	}
@@ -85,7 +85,7 @@ func (n *NZBGet) GetInto(ctx context.Context, method string, output interface{},
 	}
 	defer resp.Body.Close()
 
-	if err := json.DecodeClientResponse(resp.Body, &output); err != nil {
+	if err := jsonrpc.DecodeClientResponse(resp.Body, &output); err != nil {
 		return fmt.Errorf("parsing response: %w: %s", err, resp.Status)
 	}
 

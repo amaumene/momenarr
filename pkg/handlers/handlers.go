@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/amaumene/momenarr/pkg/models"
@@ -138,6 +137,14 @@ func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.WithFields(log.Fields{
+		"name":     notification.Name,
+		"category": notification.Category,
+		"status":   notification.Status,
+		"trakt":    notification.Trakt,
+		"dir":      notification.Dir,
+	}).Info("Received notification from NZBGet")
+
 	// Process notification asynchronously with panic recovery
 	go func() {
 		defer func() {
@@ -147,6 +154,7 @@ func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
 					"name":     notification.Name,
 					"category": notification.Category,
 					"status":   notification.Status,
+					"trakt":    notification.Trakt,
 				}).Error("Panic recovered in notification processor")
 			}
 		}()
@@ -159,7 +167,15 @@ func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
 				"name":     notification.Name,
 				"category": notification.Category,
 				"status":   notification.Status,
+				"trakt":    notification.Trakt,
 			}).Error("Failed to process notification")
+		} else {
+			log.WithFields(log.Fields{
+				"name":     notification.Name,
+				"category": notification.Category,
+				"status":   notification.Status,
+				"trakt":    notification.Trakt,
+			}).Info("Successfully processed notification")
 		}
 	}()
 
@@ -229,9 +245,9 @@ func (h *Handler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	traktID, err := strconv.ParseInt(traktIDStr, 10, 64)
+	traktID, err := validateTraktID(traktIDStr)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid integer")
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid positive integer")
 		return
 	}
 
@@ -256,9 +272,9 @@ func (h *Handler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	downloadID, err := strconv.ParseInt(downloadIDStr, 10, 64)
+	downloadID, err := validateDownloadID(downloadIDStr)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "download_id must be a valid integer")
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "download_id must be a valid positive integer")
 		return
 	}
 
@@ -283,9 +299,9 @@ func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	downloadID, err := strconv.ParseInt(downloadIDStr, 10, 64)
+	downloadID, err := validateDownloadID(downloadIDStr)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "download_id must be a valid integer")
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "download_id must be a valid positive integer")
 		return
 	}
 
@@ -358,9 +374,9 @@ func (h *Handler) handleNZBList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	traktID, err := strconv.ParseInt(traktIDStr, 10, 64)
+	traktID, err := validateTraktID(traktIDStr)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid integer")
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid positive integer")
 		return
 	}
 

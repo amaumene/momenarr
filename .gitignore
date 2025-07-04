@@ -41,6 +41,7 @@ downloads/
 temp/
 momenarr
 start.sh
+dbviewer
 
 # Log files
 *.log

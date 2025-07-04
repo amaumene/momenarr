@@ -34,10 +34,12 @@ func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbSe
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
+				MaxIdleConns:        200,
+				MaxIdleConnsPerHost: 50,
+				MaxConnsPerHost:     50,
 				IdleConnTimeout:     90 * time.Second,
 				DisableCompression:  false,
+				TLSHandshakeTimeout: 10 * time.Second,
 			},
 		},
 		category: "momenarr",
@@ -47,25 +49,7 @@ func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbSe
 
 // DownloadNotOnDisk downloads all media that is not on disk
 func (s *DownloadService) DownloadNotOnDisk() error {
-	medias, err := s.repo.FindMediaNotOnDisk()
-	if err != nil {
-		return fmt.Errorf("finding media not on disk: %w", err)
-	}
-
-	log.WithField("count", len(medias)).Info("Processing downloads for media not on disk")
-
-	for _, media := range medias {
-		if err := s.processMediaDownload(media); err != nil {
-			log.WithError(err).WithFields(log.Fields{
-				"trakt": media.Trakt,
-				"title": media.Title,
-			}).Error("Failed to process media download")
-			continue
-		}
-	}
-
-	log.Info("Finished processing downloads")
-	return nil
+	return s.DownloadNotOnDiskWithContext(context.Background())
 }
 
 // DownloadNotOnDiskWithContext downloads all media that is not on disk with context support
@@ -100,23 +84,7 @@ func (s *DownloadService) DownloadNotOnDiskWithContext(ctx context.Context) erro
 
 // processMediaDownload processes download for a single media item
 func (s *DownloadService) processMediaDownload(media *models.Media) error {
-	nzb, err := s.nzbService.GetNZBFromDB(media.Trakt)
-	if err != nil {
-		return fmt.Errorf("getting NZB from database: %w", err)
-	}
-
-	log.WithFields(log.Fields{
-		"trakt":       media.Trakt,
-		"media_title": media.Title,
-		"nzb_title":   nzb.Title,
-		"size_gb":     float64(nzb.Length) / (1024 * 1024 * 1024),
-	}).Info("Selected NZB for download")
-
-	if err := s.CreateDownload(media.Trakt, nzb); err != nil {
-		return fmt.Errorf("creating download: %w", err)
-	}
-
-	return nil
+	return s.processMediaDownloadWithContext(context.Background(), media)
 }
 
 // processMediaDownloadWithContext processes download for a single media item with context
@@ -142,41 +110,7 @@ func (s *DownloadService) processMediaDownloadWithContext(ctx context.Context, m
 
 // CreateDownload creates a download in NZBGet
 func (s *DownloadService) CreateDownload(traktID int64, nzb *models.NZB) error {
-	// Check if already in queue
-	if exists, err := s.isAlreadyInQueue(nzb.Title); err != nil {
-		return fmt.Errorf("checking if NZB is already in queue: %w", err)
-	} else if exists {
-		log.WithFields(log.Fields{
-			"trakt": traktID,
-			"title": nzb.Title,
-		}).Info("NZB already in queue, skipping")
-		return nil
-	}
-
-	// Create NZBGet input
-	input, err := s.createNZBGetInput(nzb, traktID)
-	if err != nil {
-		return fmt.Errorf("creating NZBGet input: %w", err)
-	}
-
-	// Add to NZBGet
-	downloadID, err := s.nzbGet.Append(input)
-	if err != nil || downloadID <= 0 {
-		return fmt.Errorf("adding to NZBGet queue: %w", err)
-	}
-
-	// Update media with download ID
-	if err := s.repo.UpdateMediaDownloadID(traktID, downloadID); err != nil {
-		return fmt.Errorf("updating media with download ID: %w", err)
-	}
-
-	log.WithFields(log.Fields{
-		"trakt":       traktID,
-		"title":       nzb.Title,
-		"download_id": downloadID,
-	}).Info("Download started successfully")
-
-	return nil
+	return s.CreateDownloadWithContext(context.Background(), traktID, nzb)
 }
 
 // CreateDownloadWithContext creates a download in NZBGet with context support
@@ -213,14 +147,26 @@ func (s *DownloadService) CreateDownloadWithContext(ctx context.Context, traktID
 
 	// Update media with download ID
 	if err := s.repo.UpdateMediaDownloadID(traktID, downloadID); err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"trakt":       traktID,
+			"download_id": downloadID,
+		}).Error("Failed to update media with download ID")
 		return fmt.Errorf("updating media with download ID: %w", err)
 	}
 
-	log.WithFields(log.Fields{
-		"trakt":       traktID,
-		"title":       nzb.Title,
-		"download_id": downloadID,
-	}).Info("Download started successfully")
+	// Verify the update worked
+	media, err := s.repo.GetMedia(traktID)
+	if err != nil {
+		log.WithError(err).WithField("trakt", traktID).Error("Failed to verify media after download ID update")
+	} else {
+		log.WithFields(log.Fields{
+			"trakt":       traktID,
+			"title":       nzb.Title,
+			"download_id": downloadID,
+			"media_dlid":  media.DownloadID,
+			"on_disk":     media.OnDisk,
+		}).Info("Download started successfully and media updated")
+	}
 
 	return nil
 }
@@ -243,40 +189,7 @@ func (s *DownloadService) isAlreadyInQueue(title string) (bool, error) {
 
 // createNZBGetInput creates the input for NZBGet
 func (s *DownloadService) createNZBGetInput(nzb *models.NZB, traktID int64) (*nzbget.AppendInput, error) {
-	// Download NZB content
-	resp, err := s.httpClient.Get(nzb.Link)
-	if err != nil {
-		return nil, fmt.Errorf("downloading NZB file: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to download NZB file, status: %s", resp.Status)
-	}
-
-	// Limit the size of NZB files we'll download (50MB max)
-	const maxNZBSize = 50 * 1024 * 1024
-	limitedReader := io.LimitReader(resp.Body, maxNZBSize)
-
-	content, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return nil, fmt.Errorf("reading NZB file content: %w", err)
-	}
-
-	encodedContent := base64.StdEncoding.EncodeToString(content)
-
-	return &nzbget.AppendInput{
-		Filename: nzb.Title + ".nzb",
-		Content:  encodedContent,
-		Category: s.category,
-		DupeMode: s.dupeMode,
-		Parameters: []*nzbget.Parameter{
-			{
-				Name:  "Trakt",
-				Value: strconv.FormatInt(traktID, 10),
-			},
-		},
-	}, nil
+	return s.createNZBGetInputWithContext(context.Background(), nzb, traktID)
 }
 
 // createNZBGetInputWithContext creates the input for NZBGet with context support
