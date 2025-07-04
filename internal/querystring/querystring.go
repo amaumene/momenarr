@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Values encodes a struct into URL query string values
@@ -54,6 +55,12 @@ func Values(v interface{}) (url.Values, error) {
 }
 
 func isZero(v reflect.Value) bool {
+	// Handle time.Time specifically
+	if v.Type() == reflect.TypeOf(time.Time{}) {
+		t := v.Interface().(time.Time)
+		return t.IsZero()
+	}
+	
 	switch v.Kind() {
 	case reflect.String:
 		return v.String() == ""
@@ -72,6 +79,15 @@ func isZero(v reflect.Value) bool {
 }
 
 func encodeValue(values url.Values, name string, v reflect.Value) error {
+	// Handle time.Time specifically
+	if v.Type() == reflect.TypeOf(time.Time{}) {
+		t := v.Interface().(time.Time)
+		if !t.IsZero() {
+			values.Set(name, t.Format(time.RFC3339))
+		}
+		return nil
+	}
+	
 	switch v.Kind() {
 	case reflect.String:
 		values.Set(name, v.String())

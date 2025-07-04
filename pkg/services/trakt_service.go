@@ -117,7 +117,7 @@ func (s *TraktService) syncMoviesFromWatchlist() ([]int64, error) {
 	tokenParams := trakt.ListParams{OAuth: s.token.AccessToken}
 	watchListParams := &trakt.ListWatchListParams{
 		ListParams: tokenParams,
-		Type:       "movie",
+		Type:       trakt.TypeMovie,
 	}
 
 	iterator := sync.WatchList(watchListParams)
@@ -129,7 +129,7 @@ func (s *TraktService) syncMoviesFromFavorites() ([]int64, error) {
 	tokenParams := trakt.ListParams{OAuth: s.token.AccessToken}
 	params := &trakt.ListFavoritesParams{
 		ListParams: tokenParams,
-		Type:       "movies",
+		Type:       trakt.TypeMovie,
 	}
 
 	iterator := sync.Favorites(params)
@@ -222,6 +222,18 @@ func (s *TraktService) createMovieMedia(movie *trakt.Movie) (*models.Media, erro
 		return nil, fmt.Errorf("invalid movie data: Trakt=%d, IMDB=%s", movie.Trakt, movie.IMDB)
 	}
 
+	// Check if media already exists to preserve OnDisk status
+	existing, err := s.repo.GetMedia(int64(movie.Trakt))
+	if err == nil && existing != nil {
+		// Update existing media but preserve OnDisk status and File path
+		existing.IMDB = string(movie.IMDB)
+		existing.Title = movie.Title
+		existing.Year = movie.Year
+		existing.UpdatedAt = time.Now()
+		return existing, nil
+	}
+
+	// Create new media entry
 	return &models.Media{
 		Trakt:     int64(movie.Trakt),
 		IMDB:      string(movie.IMDB),
@@ -271,7 +283,7 @@ func (s *TraktService) syncEpisodesFromWatchlist() ([]int64, error) {
 	tokenParams := trakt.ListParams{OAuth: s.token.AccessToken}
 	watchListParams := &trakt.ListWatchListParams{
 		ListParams: tokenParams,
-		Type:       "show",
+		Type:       trakt.TypeShow,
 	}
 
 	iterator := sync.WatchList(watchListParams)
@@ -315,7 +327,7 @@ func (s *TraktService) syncEpisodesFromFavorites() ([]int64, error) {
 	tokenParams := trakt.ListParams{OAuth: s.token.AccessToken}
 	params := &trakt.ListFavoritesParams{
 		ListParams: tokenParams,
-		Type:       "shows",
+		Type:       trakt.TypeShow,
 	}
 
 	iterator := sync.Favorites(params)
@@ -394,6 +406,24 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 			ep.Trakt, show.IMDB, ep.Season, ep.Number)
 	}
 
+	// Check if media already exists to preserve OnDisk status
+	existing, err := s.repo.GetMedia(int64(ep.Trakt))
+	if err == nil && existing != nil {
+		// Update existing media but preserve OnDisk status and File path
+		existing.Number = ep.Number
+		existing.Season = ep.Season
+		existing.IMDB = string(show.IMDB)
+		existing.Title = ep.Title
+		existing.Year = show.Year
+		existing.UpdatedAt = time.Now()
+		
+		if err := s.repo.SaveMedia(existing); err != nil {
+			return fmt.Errorf("updating episode %d: %w", ep.Trakt, err)
+		}
+		return nil
+	}
+
+	// Create new media entry
 	media := &models.Media{
 		Trakt:     int64(ep.Trakt),
 		Number:    ep.Number,

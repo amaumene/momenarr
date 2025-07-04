@@ -188,76 +188,26 @@ func (s *AppService) GetCleanupStats() (*CleanupStats, error) {
 	return s.cleanupService.GetCleanupStats()
 }
 
-func (s *AppService) RetryFailedDownload(traktID int64) error {
-	return s.downloadService.RetryFailedDownload(traktID)
-}
-
-func (s *AppService) CancelDownload(downloadID int64) error {
-	return s.downloadService.CancelDownload(downloadID)
-}
-
-func (s *AppService) GetDownloadStatus(downloadID int64) (string, error) {
-	return s.downloadService.GetDownloadStatus(downloadID)
-}
-
 func (s *AppService) GetNZBsByTraktID(traktID int64) ([]*models.NZB, error) {
 	return s.repo.FindAllNZBsByTraktID(traktID)
 }
 
-// MediaStatusItem represents a media item for status display
-type MediaStatusItem struct {
-	TraktID  int64  `json:"trakt_id"`
-	Title    string `json:"title"`
-	Type     string `json:"type"`
-	Season   int64  `json:"season,omitempty"`
-	Episode  int64  `json:"episode,omitempty"`
-	Year     int64  `json:"year,omitempty"`
-	IMDBID   string `json:"imdb_id"`
-	OnDisk   bool   `json:"on_disk"`
-	Status   string `json:"status"`
-	FilePath string `json:"file_path,omitempty"`
-}
 
-func (s *AppService) GetMediaStatus() ([]*MediaStatusItem, error) {
-	var statusItems []*MediaStatusItem
+// GetAllMedia returns all media items for display
+func (s *AppService) GetAllMedia() ([]*models.Media, error) {
+	var mediaList []*models.Media
 
 	// Use streaming to avoid loading all media into memory
 	err := s.repo.StreamMedia(func(media *models.Media) error {
-		item := &MediaStatusItem{
-			TraktID:  media.Trakt,
-			Title:    media.Title,
-			Year:     media.Year,
-			IMDBID:   media.IMDB,
-			OnDisk:   media.OnDisk,
-			FilePath: media.File,
-		}
-
-		if media.IsEpisode() {
-			item.Type = "episode"
-			item.Season = media.Season
-			item.Episode = media.Number
-		} else {
-			item.Type = "movie"
-		}
-
-		// Set human-readable status
-		if media.OnDisk {
-			item.Status = "Available"
-		} else if media.DownloadID > 0 {
-			item.Status = "Downloading"
-		} else {
-			item.Status = "Wanted"
-		}
-
-		statusItems = append(statusItems, item)
+		mediaList = append(mediaList, media)
 		return nil
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("streaming media for status: %w", err)
+		return nil, fmt.Errorf("streaming media: %w", err)
 	}
 
-	return statusItems, nil
+	return mediaList, nil
 }
 
 // UpdateTraktServices updates the Trakt-related services with new token (thread-safe)

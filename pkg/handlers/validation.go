@@ -6,8 +6,7 @@ import (
 )
 
 var (
-	ErrInvalidTraktID    = errors.New("invalid trakt ID")
-	ErrInvalidDownloadID = errors.New("invalid download ID")
+	ErrInvalidTraktID = errors.New("invalid trakt ID")
 )
 
 // validateTraktID validates and parses a Trakt ID
@@ -32,28 +31,4 @@ func validateTraktID(traktIDStr string) (int64, error) {
 	}
 	
 	return traktID, nil
-}
-
-// validateDownloadID validates and parses a download ID
-func validateDownloadID(downloadIDStr string) (int64, error) {
-	if downloadIDStr == "" {
-		return 0, ErrInvalidDownloadID
-	}
-	
-	downloadID, err := strconv.ParseInt(downloadIDStr, 10, 64)
-	if err != nil {
-		return 0, ErrInvalidDownloadID
-	}
-	
-	// Download IDs should be positive
-	if downloadID <= 0 {
-		return 0, ErrInvalidDownloadID
-	}
-	
-	// Reasonable upper bound check
-	if downloadID > 999999999 {
-		return 0, ErrInvalidDownloadID
-	}
-	
-	return downloadID, nil
 }

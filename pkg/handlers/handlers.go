@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"time"
 
@@ -33,8 +34,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			log.WithFields(log.Fields{
-				"panic": rec,
-				"path":  r.URL.Path,
+				"panic":  rec,
+				"path":   r.URL.Path,
 				"method": r.Method,
 			}).Error("Panic recovered in HTTP handler")
 			h.writeErrorResponse(w, http.StatusInternalServerError, "Internal server error", "An unexpected error occurred")
@@ -46,24 +47,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleNotify(w, r)
 	case "/api/media":
 		h.handleMedia(w, r)
-	case "/api/media/stats":
-		h.handleMediaStats(w, r)
-	case "/api/cleanup/stats":
-		h.handleCleanupStats(w, r)
-	case "/api/download/retry":
-		h.handleRetryDownload(w, r)
-	case "/api/download/cancel":
-		h.handleCancelDownload(w, r)
-	case "/api/download/status":
-		h.handleDownloadStatus(w, r)
 	case "/api/nzb/list":
 		h.handleNZBList(w, r)
-	case "/api/media/status":
-		h.handleMediaStatus(w, r)
 	case "/api/refresh":
 		h.handleRefresh(w, r)
-	case "/health":
-		h.handleHealth(w, r)
 	default:
 		h.writeErrorResponse(w, http.StatusNotFound, "Not found", "The requested endpoint does not exist")
 	}
@@ -72,15 +59,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SetupRoutes() {
 	http.HandleFunc("/api/notify", h.handleNotify)
 	http.HandleFunc("/api/media", h.handleMedia)
-	http.HandleFunc("/api/media/stats", h.handleMediaStats)
-	http.HandleFunc("/api/cleanup/stats", h.handleCleanupStats)
-	http.HandleFunc("/api/download/retry", h.handleRetryDownload)
-	http.HandleFunc("/api/download/cancel", h.handleCancelDownload)
-	http.HandleFunc("/api/download/status", h.handleDownloadStatus)
 	http.HandleFunc("/api/nzb/list", h.handleNZBList)
-	http.HandleFunc("/api/media/status", h.handleMediaStatus)
 	http.HandleFunc("/api/refresh", h.handleRefresh)
-	http.HandleFunc("/health", h.handleHealth)
 }
 
 // ResponseError represents an error response
@@ -182,183 +162,169 @@ func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
 	h.writeSuccessResponse(w, "Notification received and processing started", nil)
 }
 
-// handleMedia handles media listing requests
+// handleMedia handles media listing requests and returns an HTML page
 func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
 	}
 
-	// For now, return media stats instead of full listing
-	// A full media listing would require extending the repository interface
-	stats, err := h.appService.GetMediaStats()
+	// Get all media with their status
+	mediaList, err := h.appService.GetAllMedia()
 	if err != nil {
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get media", err.Error())
 		return
 	}
 
-	h.writeSuccessResponse(w, "Media statistics retrieved successfully", stats)
-}
+	// Create HTML template
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Momenarr - Media List</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+        }
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .status-on-disk {
+            color: green;
+            font-weight: bold;
+        }
+        .status-not-on-disk {
+            color: orange;
+            font-weight: bold;
+        }
+        .status-downloading {
+            color: blue;
+            font-weight: bold;
+        }
+        .type-movie {
+            background-color: #e3f2fd;
+        }
+        .type-episode {
+            background-color: #f3e5f5;
+        }
+        .stats {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .file-path {
+            font-family: monospace;
+            font-size: 0.9em;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <h1>Momenarr Media Library</h1>
+    
+    <div class="stats">
+        <h2>Statistics</h2>
+        <p>Total Media: {{.Stats.Total}} | On Disk: {{.Stats.OnDisk}} | Not on Disk: {{.Stats.NotOnDisk}} | Downloading: {{.Stats.Downloading}}</p>
+        <p>Movies: {{.Stats.Movies}} | Episodes: {{.Stats.Episodes}}</p>
+    </div>
 
-// handleMediaStats handles media statistics requests
-func (h *Handler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+    <table>
+        <thead>
+            <tr>
+                <th>Trakt ID</th>
+                <th>Type</th>
+                <th>Title</th>
+                <th>Year</th>
+                <th>Season/Episode</th>
+                <th>Status</th>
+                <th>Download ID</th>
+                <th>File Path</th>
+                <th>Created</th>
+                <th>Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Media}}
+            <tr class="{{if .IsMovie}}type-movie{{else}}type-episode{{end}}">
+                <td>{{.Trakt}}</td>
+                <td>{{if .IsMovie}}Movie{{else}}Episode{{end}}</td>
+                <td>{{.Title}}</td>
+                <td>{{.Year}}</td>
+                <td>{{if not .IsMovie}}S{{printf "%02d" .Season}}E{{printf "%02d" .Number}}{{else}}-{{end}}</td>
+                <td>
+                    {{if .OnDisk}}
+                        <span class="status-on-disk">On Disk</span>
+                    {{else if gt .DownloadID 0}}
+                        <span class="status-downloading">Downloading</span>
+                    {{else}}
+                        <span class="status-not-on-disk">Not on Disk</span>
+                    {{end}}
+                </td>
+                <td>{{if gt .DownloadID 0}}{{.DownloadID}}{{else}}-{{end}}</td>
+                <td class="file-path">{{if .File}}{{.File}}{{else}}-{{end}}</td>
+                <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+                <td>{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</body>
+</html>
+`
+
+	// Parse and execute template
+	t, err := template.New("media").Parse(tmpl)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Template error", err.Error())
 		return
 	}
 
+	// Get statistics
 	stats, err := h.appService.GetMediaStats()
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get media stats", err.Error())
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get stats", err.Error())
 		return
 	}
 
-	h.writeSuccessResponse(w, "Media statistics retrieved successfully", stats)
-}
-
-// handleCleanupStats handles cleanup statistics requests
-func (h *Handler) handleCleanupStats(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
-		return
+	// Prepare data for template
+	data := struct {
+		Media []*models.Media
+		Stats *services.MediaStats
+	}{
+		Media: mediaList,
+		Stats: stats,
 	}
 
-	stats, err := h.appService.GetCleanupStats()
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get cleanup stats", err.Error())
-		return
+	// Set content type and execute template
+	w.Header().Set("Content-Type", "text/html")
+	if err := t.Execute(w, data); err != nil {
+		log.WithError(err).Error("Failed to execute template")
 	}
-
-	h.writeSuccessResponse(w, "Cleanup statistics retrieved successfully", stats)
-}
-
-// handleRetryDownload handles download retry requests
-func (h *Handler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
-		return
-	}
-
-	traktIDStr := r.URL.Query().Get("trakt_id")
-	if traktIDStr == "" {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Missing parameter", "trakt_id parameter is required")
-		return
-	}
-
-	traktID, err := validateTraktID(traktIDStr)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid positive integer")
-		return
-	}
-
-	if err := h.appService.RetryFailedDownload(traktID); err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to retry download", err.Error())
-		return
-	}
-
-	h.writeSuccessResponse(w, "Download retry initiated", map[string]int64{"trakt_id": traktID})
-}
-
-// handleCancelDownload handles download cancellation requests
-func (h *Handler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
-		return
-	}
-
-	downloadIDStr := r.URL.Query().Get("download_id")
-	if downloadIDStr == "" {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Missing parameter", "download_id parameter is required")
-		return
-	}
-
-	downloadID, err := validateDownloadID(downloadIDStr)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "download_id must be a valid positive integer")
-		return
-	}
-
-	if err := h.appService.CancelDownload(downloadID); err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to cancel download", err.Error())
-		return
-	}
-
-	h.writeSuccessResponse(w, "Download canceled", map[string]int64{"download_id": downloadID})
-}
-
-// handleDownloadStatus handles download status requests
-func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
-		return
-	}
-
-	downloadIDStr := r.URL.Query().Get("download_id")
-	if downloadIDStr == "" {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Missing parameter", "download_id parameter is required")
-		return
-	}
-
-	downloadID, err := validateDownloadID(downloadIDStr)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "download_id must be a valid positive integer")
-		return
-	}
-
-	status, err := h.appService.GetDownloadStatus(downloadID)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get download status", err.Error())
-		return
-	}
-
-	data := map[string]interface{}{
-		"download_id": downloadID,
-		"status":      status,
-	}
-
-	h.writeSuccessResponse(w, "Download status retrieved", data)
-}
-
-// handleRefresh handles manual refresh requests
-func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
-		return
-	}
-
-	// Run tasks asynchronously with panic recovery
-	go func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				log.WithField("panic", rec).Error("Panic recovered in refresh handler")
-			}
-		}()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-
-		if err := h.appService.RunTasks(ctx); err != nil {
-			log.WithError(err).Error("Failed to run refresh tasks")
-		}
-	}()
-
-	h.writeSuccessResponse(w, "Refresh initiated", nil)
-}
-
-// handleHealth handles health check requests
-func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
-		return
-	}
-
-	health := map[string]interface{}{
-		"status":    "healthy",
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"version":   "1.0.0",
-	}
-
-	h.writeSuccessResponse(w, "Service is healthy", health)
 }
 
 // handleNZBList handles NZB listing requests for a specific Trakt ID
@@ -395,23 +361,29 @@ func (h *Handler) handleNZBList(w http.ResponseWriter, r *http.Request) {
 	h.writeSuccessResponse(w, "NZBs retrieved successfully", data)
 }
 
-// handleMediaStatus handles media status listing requests
-func (h *Handler) handleMediaStatus(w http.ResponseWriter, r *http.Request) {
+// handleRefresh handles manual refresh requests
+func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
 	}
 
-	mediaStatus, err := h.appService.GetMediaStatus()
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get media status", err.Error())
-		return
-	}
+	// Run tasks asynchronously with panic recovery
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.WithField("panic", rec).Error("Panic recovered in refresh handler")
+			}
+		}()
 
-	data := map[string]interface{}{
-		"total_items": len(mediaStatus),
-		"media":       mediaStatus,
-	}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
 
-	h.writeSuccessResponse(w, "Media status retrieved successfully", data)
+		if err := h.appService.RunTasks(ctx); err != nil {
+			log.WithError(err).Error("Failed to run refresh tasks")
+		}
+	}()
+
+	h.writeSuccessResponse(w, "Refresh initiated", nil)
 }
+

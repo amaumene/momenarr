@@ -233,7 +233,7 @@ func (s *CleanupService) GetCleanupStats() (*CleanupStats, error) {
 			continue
 		}
 
-		switch item.Type.String() {
+		switch string(item.Type) {
 		case "movie":
 			stats.Movies++
 		case "episode":

@@ -16,5 +16,5 @@ POST_DATA="{
 # Send notification to the API
 /busybox wget --header="Content-Type: application/json" --post-data="${POST_DATA}" "${API_URL}"
 
-# Exit with status 0 (success)
+# Exit with status 93
 exit 93

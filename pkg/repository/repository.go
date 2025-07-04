@@ -52,9 +52,6 @@ func NewBoltRepository(store *bolthold.Store) Repository {
 	return &BoltRepository{store: store}
 }
 
-func (r *BoltRepository) Store() *bolthold.Store {
-	return r.store
-}
 
 // Media operations
 func (r *BoltRepository) SaveMedia(media *models.Media) error {
@@ -90,7 +87,7 @@ func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
-	
+
 	// Track whether we've committed successfully
 	committed := false
 	defer func() {
@@ -239,18 +236,18 @@ func (r *BoltRepository) GetNZB(traktID int64) (*models.NZB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get NZBs: %w", err)
 	}
-	
+
 	if len(nzbs) == 0 {
 		return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
 	}
-	
+
 	// Sort and select best NZB in memory (more efficient than multiple queries)
 	var bestNZB *models.NZB
 	var bestScore int
-	
+
 	for _, nzb := range nzbs {
 		score := 0
-		
+
 		// Prioritize by quality
 		if remuxRegex.MatchString(nzb.Title) {
 			score = 3000000000 // 3 billion base score for remux
@@ -259,20 +256,20 @@ func (r *BoltRepository) GetNZB(traktID int64) (*models.NZB, error) {
 		} else {
 			score = 1000000000 // 1 billion base score for others
 		}
-		
+
 		// Add size to score (up to 1 billion for size)
 		if nzb.Length < 1000000000 {
 			score += int(nzb.Length)
 		} else {
 			score += 999999999
 		}
-		
+
 		if score > bestScore {
 			bestScore = score
 			bestNZB = nzb
 		}
 	}
-	
+
 	return bestNZB, nil
 }
 
@@ -309,7 +306,7 @@ func (r *BoltRepository) SaveNZBBatch(nzbs []*models.NZB) error {
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
-	
+
 	// Track whether we've committed successfully
 	committed := false
 	defer func() {
