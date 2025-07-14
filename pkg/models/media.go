@@ -5,6 +5,7 @@ import "time"
 // Media represents a media item (movie or TV episode) in the system
 type Media struct {
 	Trakt      int64     `json:"trakt" boltholdIndex:"Trakt" validate:"required"`
+	TraktSlug  string    `json:"trakt_slug,omitempty"` // Added slug field for API calls
 	IMDB       string    `json:"imdb,omitempty"`
 	Number     int64     `json:"number,omitempty"`
 	Season     int64     `json:"season,omitempty"`

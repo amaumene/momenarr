@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/services"
 	log "github.com/sirupsen/logrus"
 )
@@ -18,18 +17,22 @@ const (
 	MaxRequestSize = 1 << 20
 )
 
-// Handler contains all HTTP handlers
-type Handler struct {
-	appService *services.AppService
+// NewHandler contains all HTTP handlers for the new torrent/AllDebrid version
+type NewHandler struct {
+	appService *services.NewAppService
 }
 
-func NewHandler(appService *services.AppService) *Handler {
-	return &Handler{
+func CreateNewHandler(appService *services.NewAppService) *NewHandler {
+	return &NewHandler{
 		appService: appService,
 	}
 }
 
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func NewAppHandler(appService *services.NewAppService) http.Handler {
+	return CreateNewHandler(appService)
+}
+
+func (h *NewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Add panic recovery
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -37,30 +40,42 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"panic":  rec,
 				"path":   r.URL.Path,
 				"method": r.Method,
-			}).Error("Panic recovered in HTTP handler")
-			h.writeErrorResponse(w, http.StatusInternalServerError, "Internal server error", "An unexpected error occurred")
+			}).Error("panic recovered in http handler")
+			h.writeErrorResponse(w, http.StatusInternalServerError, "internal server error", "an unexpected error occurred")
 		}
 	}()
 
 	switch r.URL.Path {
-	case "/api/notify":
-		h.handleNotify(w, r)
 	case "/api/media":
 		h.handleMedia(w, r)
-	case "/api/nzb/list":
-		h.handleNZBList(w, r)
+	case "/api/media/stats":
+		h.handleMediaStats(w, r)
+	case "/api/torrents/list":
+		h.handleTorrentList(w, r)
+	case "/api/download/retry":
+		h.handleRetryDownload(w, r)
+	case "/api/download/cancel":
+		h.handleCancelDownload(w, r)
+	case "/api/download/status":
+		h.handleDownloadStatus(w, r)
 	case "/api/refresh":
 		h.handleRefresh(w, r)
+	case "/api/cleanup/stats":
+		h.handleCleanupStats(w, r)
 	default:
-		h.writeErrorResponse(w, http.StatusNotFound, "Not found", "The requested endpoint does not exist")
+		h.writeErrorResponse(w, http.StatusNotFound, "not found", "the requested endpoint does not exist")
 	}
 }
 
-func (h *Handler) SetupRoutes() {
-	http.HandleFunc("/api/notify", h.handleNotify)
+func (h *NewHandler) SetupRoutes() {
 	http.HandleFunc("/api/media", h.handleMedia)
-	http.HandleFunc("/api/nzb/list", h.handleNZBList)
+	http.HandleFunc("/api/media/stats", h.handleMediaStats)
+	http.HandleFunc("/api/torrents/list", h.handleTorrentList)
+	http.HandleFunc("/api/download/retry", h.handleRetryDownload)
+	http.HandleFunc("/api/download/cancel", h.handleCancelDownload)
+	http.HandleFunc("/api/download/status", h.handleDownloadStatus)
 	http.HandleFunc("/api/refresh", h.handleRefresh)
+	http.HandleFunc("/api/cleanup/stats", h.handleCleanupStats)
 }
 
 // ResponseError represents an error response
@@ -75,16 +90,16 @@ type ResponseSuccess struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-func (h *Handler) writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
+func (h *NewHandler) writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.WithError(err).Error("Failed to encode JSON response")
+		log.WithError(err).Error("failed to encode json response")
 	}
 }
 
-func (h *Handler) writeErrorResponse(w http.ResponseWriter, status int, message, details string) {
+func (h *NewHandler) writeErrorResponse(w http.ResponseWriter, status int, message, details string) {
 	response := ResponseError{
 		Error:   message,
 		Message: details,
@@ -92,7 +107,7 @@ func (h *Handler) writeErrorResponse(w http.ResponseWriter, status int, message,
 	h.writeJSONResponse(w, status, response)
 }
 
-func (h *Handler) writeSuccessResponse(w http.ResponseWriter, message string, data interface{}) {
+func (h *NewHandler) writeSuccessResponse(w http.ResponseWriter, message string, data interface{}) {
 	response := ResponseSuccess{
 		Message: message,
 		Data:    data,
@@ -100,73 +115,11 @@ func (h *Handler) writeSuccessResponse(w http.ResponseWriter, message string, da
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// handleNotify handles download notifications from NZBGet
-func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
-		return
-	}
-
-	// Limit request body size
-	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestSize)
-	defer r.Body.Close()
-
-	var notification models.Notification
-	if err := json.NewDecoder(r.Body).Decode(&notification); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON", fmt.Sprintf("Failed to parse request body: %v", err))
-		return
-	}
-
-	log.WithFields(log.Fields{
-		"name":     notification.Name,
-		"category": notification.Category,
-		"status":   notification.Status,
-		"trakt":    notification.Trakt,
-		"dir":      notification.Dir,
-	}).Info("Received notification from NZBGet")
-
-	// Process notification asynchronously with panic recovery
-	go func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				log.WithFields(log.Fields{
-					"panic":    rec,
-					"name":     notification.Name,
-					"category": notification.Category,
-					"status":   notification.Status,
-					"trakt":    notification.Trakt,
-				}).Error("Panic recovered in notification processor")
-			}
-		}()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
-		if err := h.appService.ProcessNotificationWithContext(ctx, &notification); err != nil {
-			log.WithError(err).WithFields(log.Fields{
-				"name":     notification.Name,
-				"category": notification.Category,
-				"status":   notification.Status,
-				"trakt":    notification.Trakt,
-			}).Error("Failed to process notification")
-		} else {
-			log.WithFields(log.Fields{
-				"name":     notification.Name,
-				"category": notification.Category,
-				"status":   notification.Status,
-				"trakt":    notification.Trakt,
-			}).Info("Successfully processed notification")
-		}
-	}()
-
-	h.writeSuccessResponse(w, "Notification received and processing started", nil)
-}
-
 // writeHTMLErrorResponse writes an HTML error response instead of JSON
-func (h *Handler) writeHTMLErrorResponse(w http.ResponseWriter, status int, message, details string) {
+func (h *NewHandler) writeHTMLErrorResponse(w http.ResponseWriter, status int, message, details string) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(status)
-	
+
 	errorHTML := fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
@@ -184,14 +137,14 @@ func (h *Handler) writeHTMLErrorResponse(w http.ResponseWriter, status int, mess
     </div>
 </body>
 </html>`, message, details)
-	
+
 	fmt.Fprint(w, errorHTML)
 }
 
 // handleMedia handles media listing requests and returns an HTML page
-func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
+func (h *NewHandler) handleMedia(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		h.writeHTMLErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+		h.writeHTMLErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", "only GET requests are allowed")
 		return
 	}
 
@@ -277,6 +230,11 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
             font-size: 0.9em;
             color: #555;
         }
+        .powered-by {
+            margin-top: 20px;
+            text-align: center;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -297,7 +255,6 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
                 <th>Year</th>
                 <th>Season/Episode</th>
                 <th>Status</th>
-                <th>Download ID</th>
                 <th>File Path</th>
                 <th>Created</th>
                 <th>Updated</th>
@@ -314,13 +271,12 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
                 <td>
                     {{if .OnDisk}}
                         <span class="status-on-disk">On Disk</span>
-                    {{else if gt .DownloadID 0}}
+                    {{else if .IsDownloading}}
                         <span class="status-downloading">Downloading</span>
                     {{else}}
                         <span class="status-not-on-disk">Not on Disk</span>
                     {{end}}
                 </td>
-                <td>{{if gt .DownloadID 0}}{{.DownloadID}}{{else}}-{{end}}</td>
                 <td class="file-path">{{if .File}}{{.File}}{{else}}-{{end}}</td>
                 <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
                 <td>{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
@@ -328,6 +284,10 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
             {{end}}
         </tbody>
     </table>
+    
+    <div class="powered-by">
+        <p>Powered by Momenarr with AllDebrid</p>
+    </div>
 </body>
 </html>
 `
@@ -340,19 +300,19 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prepare safe data for template - create a simple struct to avoid reflection issues
+	// Prepare safe data for template
 	type SafeMediaData struct {
-		Trakt      int64
-		Title      string
-		Year       int64
-		Season     int64
-		Number     int64
-		OnDisk     bool
-		File       string
-		DownloadID int64
-		IsMovie    bool
-		CreatedAt  time.Time
-		UpdatedAt  time.Time
+		Trakt         int64
+		Title         string
+		Year          int64
+		Season        int64
+		Number        int64
+		OnDisk        bool
+		File          string
+		IsMovie       bool
+		IsDownloading bool
+		CreatedAt     time.Time
+		UpdatedAt     time.Time
 	}
 
 	type SafeStats struct {
@@ -366,18 +326,30 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 
 	var safeMediaList []SafeMediaData
 	for _, media := range mediaList {
+		// Check if downloading by looking for active torrents
+		isDownloading := false
+		if !media.OnDisk {
+			torrents, _ := h.appService.GetTorrentsByTraktID(media.Trakt)
+			for _, torrent := range torrents {
+				if torrent.AllDebridID > 0 && !torrent.Failed {
+					isDownloading = true
+					break
+				}
+			}
+		}
+
 		safeMediaList = append(safeMediaList, SafeMediaData{
-			Trakt:      media.Trakt,
-			Title:      media.Title,
-			Year:       media.Year,
-			Season:     media.Season,
-			Number:     media.Number,
-			OnDisk:     media.OnDisk,
-			File:       media.File,
-			DownloadID: media.DownloadID,
-			IsMovie:    media.IsMovie(),
-			CreatedAt:  media.CreatedAt,
-			UpdatedAt:  media.UpdatedAt,
+			Trakt:         media.Trakt,
+			Title:         media.Title,
+			Year:          media.Year,
+			Season:        media.Season,
+			Number:        media.Number,
+			OnDisk:        media.OnDisk,
+			File:          media.File,
+			IsMovie:       media.IsMovie(),
+			IsDownloading: isDownloading,
+			CreatedAt:     media.CreatedAt,
+			UpdatedAt:     media.UpdatedAt,
 		})
 	}
 
@@ -404,8 +376,24 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleNZBList handles NZB listing requests for a specific Trakt ID
-func (h *Handler) handleNZBList(w http.ResponseWriter, r *http.Request) {
+// handleMediaStats returns JSON media statistics
+func (h *NewHandler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+		return
+	}
+
+	stats, err := h.appService.GetMediaStats()
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get stats", err.Error())
+		return
+	}
+
+	h.writeSuccessResponse(w, "Statistics retrieved successfully", stats)
+}
+
+// handleTorrentList handles torrent listing requests for a specific Trakt ID
+func (h *NewHandler) handleTorrentList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
@@ -423,29 +411,122 @@ func (h *Handler) handleNZBList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nzbs, err := h.appService.GetNZBsByTraktID(traktID)
+	torrents, err := h.appService.GetTorrentsByTraktID(traktID)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get NZBs", err.Error())
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get torrents", err.Error())
 		return
 	}
 
 	data := map[string]interface{}{
 		"trakt_id": traktID,
-		"count":    len(nzbs),
-		"nzbs":     nzbs,
+		"count":    len(torrents),
+		"torrents": torrents,
 	}
 
-	h.writeSuccessResponse(w, "NZBs retrieved successfully", data)
+	h.writeSuccessResponse(w, "Torrents retrieved successfully", data)
 }
 
-// handleRefresh handles manual refresh requests
-func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
+// handleRetryDownload handles download retry requests
+func (h *NewHandler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
+		return
+	}
+
+	var req struct {
+		TraktID int64 `json:"trakt_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON", err.Error())
+		return
+	}
+
+	if req.TraktID <= 0 {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a positive integer")
+		return
+	}
+
+	if err := h.appService.RetryDownload(req.TraktID); err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to retry download", err.Error())
+		return
+	}
+
+	h.writeSuccessResponse(w, "Download retry initiated", nil)
+}
+
+// handleCancelDownload handles download cancellation requests
+func (h *NewHandler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
+		return
+	}
+
+	var req struct {
+		TraktID int64 `json:"trakt_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON", err.Error())
+		return
+	}
+
+	if req.TraktID <= 0 {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a positive integer")
+		return
+	}
+
+	if err := h.appService.CancelDownload(req.TraktID); err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to cancel download", err.Error())
+		return
+	}
+
+	h.writeSuccessResponse(w, "Download cancelled successfully", nil)
+}
+
+// handleDownloadStatus gets the status of a download
+func (h *NewHandler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
 	}
 
-	// Run tasks asynchronously with panic recovery
+	traktIDStr := r.URL.Query().Get("trakt_id")
+	if traktIDStr == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Missing parameter", "trakt_id parameter is required")
+		return
+	}
+
+	traktID, err := validateTraktID(traktIDStr)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid positive integer")
+		return
+	}
+
+	status, err := h.appService.GetDownloadStatus(traktID)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get download status", err.Error())
+		return
+	}
+
+	data := map[string]interface{}{
+		"trakt_id": traktID,
+		"status":   status,
+	}
+
+	h.writeSuccessResponse(w, "Download status retrieved", data)
+}
+
+// handleRefresh handles manual refresh requests - syncs with Trakt and searches for torrents
+// GET /api/refresh - Syncs media from Trakt and searches for torrents for media not marked as downloaded
+// This will sync the latest media from Trakt, then search multiple torrent providers and check AllDebrid cache
+func (h *NewHandler) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+		return
+	}
+
+	// Run torrent search asynchronously with panic recovery
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -453,14 +534,42 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		defer cancel()
 
-		if err := h.appService.RunTasks(ctx); err != nil {
-			log.WithError(err).Error("Failed to run refresh tasks")
+		if err := h.appService.SearchTorrentsForNotDownloaded(ctx); err != nil {
+			log.WithError(err).Error("Failed to sync with Trakt and search torrents for media not on disk")
+		} else {
+			log.Info("Trakt sync and torrent search for media not on disk completed successfully")
 		}
 	}()
 
-	h.writeSuccessResponse(w, "Refresh initiated", nil)
+	h.writeSuccessResponse(w, "Trakt sync and torrent search initiated", map[string]interface{}{
+		"description": "Syncing latest media from Trakt, then searching for torrents and checking AllDebrid cache for media not marked as downloaded",
+		"timeout":     "20 minutes",
+		"steps": []string{
+			"1. Sync movies and episodes from Trakt watchlist and favorites",
+			"2. Clean up media no longer in Trakt lists",
+			"3. Find media not marked as downloaded",
+			"4. Search torrent providers (YGG, APIBay) for each media item",
+			"5. Check AllDebrid cache for available torrents",
+			"6. Mark cached torrents as downloaded",
+		},
+	})
 }
 
+// handleCleanupStats returns cleanup statistics
+func (h *NewHandler) handleCleanupStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+		return
+	}
+
+	stats, err := h.appService.GetCleanupStats()
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get cleanup stats", err.Error())
+		return
+	}
+
+	h.writeSuccessResponse(w, "Cleanup statistics retrieved", stats)
+}

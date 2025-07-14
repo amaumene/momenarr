@@ -28,13 +28,13 @@ const (
 
 // MediaStats holds statistics about the media collection
 type MediaStats struct {
-	TotalItems   int
-	Movies       int
-	Episodes     int
-	OnDisk       int
-	NotOnDisk    int
-	Downloading  int
-	UniqueShows  int
+	TotalItems  int
+	Movies      int
+	Episodes    int
+	OnDisk      int
+	NotOnDisk   int
+	Downloading int
+	UniqueShows int
 }
 
 func main() {
@@ -43,7 +43,6 @@ func main() {
 		showStats  = flag.Bool("stats", false, "Show only statistics")
 		showMovies = flag.Bool("movies", false, "Show only movies")
 		showShows  = flag.Bool("shows", false, "Show only TV shows")
-		showNZBs   = flag.Bool("nzbs", false, "Show NZB information")
 		onDiskOnly = flag.Bool("ondisk", false, "Show only media on disk")
 		noColor    = flag.Bool("no-color", false, "Disable colored output")
 		sortBy     = flag.String("sort", "title", "Sort by: title, year, created, updated, status")
@@ -84,7 +83,7 @@ func main() {
 
 	// Filter media based on flags
 	filteredMedia := filterMedia(mediaItems, *showMovies, *showShows, *onDiskOnly)
-	
+
 	// Sort media
 	sortMedia(filteredMedia, *sortBy)
 
@@ -103,7 +102,7 @@ func main() {
 	}
 
 	// Print media collection
-	printMediaCollection(colorize, filteredMedia, *showNZBs, store)
+	printMediaCollection(colorize, filteredMedia, store)
 
 	// Print summary statistics
 	fmt.Printf("\n" + colorize("cyan", "=== SUMMARY ===") + "\n")
@@ -112,7 +111,7 @@ func main() {
 
 func filterMedia(media []*models.Media, moviesOnly, showsOnly, onDiskOnly bool) []*models.Media {
 	var filtered []*models.Media
-	
+
 	for _, item := range media {
 		// Filter by type
 		if moviesOnly && !item.IsMovie() {
@@ -121,15 +120,15 @@ func filterMedia(media []*models.Media, moviesOnly, showsOnly, onDiskOnly bool) 
 		if showsOnly && !item.IsEpisode() {
 			continue
 		}
-		
+
 		// Filter by on-disk status
 		if onDiskOnly && !item.OnDisk {
 			continue
 		}
-		
+
 		filtered = append(filtered, item)
 	}
-	
+
 	return filtered
 }
 
@@ -171,10 +170,10 @@ func getStatusPriority(media *models.Media) int {
 func calculateStats(media []*models.Media) MediaStats {
 	stats := MediaStats{}
 	shows := make(map[string]bool)
-	
+
 	for _, item := range media {
 		stats.TotalItems++
-		
+
 		if item.IsMovie() {
 			stats.Movies++
 		} else {
@@ -189,18 +188,18 @@ func calculateStats(media []*models.Media) MediaStats {
 			}
 			shows[showTitle] = true
 		}
-		
+
 		if item.OnDisk {
 			stats.OnDisk++
 		} else {
 			stats.NotOnDisk++
 		}
-		
+
 		if item.DownloadID > 0 {
 			stats.Downloading++
 		}
 	}
-	
+
 	stats.UniqueShows = len(shows)
 	return stats
 }
@@ -209,7 +208,7 @@ func getColorizer(noColor bool) func(string, string) string {
 	if noColor {
 		return func(color, text string) string { return text }
 	}
-	
+
 	colors := map[string]string{
 		"red":    ColorRed,
 		"green":  ColorGreen,
@@ -220,7 +219,7 @@ func getColorizer(noColor bool) func(string, string) string {
 		"white":  ColorWhite,
 		"bold":   ColorBold,
 	}
-	
+
 	return func(color, text string) string {
 		if c, ok := colors[color]; ok {
 			return c + text + ColorReset
@@ -233,9 +232,9 @@ func printHeader(colorize func(string, string) string, dbPath string, filtered, 
 	fmt.Printf(colorize("bold", "╔══════════════════════════════════════════════════════════════════════════════╗\n"))
 	fmt.Printf(colorize("bold", "║") + colorize("cyan", "                          MOMENARR DATABASE VIEWER                          ") + colorize("bold", "║\n"))
 	fmt.Printf(colorize("bold", "╚══════════════════════════════════════════════════════════════════════════════╝\n"))
-	fmt.Printf(colorize("yellow", "Database: ") + "%s\n", filepath.Base(dbPath))
-	fmt.Printf(colorize("yellow", "Showing: ") + "%d of %d items\n", filtered, total)
-	fmt.Printf(colorize("yellow", "Scanned: ") + "%s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf(colorize("yellow", "Database: ")+"%s\n", filepath.Base(dbPath))
+	fmt.Printf(colorize("yellow", "Showing: ")+"%d of %d items\n", filtered, total)
+	fmt.Printf(colorize("yellow", "Scanned: ")+"%s\n\n", time.Now().Format("2006-01-02 15:04:05"))
 }
 
 func printStatistics(colorize func(string, string) string, stats MediaStats) {
@@ -247,7 +246,7 @@ func printStatistics(colorize func(string, string) string, stats MediaStats) {
 	fmt.Printf("  Available:       %s\n", colorize("green", fmt.Sprintf("%d", stats.OnDisk)))
 	fmt.Printf("  Wanted:          %s\n", colorize("yellow", fmt.Sprintf("%d", stats.NotOnDisk)))
 	fmt.Printf("  Downloading:     %s\n", colorize("cyan", fmt.Sprintf("%d", stats.Downloading)))
-	
+
 	if stats.TotalItems > 0 {
 		availablePercent := float64(stats.OnDisk) / float64(stats.TotalItems) * 100
 		fmt.Printf("  Completion:      %s\n", colorize("green", fmt.Sprintf("%.1f%%", availablePercent)))
@@ -255,16 +254,12 @@ func printStatistics(colorize func(string, string) string, stats MediaStats) {
 	fmt.Println()
 }
 
-func printMediaCollection(colorize func(string, string) string, media []*models.Media, showNZBs bool, store *bolthold.Store) {
+func printMediaCollection(colorize func(string, string) string, media []*models.Media, store *bolthold.Store) {
 	fmt.Printf(colorize("bold", "📺 MEDIA COLLECTION\n"))
-	
+
 	for i, item := range media {
 		printMediaItem(colorize, item, i+1)
-		
-		if showNZBs {
-			printNZBInfo(colorize, item.Trakt, store)
-		}
-		
+
 		if i < len(media)-1 {
 			fmt.Println(colorize("yellow", "────────────────────────────────────────────────────────────────────────────────"))
 		}
@@ -276,7 +271,7 @@ func printMediaItem(colorize func(string, string) string, item *models.Media, in
 	statusColor := "yellow"
 	statusText := "WANTED"
 	statusIcon := "⏳"
-	
+
 	if item.OnDisk {
 		statusColor = "green"
 		statusText = "AVAILABLE"
@@ -286,88 +281,60 @@ func printMediaItem(colorize func(string, string) string, item *models.Media, in
 		statusText = "DOWNLOADING"
 		statusIcon = "⬇️"
 	}
-	
+
 	// Type indicator
 	typeIcon := "🎬" // Movie
 	typeColor := "blue"
 	typeText := "MOVIE"
-	
+
 	if item.IsEpisode() {
 		typeIcon = "📺"
 		typeColor = "purple"
 		typeText = fmt.Sprintf("S%02dE%02d", item.Season, item.Number)
 	}
-	
+
 	// Print main info
 	fmt.Printf("%s %s %s %s\n",
 		colorize("white", fmt.Sprintf("[%03d]", index)),
 		typeIcon,
 		colorize("bold", item.Title),
 		colorize(statusColor, fmt.Sprintf("[%s %s]", statusIcon, statusText)))
-	
+
 	// Print details
 	details := []string{}
-	
+
 	if item.Year > 0 {
 		details = append(details, colorize("yellow", fmt.Sprintf("Year: %d", item.Year)))
 	}
-	
+
 	if item.IsEpisode() {
 		details = append(details, colorize(typeColor, typeText))
 	} else {
 		details = append(details, colorize(typeColor, typeText))
 	}
-	
+
 	if item.IMDB != "" {
 		details = append(details, colorize("white", fmt.Sprintf("IMDB: %s", item.IMDB)))
 	}
-	
+
 	if item.DownloadID > 0 {
 		details = append(details, colorize("cyan", fmt.Sprintf("Download ID: %d", item.DownloadID)))
 	}
-	
+
 	if len(details) > 0 {
 		fmt.Printf("    %s\n", strings.Join(details, " • "))
 	}
-	
+
 	// File path
 	if item.OnDisk && item.File != "" {
 		fmt.Printf("    %s %s\n", colorize("green", "📁"), filepath.Base(item.File))
 	}
-	
+
 	// Timestamps
 	fmt.Printf("    %s %s • %s %s\n",
 		colorize("white", "Created:"), item.CreatedAt.Format("2006-01-02 15:04"),
 		colorize("white", "Updated:"), item.UpdatedAt.Format("2006-01-02 15:04"))
-	
-	fmt.Println()
-}
 
-func printNZBInfo(colorize func(string, string) string, traktID int64, store *bolthold.Store) {
-	var nzbs []*models.NZB
-	err := store.Find(&nzbs, bolthold.Where("Trakt").Eq(traktID))
-	if err != nil || len(nzbs) == 0 {
-		return
-	}
-	
-	fmt.Printf("    %s NZB Files (%d found):\n", colorize("cyan", "💾"), len(nzbs))
-	
-	for i, nzb := range nzbs {
-		statusIcon := "✅"
-		statusColor := "green"
-		if nzb.Failed {
-			statusIcon = "❌"
-			statusColor = "red"
-		}
-		
-		sizeStr := formatBytes(nzb.Length)
-		
-		fmt.Printf("      %s %s %s %s\n",
-			colorize(statusColor, statusIcon),
-			colorize("white", fmt.Sprintf("[%d]", i+1)),
-			colorize("white", nzb.Title),
-			colorize("yellow", fmt.Sprintf("(%s)", sizeStr)))
-	}
 	fmt.Println()
 }
 

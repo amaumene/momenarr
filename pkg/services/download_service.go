@@ -2,58 +2,39 @@ package services
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"io"
-	"net/http"
-	"strconv"
-	"time"
+	"sync"
 
-	"github.com/amaumene/momenarr/nzbget"
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/repository"
 	log "github.com/sirupsen/logrus"
 )
 
-// DownloadService handles download operations
-type DownloadService struct {
-	repo       repository.Repository
-	nzbGet     *nzbget.NZBGet
-	nzbService *NZBService
-	httpClient *http.Client
-	category   string
-	dupeMode   string
+type NewDownloadService struct {
+	repo             repository.Repository
+	allDebridService *AllDebridService
+	torrentService   *TorrentService
+	processingMedia  map[int64]bool
+	processingMutex  sync.RWMutex
 }
 
-// NewDownloadService creates a new DownloadService
-func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbService *NZBService) *DownloadService {
-	return &DownloadService{
-		repo:       repo,
-		nzbGet:     nzbGet,
-		nzbService: nzbService,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        200,
-				MaxIdleConnsPerHost: 50,
-				MaxConnsPerHost:     50,
-				IdleConnTimeout:     90 * time.Second,
-				DisableCompression:  false,
-				TLSHandshakeTimeout: 10 * time.Second,
-			},
-		},
-		category: "momenarr",
-		dupeMode: "score",
+// CreateNewDownloadService creates a new download service
+func CreateNewDownloadService(repo repository.Repository, allDebrid *AllDebridService, torrentService *TorrentService) *NewDownloadService {
+	return &NewDownloadService{
+		repo:             repo,
+		allDebridService: allDebrid,
+		torrentService:   torrentService,
+		processingMedia:  make(map[int64]bool),
 	}
 }
 
 // DownloadNotOnDisk downloads all media that is not on disk
-func (s *DownloadService) DownloadNotOnDisk() error {
+func (s *NewDownloadService) DownloadNotOnDisk() error {
 	return s.DownloadNotOnDiskWithContext(context.Background())
 }
 
 // DownloadNotOnDiskWithContext downloads all media that is not on disk with context support
-func (s *DownloadService) DownloadNotOnDiskWithContext(ctx context.Context) error {
+func (s *NewDownloadService) DownloadNotOnDiskWithContext(ctx context.Context) error {
 	medias, err := s.repo.FindMediaNotOnDisk()
 	if err != nil {
 		return fmt.Errorf("finding media not on disk: %w", err)
@@ -71,8 +52,8 @@ func (s *DownloadService) DownloadNotOnDiskWithContext(ctx context.Context) erro
 
 		if err := s.processMediaDownloadWithContext(ctx, media); err != nil {
 			log.WithError(err).WithFields(log.Fields{
-				"trakt": media.Trakt,
-				"title": media.Title,
+				"trakt_id": media.Trakt,
+				"title":    media.Title,
 			}).Error("Failed to process media download")
 			continue
 		}
@@ -82,207 +63,118 @@ func (s *DownloadService) DownloadNotOnDiskWithContext(ctx context.Context) erro
 	return nil
 }
 
-// processMediaDownload processes download for a single media item
-func (s *DownloadService) processMediaDownload(media *models.Media) error {
-	return s.processMediaDownloadWithContext(context.Background(), media)
-}
-
 // processMediaDownloadWithContext processes download for a single media item with context
-func (s *DownloadService) processMediaDownloadWithContext(ctx context.Context, media *models.Media) error {
-	nzb, err := s.nzbService.GetNZBFromDB(media.Trakt)
+func (s *NewDownloadService) processMediaDownloadWithContext(ctx context.Context, media *models.Media) error {
+	s.processingMutex.Lock()
+	if s.processingMedia[media.Trakt] {
+		s.processingMutex.Unlock()
+		return nil
+	}
+	s.processingMedia[media.Trakt] = true
+	s.processingMutex.Unlock()
+
+	defer func() {
+		s.processingMutex.Lock()
+		delete(s.processingMedia, media.Trakt)
+		s.processingMutex.Unlock()
+	}()
+
+	currentMedia, err := s.repo.GetMedia(media.Trakt)
+	if err == nil && currentMedia.OnDisk {
+		return nil
+	}
+	// Search for torrents in real-time and find the best cached one
+	bestTorrent, err := s.torrentService.FindBestCachedTorrent(media, s.allDebridService)
 	if err != nil {
-		return fmt.Errorf("getting NZB from database: %w", err)
+		return fmt.Errorf("finding best cached torrent: %w", err)
 	}
 
-	log.WithFields(log.Fields{
-		"trakt":       media.Trakt,
-		"media_title": media.Title,
-		"nzb_title":   nzb.Title,
-		"size_gb":     float64(nzb.Length) / (1024 * 1024 * 1024),
-	}).Info("Selected NZB for download")
-
-	if err := s.CreateDownloadWithContext(ctx, media.Trakt, nzb); err != nil {
-		return fmt.Errorf("creating download: %w", err)
-	}
-
-	return nil
-}
-
-// CreateDownload creates a download in NZBGet
-func (s *DownloadService) CreateDownload(traktID int64, nzb *models.NZB) error {
-	return s.CreateDownloadWithContext(context.Background(), traktID, nzb)
-}
-
-// CreateDownloadWithContext creates a download in NZBGet with context support
-func (s *DownloadService) CreateDownloadWithContext(ctx context.Context, traktID int64, nzb *models.NZB) error {
-	// Check context before starting
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	// Check if already in queue
-	if exists, err := s.isAlreadyInQueue(nzb.Title); err != nil {
-		return fmt.Errorf("checking if NZB is already in queue: %w", err)
-	} else if exists {
+	if bestTorrent == nil {
 		log.WithFields(log.Fields{
-			"trakt": traktID,
-			"title": nzb.Title,
-		}).Info("NZB already in queue, skipping")
+			"trakt_id": media.Trakt,
+			"title":    media.Title,
+		}).Info("No cached torrents found")
 		return nil
 	}
 
-	// Create NZBGet input with context
-	input, err := s.createNZBGetInputWithContext(ctx, nzb, traktID)
-	if err != nil {
-		return fmt.Errorf("creating NZBGet input: %w", err)
-	}
+	log.WithFields(log.Fields{
+		"trakt_id": media.Trakt,
+		"title":    media.Title,
+		"hash":     bestTorrent.Hash,
+		"seeders":  bestTorrent.Seeders,
+		"size_gb":  float64(bestTorrent.Size) / (1024 * 1024 * 1024),
+	}).Info("Found cached torrent, downloading")
 
-	// Add to NZBGet
-	downloadID, err := s.nzbGet.Append(input)
-	if err != nil || downloadID <= 0 {
-		return fmt.Errorf("adding to NZBGet queue: %w", err)
-	}
-
-	// Update media with download ID
-	if err := s.repo.UpdateMediaDownloadID(traktID, downloadID); err != nil {
-		log.WithError(err).WithFields(log.Fields{
-			"trakt":       traktID,
-			"download_id": downloadID,
-		}).Error("Failed to update media with download ID")
-		return fmt.Errorf("updating media with download ID: %w", err)
-	}
-
-	// Verify the update worked
-	media, err := s.repo.GetMedia(traktID)
-	if err != nil {
-		log.WithError(err).WithField("trakt", traktID).Error("Failed to verify media after download ID update")
-	} else {
-		log.WithFields(log.Fields{
-			"trakt":       traktID,
-			"title":       nzb.Title,
-			"download_id": downloadID,
-			"media_dlid":  media.DownloadID,
-			"on_disk":     media.OnDisk,
-		}).Info("Download started successfully and media updated")
-	}
-
-	return nil
-}
-
-// isAlreadyInQueue checks if the NZB is already in the download queue
-func (s *DownloadService) isAlreadyInQueue(title string) (bool, error) {
-	queue, err := s.nzbGet.ListGroups()
-	if err != nil {
-		return false, fmt.Errorf("getting NZBGet queue: %w", err)
-	}
-
-	for _, item := range queue {
-		if item.NZBName == title {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-// createNZBGetInput creates the input for NZBGet
-func (s *DownloadService) createNZBGetInput(nzb *models.NZB, traktID int64) (*nzbget.AppendInput, error) {
-	return s.createNZBGetInputWithContext(context.Background(), nzb, traktID)
-}
-
-// createNZBGetInputWithContext creates the input for NZBGet with context support
-func (s *DownloadService) createNZBGetInputWithContext(ctx context.Context, nzb *models.NZB, traktID int64) (*nzbget.AppendInput, error) {
-	// Create request with context
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, nzb.Link, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	// Download NZB content
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("downloading NZB file: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to download NZB file, status: %s", resp.Status)
-	}
-
-	// Limit the size of NZB files we'll download (50MB max)
-	const maxNZBSize = 50 * 1024 * 1024
-	limitedReader := io.LimitReader(resp.Body, maxNZBSize)
-
-	content, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return nil, fmt.Errorf("reading NZB file content: %w", err)
-	}
-
-	encodedContent := base64.StdEncoding.EncodeToString(content)
-
-	return &nzbget.AppendInput{
-		Filename: nzb.Title + ".nzb",
-		Content:  encodedContent,
-		Category: s.category,
-		DupeMode: s.dupeMode,
-		Parameters: []*nzbget.Parameter{
-			{
-				Name:  "Trakt",
-				Value: strconv.FormatInt(traktID, 10),
-			},
-		},
-	}, nil
-}
-
-// GetDownloadStatus gets the status of a download
-func (s *DownloadService) GetDownloadStatus(downloadID int64) (string, error) {
-	queue, err := s.nzbGet.ListGroups()
-	if err != nil {
-		return "", fmt.Errorf("getting NZBGet queue: %w", err)
-	}
-
-	for _, item := range queue {
-		if int64(item.NZBID) == downloadID {
-			return string(item.Status), nil
-		}
-	}
-
-	// Check history if not in queue
-	history, err := s.nzbGet.History(false)
-	if err != nil {
-		return "", fmt.Errorf("getting NZBGet history: %w", err)
-	}
-
-	for _, item := range history {
-		if int64(item.NZBID) == downloadID {
-			return string(item.Status), nil
-		}
-	}
-
-	return "NOT_FOUND", nil
-}
-
-// CancelDownload cancels a download
-func (s *DownloadService) CancelDownload(downloadID int64) error {
-	success, err := s.nzbGet.EditQueue("GroupDelete", "", []int64{downloadID})
-	if err != nil {
-		return fmt.Errorf("canceling download: %w", err)
-	}
+	// Download the torrent
+	success, err := s.downloadBestTorrent(ctx, media, bestTorrent)
 	if !success {
-		return fmt.Errorf("failed to cancel download %d", downloadID)
+		return fmt.Errorf("failed to download best torrent: %w", err)
 	}
 
-	log.WithField("download_id", downloadID).Info("Download canceled")
+	log.WithFields(log.Fields{
+		"trakt_id": media.Trakt,
+		"title":    media.Title,
+		"hash":     bestTorrent.Hash,
+	}).Info("Successfully downloaded torrent")
 	return nil
+}
+
+// tryTorrent attempts to process a single torrent and returns success status
+func (s *NewDownloadService) tryTorrent(ctx context.Context, torrent *models.Torrent, media *models.Media) (bool, error) {
+	// First check if the torrent is cached on AllDebrid
+	isCached, allDebridID, err := s.allDebridService.IsTorrentCached(torrent.Hash)
+	if err != nil {
+		log.WithError(err).WithField("hash", torrent.Hash).Debug("Failed to check if torrent is cached")
+		return false, fmt.Errorf("checking if torrent is cached: %w", err)
+	}
+
+	if !isCached {
+		log.WithFields(log.Fields{
+			"hash":     torrent.Hash,
+			"title":    torrent.Title,
+			"size_gb":  fmt.Sprintf("%.2f", float64(torrent.Size)/(1024*1024*1024)),
+			"trakt_id": media.Trakt,
+			"media":    media.Title,
+		}).Info("Torrent not cached on AllDebrid")
+		return false, fmt.Errorf("torrent not cached on AllDebrid")
+	}
+
+	// Torrent is cached! Save the AllDebrid ID and mark as done
+	torrent.AllDebridID = allDebridID
+	if err := s.repo.SaveTorrent(torrent); err != nil {
+		log.WithError(err).Error("Failed to save torrent with AllDebrid ID")
+		return false, fmt.Errorf("saving torrent with AllDebrid ID: %w", err)
+	}
+
+	log.WithFields(log.Fields{
+		"hash":         torrent.Hash,
+		"title":        torrent.Title,
+		"trakt_id":     media.Trakt,
+		"alldebrid_id": allDebridID,
+	}).Info("Torrent cached on AllDebrid - marking as completed")
+
+	// Mark media as "on disk" since the torrent is cached on AllDebrid
+	media.OnDisk = true
+	media.File = fmt.Sprintf("AllDebrid magnet ID: %d", allDebridID)
+	if saveErr := s.repo.SaveMedia(media); saveErr != nil {
+		log.WithError(saveErr).Error("Failed to save media as completed")
+		return false, fmt.Errorf("saving media as completed: %w", saveErr)
+	}
+
+	log.WithFields(log.Fields{
+		"trakt_id": media.Trakt,
+		"title":    media.Title,
+		"torrent":  torrent.Title,
+	}).Info("Successfully processed cached torrent")
+
+	return true, nil
 }
 
 // RetryFailedDownload retries a failed download
-func (s *DownloadService) RetryFailedDownload(traktID int64) error {
-	// Mark current NZB as failed
-	if err := s.nzbService.MarkNZBFailed(traktID); err != nil {
-		log.WithError(err).WithField("trakt", traktID).Error("Failed to mark NZB as failed")
+func (s *NewDownloadService) RetryFailedDownload(traktID int64) error {
+	// Mark current torrent as failed
+	if err := s.torrentService.MarkTorrentFailed(traktID); err != nil {
+		log.WithError(err).WithField("trakt_id", traktID).Error("Failed to mark torrent as failed")
 	}
 
 	// Get media and try to download again
@@ -291,5 +183,112 @@ func (s *DownloadService) RetryFailedDownload(traktID int64) error {
 		return fmt.Errorf("getting media for retry: %w", err)
 	}
 
-	return s.processMediaDownload(media)
+	return s.processMediaDownloadWithContext(context.Background(), media)
+}
+
+// GetDownloadStatus gets the status of a download
+func (s *NewDownloadService) GetDownloadStatus(traktID int64) (string, error) {
+	// Get the torrent
+	torrent, err := s.torrentService.GetBestTorrent(traktID)
+	if err != nil {
+		return "NOT_FOUND", nil
+	}
+
+	if torrent.AllDebridID == 0 {
+		return "NOT_STARTED", nil
+	}
+
+	// Check AllDebrid status
+	status, err := s.allDebridService.client.GetMagnetStatus(s.allDebridService.apiKey, []int64{torrent.AllDebridID})
+	if err != nil {
+		return "ERROR", err
+	}
+
+	if status.Status != "success" || len(status.Data.Magnets) == 0 {
+		return "ERROR", nil
+	}
+
+	magnet := status.Data.Magnets[0]
+	if magnet.Ready {
+		// Check if on disk
+		media, err := s.repo.GetMedia(traktID)
+		if err == nil && media.OnDisk {
+			return "COMPLETED", nil
+		}
+		return "READY", nil
+	}
+
+	return magnet.Status, nil
+}
+
+// CancelDownload cancels a download
+func (s *NewDownloadService) CancelDownload(traktID int64) error {
+	// Get the torrent
+	torrent, err := s.torrentService.GetBestTorrent(traktID)
+	if err != nil {
+		return fmt.Errorf("getting torrent: %w", err)
+	}
+
+	if torrent.AllDebridID == 0 {
+		return fmt.Errorf("no active download for Trakt ID %d", traktID)
+	}
+
+	// Delete from AllDebrid
+	if err := s.allDebridService.DeleteMagnet(torrent.AllDebridID); err != nil {
+		return fmt.Errorf("deleting from AllDebrid: %w", err)
+	}
+
+	// Mark torrent as failed
+	torrent.MarkFailed()
+	if err := s.repo.SaveTorrent(torrent); err != nil {
+		return fmt.Errorf("updating torrent: %w", err)
+	}
+
+	log.WithField("trakt_id", traktID).Info("Download canceled")
+	return nil
+}
+
+// downloadBestTorrent downloads the best torrent found from real-time search
+func (s *NewDownloadService) downloadBestTorrent(ctx context.Context, media *models.Media, torrent *models.TorrentSearchResult) (bool, error) {
+	// Check if torrent is cached on AllDebrid (double-check)
+	isCached, allDebridID, err := s.allDebridService.IsTorrentCached(torrent.Hash)
+	if err != nil {
+		return false, fmt.Errorf("checking if torrent is cached: %w", err)
+	}
+
+	if !isCached {
+		log.WithFields(log.Fields{
+			"hash":     torrent.Hash,
+			"title":    torrent.Title,
+			"size_gb":  fmt.Sprintf("%.2f", float64(torrent.Size)/(1024*1024*1024)),
+			"trakt_id": media.Trakt,
+			"media":    media.Title,
+		}).Warn("Torrent not cached on AllDebrid (cache status changed)")
+		return false, fmt.Errorf("torrent not cached on AllDebrid")
+	}
+
+	log.WithFields(log.Fields{
+		"hash":         torrent.Hash,
+		"title":        torrent.Title,
+		"alldebrid_id": allDebridID,
+		"size_gb":      fmt.Sprintf("%.2f", float64(torrent.Size)/(1024*1024*1024)),
+		"trakt_id":     media.Trakt,
+		"media":        media.Title,
+	}).Info("Torrent cached on AllDebrid, marking as downloaded")
+
+	// Mark media as downloaded and save AllDebrid ID
+	media.OnDisk = true
+	media.File = fmt.Sprintf("AllDebrid magnet ID: %d", allDebridID)
+	if saveErr := s.repo.SaveMedia(media); saveErr != nil {
+		log.WithError(saveErr).Error("Failed to save media as completed")
+		return false, fmt.Errorf("saving media as completed: %w", saveErr)
+	}
+
+	log.WithFields(log.Fields{
+		"trakt_id": media.Trakt,
+		"title":    media.Title,
+		"torrent":  torrent.Title,
+	}).Info("Successfully processed cached torrent")
+
+	return true, nil
 }

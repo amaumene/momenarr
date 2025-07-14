@@ -6,60 +6,46 @@ import (
 	"strconv"
 )
 
-// Config holds all application configuration
-type Config struct {
+// NewConfig holds all application configuration with AllDebrid
+type NewConfig struct {
 	// Server configuration
-	Port string `json:"port" validate:"required"`
-	Host string `json:"host"`
+	HTTPAddr string `json:"http_addr"`
 
 	// Storage configuration
-	DownloadDir string `json:"download_dir" validate:"required"`
-	DataDir     string `json:"data_dir" validate:"required"`
+	DataDir       string `json:"data_dir" validate:"required"`
+	BlacklistFile string `json:"blacklist_file"`
 
-	// Newsnab configuration
-	NewsNabHost   string `json:"newsnab_host" validate:"required,url"`
-	NewsNabAPIKey string `json:"newsnab_api_key" validate:"required"`
+	// AllDebrid configuration
+	AllDebridAPIKey string `json:"alldebrid_api_key" validate:"required"`
 
 	// Trakt configuration
 	TraktAPIKey       string `json:"trakt_api_key" validate:"required"`
 	TraktClientSecret string `json:"trakt_client_secret" validate:"required"`
 
-	// NZBGet configuration
-	NZBGetHost     string `json:"nzbget_host" validate:"required"`
-	NZBGetPort     int    `json:"nzbget_port" validate:"required,min=1,max=65535"`
-	NZBGetUsername string `json:"nzbget_username" validate:"required"`
-	NZBGetPassword string `json:"nzbget_password" validate:"required"`
-
 	// Application settings
 	SyncInterval   string `json:"sync_interval"`
-	BlacklistFile  string `json:"blacklist_file"`
+	WatchedDays    int    `json:"watched_days"`
 	MaxRetries     int    `json:"max_retries"`
 	RequestTimeout int    `json:"request_timeout"`
 }
 
-// LoadConfig loads configuration from environment variables
-func LoadConfig() (*Config, error) {
-	config := &Config{
-		Port:           getEnvOrDefault("PORT", "3000"),
-		Host:           getEnvOrDefault("HOST", "0.0.0.0"),
+// LoadNewConfig loads configuration from environment variables
+func LoadNewConfig() (*NewConfig, error) {
+	config := &NewConfig{
+		HTTPAddr:       getEnvOrDefault("HTTP_ADDR", ":8080"),
 		SyncInterval:   getEnvOrDefault("SYNC_INTERVAL", "6h"),
 		BlacklistFile:  getEnvOrDefault("BLACKLIST_FILE", "blacklist.txt"),
+		WatchedDays:    getEnvIntOrDefault("WATCHED_DAYS", 5),
 		MaxRetries:     getEnvIntOrDefault("MAX_RETRIES", 3),
 		RequestTimeout: getEnvIntOrDefault("REQUEST_TIMEOUT", 30),
 	}
 
 	// Required environment variables
 	var err error
-	if config.DownloadDir, err = getRequiredEnv("DOWNLOAD_DIR"); err != nil {
-		return nil, err
-	}
 	if config.DataDir, err = getRequiredEnv("DATA_DIR"); err != nil {
 		return nil, err
 	}
-	if config.NewsNabHost, err = getRequiredEnv("NEWSNAB_HOST"); err != nil {
-		return nil, err
-	}
-	if config.NewsNabAPIKey, err = getRequiredEnv("NEWSNAB_API_KEY"); err != nil {
+	if config.AllDebridAPIKey, err = getRequiredEnv("ALLDEBRID_API_KEY"); err != nil {
 		return nil, err
 	}
 	if config.TraktAPIKey, err = getRequiredEnv("TRAKT_API_KEY"); err != nil {
@@ -68,53 +54,35 @@ func LoadConfig() (*Config, error) {
 	if config.TraktClientSecret, err = getRequiredEnv("TRAKT_CLIENT_SECRET"); err != nil {
 		return nil, err
 	}
-	if config.NZBGetHost, err = getRequiredEnv("NZBGET_HOST"); err != nil {
-		return nil, err
-	}
-	if config.NZBGetPort, err = getRequiredEnvInt("NZBGET_PORT"); err != nil {
-		return nil, err
-	}
-	if config.NZBGetUsername, err = getRequiredEnv("NZBGET_USERNAME"); err != nil {
-		return nil, err
-	}
-	if config.NZBGetPassword, err = getRequiredEnv("NZBGET_PASSWORD"); err != nil {
-		return nil, err
+
+	// Set blacklist file path if not absolute
+	if config.BlacklistFile != "" && !os.IsPathSeparator(config.BlacklistFile[0]) {
+		config.BlacklistFile = fmt.Sprintf("%s/%s", config.DataDir, config.BlacklistFile)
 	}
 
 	return config, nil
 }
 
 // GetServerAddress returns the full server address
-func (c *Config) GetServerAddress() string {
-	return c.Host + ":" + c.Port
-}
-
-// GetNZBGetURL returns the full NZBGet URL
-func (c *Config) GetNZBGetURL() string {
-	return fmt.Sprintf("http://%s:%d", c.NZBGetHost, c.NZBGetPort)
+func (c *NewConfig) GetServerAddress() string {
+	return c.HTTPAddr
 }
 
 // Validate validates the configuration
-func (c *Config) Validate() error {
-	if c.DownloadDir == "" {
-		return fmt.Errorf("download directory is required")
-	}
+func (c *NewConfig) Validate() error {
 	if c.DataDir == "" {
 		return fmt.Errorf("data directory is required")
 	}
-	if c.NewsNabHost == "" || c.NewsNabAPIKey == "" {
-		return fmt.Errorf("newsnab configuration is required")
+	if c.AllDebridAPIKey == "" {
+		return fmt.Errorf("AllDebrid API key is required")
 	}
 	if c.TraktAPIKey == "" || c.TraktClientSecret == "" {
-		return fmt.Errorf("trakt configuration is required")
-	}
-	if c.NZBGetHost == "" || c.NZBGetPort <= 0 || c.NZBGetUsername == "" || c.NZBGetPassword == "" {
-		return fmt.Errorf("nzbget configuration is required")
+		return fmt.Errorf("Trakt configuration is required")
 	}
 	return nil
 }
 
-// Helper functions
+// Helper functions (reuse from original config.go)
 func getEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -131,23 +99,10 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 	return defaultValue
 }
 
-
 func getRequiredEnv(key string) (string, error) {
 	value := os.Getenv(key)
 	if value == "" {
 		return "", fmt.Errorf("required environment variable %s is not set", key)
 	}
 	return value, nil
-}
-
-func getRequiredEnvInt(key string) (int, error) {
-	value := os.Getenv(key)
-	if value == "" {
-		return 0, fmt.Errorf("required environment variable %s is not set", key)
-	}
-	intValue, err := strconv.Atoi(value)
-	if err != nil {
-		return 0, fmt.Errorf("environment variable %s must be a valid integer: %w", key, err)
-	}
-	return intValue, nil
 }

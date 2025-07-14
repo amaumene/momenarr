@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/pkg/models"
+	log "github.com/sirupsen/logrus"
 )
 
 // Pre-compiled regex patterns for better performance
@@ -31,13 +33,15 @@ type Repository interface {
 	RemoveMedia(traktID int64) error
 	FindAllMedia() ([]*models.Media, error)
 
-	// NZB operations
-	SaveNZB(nzb *models.NZB) error
-	SaveNZBBatch(nzbs []*models.NZB) error
-	GetNZB(traktID int64) (*models.NZB, error)
-	FindAllNZBsByTraktID(traktID int64) ([]*models.NZB, error)
-	FindNZBsByTraktIDs(traktIDs []int64) ([]*models.NZB, error)
-	RemoveNZBsByTraktID(traktID int64) error
+	// Torrent operations
+	SaveTorrent(torrent *models.Torrent) error
+	GetBestTorrent(traktID int64) (*models.Torrent, error)
+	GetTorrentByID(id int64) (*models.Torrent, error)
+	GetTorrentByAllDebridID(allDebridID int64) (*models.Torrent, error)
+	FindAllTorrentsByTraktID(traktID int64) ([]*models.Torrent, error)
+	RemoveTorrentsByTraktID(traktID int64) error
+	UpdateTorrentSeasonPack(torrentID int64, episodesInPack []int) error
+	MarkTorrentEpisodeWatched(torrentID int64, episode int) error
 
 	// Utility operations
 	Close() error
@@ -51,7 +55,6 @@ type BoltRepository struct {
 func NewBoltRepository(store *bolthold.Store) Repository {
 	return &BoltRepository{store: store}
 }
-
 
 // Media operations
 func (r *BoltRepository) SaveMedia(media *models.Media) error {
@@ -217,123 +220,112 @@ func (r *BoltRepository) FindAllMedia() ([]*models.Media, error) {
 	return medias, nil
 }
 
-// NZB operations
-func (r *BoltRepository) SaveNZB(nzb *models.NZB) error {
-	if nzb.ID == "" {
-		nzb.GenerateID()
-	}
-	if err := r.store.Upsert(nzb.ID, nzb); err != nil {
-		return fmt.Errorf("failed to save NZB: %w", err)
+// Torrent operations
+func (r *BoltRepository) SaveTorrent(torrent *models.Torrent) error {
+	if torrent.ID == 0 {
+		// Insert new torrent with auto-generated ID
+		if err := r.store.Insert(bolthold.NextSequence(), torrent); err != nil {
+			return fmt.Errorf("failed to insert torrent: %w", err)
+		}
+	} else {
+		// Update existing torrent
+		if err := r.store.Update(torrent.ID, torrent); err != nil {
+			return fmt.Errorf("failed to update torrent: %w", err)
+		}
 	}
 	return nil
 }
 
-func (r *BoltRepository) GetNZB(traktID int64) (*models.NZB, error) {
-	// Get all non-failed NZBs for this Trakt ID in a single query
-	var nzbs []*models.NZB
-	err := r.store.Find(&nzbs, bolthold.Where("Trakt").Eq(traktID).
-		And("Failed").Eq(false))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get NZBs: %w", err)
+func (r *BoltRepository) GetBestTorrent(traktID int64) (*models.Torrent, error) {
+	var torrents []*models.Torrent
+
+	// Get all torrents for this Trakt ID that haven't failed
+	if err := r.store.Find(&torrents,
+		bolthold.Where("Trakt").Eq(traktID).And("Failed").Eq(false)); err != nil {
+		return nil, fmt.Errorf("failed to find torrents: %w", err)
 	}
 
-	if len(nzbs) == 0 {
-		return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
+	log.WithFields(log.Fields{
+		"trakt":       traktID,
+		"found_count": len(torrents),
+	}).Debug("GetBestTorrent query results")
+
+	if len(torrents) == 0 {
+		return nil, fmt.Errorf("no torrents found for Trakt ID %d", traktID)
 	}
 
-	// Sort and select best NZB in memory (more efficient than multiple queries)
-	var bestNZB *models.NZB
-	var bestScore int
-
-	for _, nzb := range nzbs {
-		score := 0
-
-		// Prioritize by quality
-		if remuxRegex.MatchString(nzb.Title) {
-			score = 3000000000 // 3 billion base score for remux
-		} else if webDLRegex.MatchString(nzb.Title) {
-			score = 2000000000 // 2 billion base score for web-dl
-		} else {
-			score = 1000000000 // 1 billion base score for others
-		}
-
-		// Add size to score (up to 1 billion for size)
-		if nzb.Length < 1000000000 {
-			score += int(nzb.Length)
-		} else {
-			score += 999999999
-		}
-
-		if score > bestScore {
-			bestScore = score
-			bestNZB = nzb
+	// Find the best torrent (prioritize by size)
+	best := torrents[0]
+	for _, torrent := range torrents[1:] {
+		if torrent.Size > best.Size {
+			best = torrent
 		}
 	}
 
-	return bestNZB, nil
+	return best, nil
 }
 
-func (r *BoltRepository) FindAllNZBsByTraktID(traktID int64) ([]*models.NZB, error) {
-	var nzbs []*models.NZB
-	if err := r.store.Find(&nzbs, bolthold.Where("Trakt").Eq(traktID)); err != nil {
-		return nil, fmt.Errorf("failed to find all NZBs for Trakt ID %d: %w", traktID, err)
+func (r *BoltRepository) GetTorrentByID(id int64) (*models.Torrent, error) {
+	var torrent models.Torrent
+
+	if err := r.store.Get(id, &torrent); err != nil {
+		if err == bolthold.ErrNotFound {
+			return nil, fmt.Errorf("torrent with ID %d not found", id)
+		}
+		return nil, fmt.Errorf("failed to get torrent: %w", err)
 	}
-	return nzbs, nil
+
+	return &torrent, nil
 }
 
-func (r *BoltRepository) FindNZBsByTraktIDs(traktIDs []int64) ([]*models.NZB, error) {
-	var nzbs []*models.NZB
-
-	// Convert []int64 to []interface{}
-	ids := make([]interface{}, len(traktIDs))
-	for i, id := range traktIDs {
-		ids[i] = id
+func (r *BoltRepository) GetTorrentByAllDebridID(allDebridID int64) (*models.Torrent, error) {
+	var torrent models.Torrent
+	if err := r.store.FindOne(&torrent, bolthold.Where("AllDebridID").Eq(allDebridID)); err != nil {
+		return nil, fmt.Errorf("failed to get torrent by AllDebrid ID: %w", err)
 	}
-
-	if err := r.store.Find(&nzbs, bolthold.Where("Trakt").In(ids...)); err != nil {
-		return nil, fmt.Errorf("failed to find NZBs by Trakt IDs: %w", err)
-	}
-	return nzbs, nil
+	return &torrent, nil
 }
 
-// SaveNZBBatch saves multiple NZB items in a single transaction
-func (r *BoltRepository) SaveNZBBatch(nzbs []*models.NZB) error {
-	if len(nzbs) == 0 {
-		return nil
+func (r *BoltRepository) FindAllTorrentsByTraktID(traktID int64) ([]*models.Torrent, error) {
+	var torrents []*models.Torrent
+	if err := r.store.Find(&torrents, bolthold.Where("Trakt").Eq(traktID)); err != nil {
+		return nil, fmt.Errorf("failed to find torrents by Trakt ID: %w", err)
 	}
+	return torrents, nil
+}
 
-	tx, err := r.store.Bolt().Begin(true)
-	if err != nil {
-		return fmt.Errorf("failed to start transaction: %w", err)
+func (r *BoltRepository) RemoveTorrentsByTraktID(traktID int64) error {
+	if err := r.store.DeleteMatching(&models.Torrent{}, bolthold.Where("Trakt").Eq(traktID)); err != nil {
+		return fmt.Errorf("failed to remove torrents for Trakt ID %d: %w", traktID, err)
 	}
-
-	// Track whether we've committed successfully
-	committed := false
-	defer func() {
-		if !committed {
-			tx.Rollback()
-		}
-	}()
-
-	for _, nzb := range nzbs {
-		if nzb.ID == "" {
-			nzb.GenerateID()
-		}
-		if err := r.store.TxUpsert(tx, nzb.ID, nzb); err != nil {
-			return fmt.Errorf("failed to save NZB in batch: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit NZB batch transaction: %w", err)
-	}
-	committed = true
 	return nil
 }
 
-func (r *BoltRepository) RemoveNZBsByTraktID(traktID int64) error {
-	if err := r.store.DeleteMatching(&models.NZB{}, bolthold.Where("Trakt").Eq(traktID)); err != nil {
-		return fmt.Errorf("failed to remove NZBs for Trakt ID %d: %w", traktID, err)
+func (r *BoltRepository) UpdateTorrentSeasonPack(torrentID int64, episodesInPack []int) error {
+	var torrent models.Torrent
+	if err := r.store.Get(torrentID, &torrent); err != nil {
+		return fmt.Errorf("failed to get torrent: %w", err)
+	}
+
+	torrent.EpisodesInPack = episodesInPack
+	torrent.UpdatedAt = time.Now()
+
+	if err := r.store.Update(torrentID, &torrent); err != nil {
+		return fmt.Errorf("failed to update torrent season pack: %w", err)
+	}
+	return nil
+}
+
+func (r *BoltRepository) MarkTorrentEpisodeWatched(torrentID int64, episode int) error {
+	var torrent models.Torrent
+	if err := r.store.Get(torrentID, &torrent); err != nil {
+		return fmt.Errorf("failed to get torrent: %w", err)
+	}
+
+	torrent.MarkEpisodeWatched(episode)
+
+	if err := r.store.Update(torrentID, &torrent); err != nil {
+		return fmt.Errorf("failed to update torrent watched episode: %w", err)
 	}
 	return nil
 }
