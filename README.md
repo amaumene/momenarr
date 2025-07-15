@@ -1,40 +1,26 @@
 # Momenarr
 
-A lightweight media automation tool that integrates with Trakt and AllDebrid for automated downloading and management of movies and TV shows. Designed to be resource-efficient and perfect for running on various systems including containers and low-resource devices.
+A lightweight media automation tool that monitors your Trakt watchlist and favorites, automatically searches for torrents, and downloads them through AllDebrid.
 
 ## Features
 
-- **🚀 Lightweight**: Minimal resource usage with embedded database (BoltDB)
-- **📺 Trakt Integration**: Syncs with watchlists, favorites, and watch history
-- **🔍 Smart Torrent Search**: Searches multiple torrent providers (YGG, APIBay)
-- **☁️ AllDebrid Integration**: Downloads torrents through AllDebrid's premium service
-- **🎯 Quality Prioritization**: Prefers REMUX > High Resolution > File Size
-- **🧹 Auto-Cleanup**: Removes watched media after configurable period
-- **🔄 Continuous Sync**: Runs on configurable intervals (default: 6 hours)
-- **🌐 REST API**: Full control via HTTP endpoints
-- **🛡️ API Security**: Optional API key authentication
+- **Trakt Integration**: Syncs with your watchlist and favorites
+- **Automatic Torrent Search**: Searches YGG and APIBay for media
+- **AllDebrid Downloads**: Downloads torrents through AllDebrid's premium service
+- **Smart Cleanup**: Automatically removes watched content after configurable days
+- **Web Interface**: View and manage your media collection
+- **Database Viewer**: Command-line tool to inspect your collection
+- **API Access**: REST API for external integrations
 
-## Architecture
+## Requirements
 
-```
-momenarr/
-├── cmd/
-│   ├── momenarr/        # Main application
-│   └── dbviewer/        # Database inspection tool
-├── pkg/
-│   ├── config/          # Configuration management
-│   ├── handlers/        # HTTP request handlers
-│   ├── models/          # Data models
-│   ├── repository/      # Data access layer
-│   ├── services/        # Business logic
-│   └── utils/           # Common utilities
-├── bolthold/            # Embedded BoltDB wrapper
-└── trakt/               # Trakt API client
-```
+- Go 1.23+ (for building from source)
+- AllDebrid account with API key
+- Trakt account with API credentials
 
 ## Installation
 
-### Docker/Podman
+### Docker
 
 ```bash
 docker run -d \
@@ -51,241 +37,151 @@ docker run -d \
 
 ### Building from Source
 
-Requirements:
-- Go 1.23 or later
-
 ```bash
-# Clone the repository
 git clone https://github.com/amaumene/momenarr.git
 cd momenarr
-
-# Build the binary
 go build -o momenarr ./cmd/momenarr
-
-# Run with environment variables
-export DATA_DIR="/path/to/data"
-export ALLDEBRID_API_KEY="your-alldebrid-key"
-export TRAKT_API_KEY="your-trakt-key"
-export TRAKT_CLIENT_SECRET="your-trakt-secret"
-./momenarr
 ```
 
 ## Configuration
 
-### Environment Variables
+### Required Environment Variables
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `DATA_DIR` | Directory for database and tokens | - | ✅ |
-| `ALLDEBRID_API_KEY` | AllDebrid API key | - | ✅ |
-| `TRAKT_API_KEY` | Trakt application API key | - | ✅ |
-| `TRAKT_CLIENT_SECRET` | Trakt client secret | - | ✅ |
-| `HTTP_ADDR` | HTTP server address | `:8080` | ❌ |
-| `BLACKLIST_FILE` | Path to blacklist file | `{DATA_DIR}/blacklist.txt` | ❌ |
-| `SYNC_INTERVAL` | Sync interval duration | `6h` | ❌ |
-| `WATCHED_DAYS` | Days to look back for watched items | `5` | ❌ |
-| `MOMENARR_API_KEY` | API key for authentication | - | ❌ |
+| Variable | Description |
+|----------|-------------|
+| `DATA_DIR` | Directory for database and tokens |
+| `ALLDEBRID_API_KEY` | Your AllDebrid API key |
+| `TRAKT_API_KEY` | Your Trakt application API key |
+| `TRAKT_CLIENT_SECRET` | Your Trakt client secret |
 
-### Trakt Setup
+### Optional Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HTTP_ADDR` | HTTP server address | `:8080` |
+| `BLACKLIST_FILE` | Path to blacklist file | `{DATA_DIR}/blacklist.txt` |
+| `SYNC_INTERVAL` | How often to sync | `6h` |
+| `WATCHED_DAYS` | Days to look back for watched items | `5` |
+| `MOMENARR_API_KEY` | API key for authentication | _(none)_ |
+
+### Setting up Trakt
 
 1. Create a Trakt app at [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications)
 2. Set redirect URI to `http://localhost:8080/api/trakt/callback`
-3. Note your Client ID (API key) and Client Secret
-4. Visit `http://your-server:8080/api/trakt/auth` to authenticate
+3. Note your Client ID (use as `TRAKT_API_KEY`) and Client Secret
+4. Start momenarr and visit `http://localhost:8080/api/trakt/auth` to authenticate
 
-### AllDebrid Setup
+### Setting up AllDebrid
 
 1. Get your API key from [alldebrid.com/apikeys](https://alldebrid.com/apikeys)
 2. Set the `ALLDEBRID_API_KEY` environment variable
 
-### Blacklist Configuration
+### Blacklist
 
-Create a `blacklist.txt` file with one pattern per line to exclude certain releases:
+Create a `blacklist.txt` file to exclude certain releases:
 ```
 cam
 hdcam
 telesync
-ts
 ```
 
-## API Reference
+## API Endpoints
 
-### Media Operations
+All endpoints are prefixed with `/api/`:
 
-#### Get All Media
-```
-GET /api/media
-```
-Returns an HTML page with all tracked media.
-
-#### Get Media Statistics
-```
-GET /api/media/stats
-```
-Returns JSON with aggregate statistics:
-```json
-{
-  "total": 150,
-  "on_disk": 120,
-  "not_on_disk": 30,
-  "movies": 50,
-  "episodes": 100,
-  "downloading": 5
-}
-```
-
-### Download Management
-
-#### List Torrents for Media
-```
-GET /api/torrents/list?trakt_id={id}
-```
-
-#### Retry Failed Download
-```
-POST /api/download/retry?trakt_id={id}
-```
-
-#### Cancel Download
-```
-POST /api/download/cancel?trakt_id={id}
-```
-
-#### Get Download Status
-```
-GET /api/download/status?trakt_id={id}
-```
-
-### Manual Operations
-
-#### Trigger Full Refresh
-```
-GET /api/refresh
-```
-Manually triggers sync from Trakt and torrent search.
-
-#### Get Cleanup Statistics
-```
-GET /api/cleanup/stats
-```
-Returns statistics about watched media eligible for cleanup.
-
-## Workflow
-
-The application runs the following workflow periodically:
-
-1. **Sync from Trakt**: Fetches current watchlists and favorites
-2. **Search Torrents**: Searches for torrents for media not on disk
-3. **Check AllDebrid Cache**: Verifies if torrents are cached
-4. **Download**: Adds selected torrents to AllDebrid
-5. **Monitor**: Tracks download progress
-6. **Cleanup**: Removes watched media after configured days
-
-### Quality Selection Algorithm
-
-1. Searches all available torrents for a media item
-2. Filters out blacklisted releases
-3. Prioritizes by:
-   - REMUX quality (highest)
-   - Resolution (4K > 1080p > 720p)
-   - File size (larger preferred)
-4. Checks AllDebrid cache availability
-5. Selects best cached torrent
-
-### TV Show Logic
-
-- **Watchlist**: Downloads next unwatched episode
-- **Favorites**: Downloads complete seasons when available
-- **Season Packs**: Intelligently handles multi-episode torrents
-
-## Database Viewer
-
-A standalone tool is included to inspect your media collection:
-
-```bash
-# Build the database viewer
-go build -o dbviewer ./cmd/dbviewer
-
-# View collection statistics
-./dbviewer -db /path/to/data.db -stats
-
-# View all movies
-./dbviewer -db /path/to/data.db -movies
-
-# View TV shows
-./dbviewer -db /path/to/data.db -shows
-
-# Filter by on-disk status
-./dbviewer -db /path/to/data.db -movies -ondisk
-./dbviewer -db /path/to/data.db -shows -not-ondisk
-```
-
-## Security
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/media` | GET | HTML page showing all media |
+| `/api/media/stats` | GET | JSON statistics about your collection |
+| `/api/torrents/list?trakt_id=X` | GET | List available torrents for a media item |
+| `/api/download/retry?trakt_id=X` | POST | Retry a failed download |
+| `/api/download/cancel?trakt_id=X` | POST | Cancel an active download |
+| `/api/download/status?trakt_id=X` | GET | Get download status |
+| `/api/refresh` | GET | Manually trigger sync and search |
+| `/api/cleanup/stats` | GET | Statistics about watched media |
 
 ### API Authentication
 
-To secure your Momenarr instance, set the `MOMENARR_API_KEY` environment variable:
-
+If `MOMENARR_API_KEY` is set, include it in requests:
 ```bash
-export MOMENARR_API_KEY="your-secure-api-key"
-```
-
-Then include the key in your requests:
-```bash
-# Using Authorization header
 curl -H "Authorization: Bearer your-api-key" http://localhost:8080/api/media/stats
-
-# Using X-API-Key header
+# or
 curl -H "X-API-Key: your-api-key" http://localhost:8080/api/media/stats
 ```
 
-### Best Practices
+## Database Viewer
 
-1. **Use HTTPS**: Deploy behind a reverse proxy with TLS
-2. **Secure Storage**: Database files are created with restrictive permissions
-3. **API Key**: Generate a strong, random API key for production
-4. **Network**: Limit access to trusted networks
+A command-line tool is included to inspect your media database:
+
+```bash
+# Build the viewer
+go build -o dbviewer ./cmd/dbviewer
+
+# Show statistics
+./dbviewer -db /path/to/data/data.db -stats
+
+# List all movies
+./dbviewer -db /path/to/data/data.db -movies
+
+# List TV shows
+./dbviewer -db /path/to/data/data.db -shows
+
+# Additional options:
+#   -ondisk      Show only media on disk
+#   -not-ondisk  Show only missing media
+#   -sort        Sort by: title, year, added (default: title)
+#   -limit N     Limit results
+```
+
+## How It Works
+
+1. **Sync**: Periodically fetches your Trakt watchlist and favorites
+2. **Search**: For each missing media item, searches torrents on YGG and APIBay
+3. **Download**: Sends the best torrent to AllDebrid (checks cache first)
+4. **Monitor**: Tracks download progress
+5. **Cleanup**: Removes media that has been watched (after configured days)
+
+The application maintains a BoltDB database tracking:
+- Media items (movies and TV episodes)
+- Torrent information
+- Download status
+- Watch history
 
 ## Development
 
-### Running Tests
+### Project Structure
+
+```
+momenarr/
+├── cmd/
+│   ├── momenarr/      # Main application
+│   └── dbviewer/      # Database viewer tool
+├── pkg/
+│   ├── alldebrid/     # AllDebrid API client
+│   ├── config/        # Configuration
+│   ├── handlers/      # HTTP handlers
+│   ├── models/        # Data models
+│   ├── repository/    # Database layer
+│   ├── services/      # Business logic
+│   └── utils/         # Utilities
+├── bolthold/          # BoltDB wrapper
+└── trakt/             # Trakt API client
+```
+
+### Building
 
 ```bash
+# Run tests
 go test ./...
-```
 
-### Building for Different Platforms
+# Build for current platform
+go build -o momenarr ./cmd/momenarr
 
-```bash
-# Linux AMD64
+# Cross-compile
 GOOS=linux GOARCH=amd64 go build -o momenarr-linux-amd64 ./cmd/momenarr
-
-# Linux ARM64
-GOOS=linux GOARCH=arm64 go build -o momenarr-linux-arm64 ./cmd/momenarr
-
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o momenarr-darwin-amd64 ./cmd/momenarr
-
-# Windows
-GOOS=windows GOARCH=amd64 go build -o momenarr.exe ./cmd/momenarr
+GOOS=darwin GOARCH=arm64 go build -o momenarr-darwin-arm64 ./cmd/momenarr
 ```
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and linting
-5. Submit a pull request
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Built with [BoltDB](https://github.com/etcd-io/bbolt) for embedded storage
-- Uses [Logrus](https://github.com/sirupsen/logrus) for structured logging
-- Integrates with [Trakt](https://trakt.tv) and [AllDebrid](https://alldebrid.com)
+GNU General Public License v3.0 - see [LICENSE](LICENSE) file for details.
