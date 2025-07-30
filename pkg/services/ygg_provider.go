@@ -15,27 +15,18 @@ import (
 )
 
 const (
-	// YGG API endpoints
 	yggAPIBase         = "https://yggapi.eu"
 	yggSearchEndpoint  = "/torrents"
 	yggTorrentEndpoint = "/torrent"
-
-	// YGG category IDs
+	
 	movieCategories  = "&category_id=2178&category_id=2181&category_id=2183"
 	seriesCategories = "&category_id=2179&category_id=2181&category_id=2182&category_id=2184"
-
-	// API parameters
+	
 	defaultPage              = 1
 	defaultPerPage           = 100
 	maxConcurrentHashFetches = 5
+	maxHashFetchResults      = 10
 )
-
-// YGGProvider implements torrent search using YggTorrent API
-type YGGProvider struct {
-	httpClient   *http.Client
-	hashCache    sync.Map // Cache for torrent hashes
-	traktService *TraktService
-}
 
 // YggTorrent represents a torrent from YGG API
 type YggTorrent struct {
@@ -47,11 +38,40 @@ type YggTorrent struct {
 	Hash     string `json:"hash,omitempty"`
 }
 
-// NewYGGProvider creates a new YGG provider
-func NewYGGProvider(httpClient *http.Client, traktService *TraktService) *YGGProvider {
+// YGGProvider searches torrents on YggTorrent (French tracker)
+type YGGProvider struct {
+	httpClient  *http.Client
+	hashCache   sync.Map
+	tmdbService *TMDBService
+}
+
+// CreateYGGProvider creates a YGG provider
+func CreateYGGProvider(httpClient *http.Client) *YGGProvider {
 	return &YGGProvider{
-		httpClient:   httpClient,
-		traktService: traktService,
+		httpClient: httpClient,
+	}
+}
+
+// NewYGGProvider is deprecated, use CreateYGGProvider
+func NewYGGProvider(httpClient *http.Client) *YGGProvider {
+	return &YGGProvider{
+		httpClient: httpClient,
+	}
+}
+
+// CreateYGGProviderWithTMDB creates a YGG provider with TMDB support
+func CreateYGGProviderWithTMDB(httpClient *http.Client, tmdbService *TMDBService) *YGGProvider {
+	return &YGGProvider{
+		httpClient:  httpClient,
+		tmdbService: tmdbService,
+	}
+}
+
+// NewYGGProviderWithTMDB is deprecated, use CreateYGGProviderWithTMDB
+func NewYGGProviderWithTMDB(httpClient *http.Client, tmdbService *TMDBService) *YGGProvider {
+	return &YGGProvider{
+		httpClient:  httpClient,
+		tmdbService: tmdbService,
 	}
 }
 
@@ -60,148 +80,202 @@ func (p *YGGProvider) GetName() string {
 	return "YGG"
 }
 
-// Search searches for torrents on YGG (legacy method for backward compatibility)
+// Search searches for torrents on YGG
 func (p *YGGProvider) Search(query string, mediaType string, season, episode int) ([]models.TorrentSearchResult, error) {
-	// For legacy calls, try to extract Trakt slug from query if it's provided
-	// Format: "Title Year [traktSlug]" or "Title+Year+[traktSlug]"
-	frenchQuery := query
-	var traktSlug string
-
-	if p.traktService != nil {
-		// Try to extract Trakt slug from query if it's provided
-		if idx := strings.LastIndex(query, "["); idx != -1 {
-			if endIdx := strings.Index(query[idx:], "]"); endIdx != -1 {
-				traktSlug = query[idx+1 : idx+endIdx]
-				if traktSlug != "" {
-					// Remove the Trakt slug from query
-					queryWithoutSlug := strings.TrimSpace(query[:idx])
-
-					originalTitle := queryWithoutSlug
-					frenchQuery = p.traktService.GetFrenchTitle(originalTitle, mediaType, traktSlug)
-
-					if frenchQuery != originalTitle {
-						log.WithFields(log.Fields{
-							"original": originalTitle,
-							"french":   frenchQuery,
-						}).Info("Using French title for search")
-					}
-				}
-			}
-		}
-	}
-
-	// Build search query using the translated title
-	searchQuery := p.buildSearchQuery(frenchQuery, mediaType, season, episode)
-
-	return p.performSearch(searchQuery, mediaType, season, episode)
-}
-
-// performSearch performs the actual YGG API search
-func (p *YGGProvider) performSearch(searchQuery string, mediaType string, season, episode int) ([]models.TorrentSearchResult, error) {
-	// Build API URL
-	encodedQuery := url.QueryEscape(searchQuery)
-	categoryParams := p.getCategoryParams(mediaType)
-	apiURL := fmt.Sprintf("%s%s?q=%s&page=%d&per_page=%d%s",
-		yggAPIBase, yggSearchEndpoint, encodedQuery, defaultPage, defaultPerPage, categoryParams)
-
-	log.WithFields(log.Fields{
-		"search_query": searchQuery,
-		"media_type":   mediaType,
-		"season":       season,
-		"episode":      episode,
-		"api_url":      apiURL,
-	}).Info("Searching YGG API")
-
-	resp, err := p.httpClient.Get(apiURL)
+	torrents, err := p.fetchTorrents(query, mediaType)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search YGG: %w", err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.WithField("status_code", resp.StatusCode).Warn("YGG API returned non-OK status")
-		return []models.TorrentSearchResult{}, nil
-	}
-
-	// Read the response body to check if it's valid JSON
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read YGG response: %w", err)
-	}
-
-	// Check if response looks like JSON
-	if len(body) > 0 && body[0] != '[' && body[0] != '{' {
-		log.Warn("YGG API returned invalid JSON response")
-		return []models.TorrentSearchResult{}, nil
-	}
-
-	var yggTorrents []YggTorrent
-	if err := json.Unmarshal(body, &yggTorrents); err != nil {
-		log.WithError(err).Warn("Failed to decode YGG response")
-		return []models.TorrentSearchResult{}, nil
-	}
-
-	log.WithField("raw_results", len(yggTorrents)).Info("YGG API returned results")
-
-	// Convert to our format
-	var results []models.TorrentSearchResult
-	for _, yggTorrent := range yggTorrents {
-		// Filter based on media type
-		if mediaType == "series" && season > 0 {
-			if episode > 0 {
-				// For specific episodes, accept if it matches the episode OR is a season pack
-				if !p.matchesEpisode(yggTorrent.Title, season, episode) && !p.isSeasonPack(yggTorrent.Title, season) {
-					if !p.mentionsSeason(yggTorrent.Title, season) {
-						continue
-					}
-				}
-			} else {
-				// For season searches, accept anything that mentions the season
-				if !p.mentionsSeason(yggTorrent.Title, season) {
-					continue
-				}
-			}
-		}
-
-		result := models.TorrentSearchResult{
-			Title:     yggTorrent.Title,
-			Hash:      "", // Will be fetched later if needed
-			Size:      yggTorrent.Size,
-			Seeders:   yggTorrent.Seeders,
-			Leechers:  yggTorrent.Leechers,
-			Source:    "YGG",
-			MagnetURL: "",                          // Will be generated after hash is fetched
-			ID:        strconv.Itoa(yggTorrent.ID), // Store ID for later hash fetching
-		}
-
-		results = append(results, result)
-	}
-
-	log.WithField("filtered_results", len(results)).Info("YGG search filtering completed")
-
-	// Fetch hashes for results with good seeders (top 10)
-	if len(results) > 0 {
-		p.fetchHashesForTopResults(results)
-	}
-
+	
+	results := p.filterAndConvert(torrents, mediaType, season, episode)
+	p.enrichTopResults(results)
+	
 	return results, nil
 }
 
-// buildSearchQuery builds the search query following gostremiofr pattern
-func (p *YGGProvider) buildSearchQuery(query string, mediaType string, season, episode int) string {
-	// The query from torrent search service already includes season/year info
-	// Just clean it up and return it as-is to avoid duplication
-
-	// Replace spaces with + for URL encoding
-	cleanQuery := strings.ReplaceAll(query, " ", "+")
-
-	// Remove any URL encoding that might already be present
-	cleanQuery = strings.ReplaceAll(cleanQuery, "%2B", "+")
-
-	return cleanQuery
+// SearchWithStoredFrenchTitle searches using pre-fetched French title
+func (p *YGGProvider) SearchWithStoredFrenchTitle(query string, mediaType string, season, episode int, tmdbID int64, originalTitle string) ([]models.TorrentSearchResult, error) {
+	// For backward compatibility - just use the provided query
+	return p.Search(query, mediaType, season, episode)
 }
 
-// getCategoryParams returns the appropriate category parameters for the content type
+// fetchTorrents retrieves torrents from YGG API
+func (p *YGGProvider) fetchTorrents(query string, mediaType string) ([]YggTorrent, error) {
+	apiURL := p.buildAPIURL(query, mediaType)
+	
+	log.WithFields(log.Fields{
+		"query": query,
+		"type":  mediaType,
+	}).Debug("Fetching from YGG API")
+	
+	resp, err := p.httpClient.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("YGG API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		log.WithField("status", resp.StatusCode).Warn("YGG API returned non-OK status")
+		return []YggTorrent{}, nil
+	}
+	
+	return p.parseResponse(resp.Body)
+}
+
+// buildAPIURL constructs the API endpoint URL
+func (p *YGGProvider) buildAPIURL(query string, mediaType string) string {
+	encodedQuery := url.QueryEscape(query)
+	categories := p.getCategoryParams(mediaType)
+	
+	return fmt.Sprintf("%s%s?q=%s&page=%d&per_page=%d%s",
+		yggAPIBase, yggSearchEndpoint, encodedQuery, 
+		defaultPage, defaultPerPage, categories)
+}
+
+// parseResponse parses the API response
+func (p *YGGProvider) parseResponse(body io.Reader) ([]YggTorrent, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	
+	// Validate JSON format
+	if len(data) > 0 && data[0] != '[' && data[0] != '{' {
+		log.Warn("YGG API returned invalid JSON")
+		return []YggTorrent{}, nil
+	}
+	
+	var torrents []YggTorrent
+	if err := json.Unmarshal(data, &torrents); err != nil {
+		log.WithError(err).Warn("Failed to parse YGG response")
+		return []YggTorrent{}, nil
+	}
+	
+	return torrents, nil
+}
+
+// filterAndConvert filters torrents and converts to search results
+func (p *YGGProvider) filterAndConvert(torrents []YggTorrent, mediaType string, season, episode int) []models.TorrentSearchResult {
+	var results []models.TorrentSearchResult
+	
+	for _, torrent := range torrents {
+		if !p.matchesMediaFilter(torrent.Title, mediaType, season, episode) {
+			continue
+		}
+		
+		results = append(results, p.convertToSearchResult(torrent))
+	}
+	
+	return results
+}
+
+// matchesMediaFilter checks if torrent matches the search criteria
+func (p *YGGProvider) matchesMediaFilter(title, mediaType string, season, episode int) bool {
+	if mediaType != "series" || season == 0 {
+		return true
+	}
+	
+	if episode > 0 {
+		return p.matchesEpisode(title, season, episode) || 
+		       p.isSeasonPack(title, season) || 
+		       p.containsSeason(title, season)
+	}
+	
+	return p.containsSeason(title, season)
+}
+
+// convertToSearchResult converts YGG torrent to search result
+func (p *YGGProvider) convertToSearchResult(torrent YggTorrent) models.TorrentSearchResult {
+	return models.TorrentSearchResult{
+		Title:     torrent.Title,
+		Hash:      "",
+		Size:      torrent.Size,
+		Seeders:   torrent.Seeders,
+		Leechers:  torrent.Leechers,
+		Source:    p.GetName(),
+		MagnetURL: "",
+		ID:        strconv.Itoa(torrent.ID),
+	}
+}
+
+// enrichTopResults fetches hashes for top results
+func (p *YGGProvider) enrichTopResults(results []models.TorrentSearchResult) {
+	limit := min(len(results), maxHashFetchResults)
+	if limit == 0 {
+		return
+	}
+	
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, maxConcurrentHashFetches)
+	
+	for i := 0; i < limit; i++ {
+		if results[i].ID == "" {
+			continue
+		}
+		
+		wg.Add(1)
+		go p.enrichResultWithHash(&results[i], &wg, semaphore)
+	}
+	
+	wg.Wait()
+}
+
+// enrichResultWithHash fetches and sets hash for a single result
+func (p *YGGProvider) enrichResultWithHash(result *models.TorrentSearchResult, wg *sync.WaitGroup, sem chan struct{}) {
+	defer wg.Done()
+	
+	sem <- struct{}{}
+	defer func() { <-sem }()
+	
+	hash, err := p.fetchTorrentHash(result.ID)
+	if err != nil {
+		log.WithError(err).WithField("id", result.ID).Debug("Failed to fetch hash")
+		return
+	}
+	
+	result.Hash = hash
+	result.MagnetURL = p.buildMagnetURL(hash, result.Title)
+}
+
+// fetchTorrentHash retrieves hash for a specific torrent
+func (p *YGGProvider) fetchTorrentHash(torrentID string) (string, error) {
+	// Check cache
+	if cached, ok := p.hashCache.Load(torrentID); ok {
+		return cached.(string), nil
+	}
+	
+	apiURL := fmt.Sprintf("%s%s/%s", yggAPIBase, yggTorrentEndpoint, torrentID)
+	
+	resp, err := p.httpClient.Get(apiURL)
+	if err != nil {
+		return "", fmt.Errorf("hash fetch failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+	
+	var result struct {
+		Hash string `json:"hash"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode hash: %w", err)
+	}
+	
+	// Cache result
+	p.hashCache.Store(torrentID, result.Hash)
+	
+	return result.Hash, nil
+}
+
+// buildMagnetURL constructs a magnet link
+func (p *YGGProvider) buildMagnetURL(hash, title string) string {
+	return fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", hash, url.QueryEscape(title))
+}
+
+// getCategoryParams returns category filters for the media type
 func (p *YGGProvider) getCategoryParams(mediaType string) string {
 	switch mediaType {
 	case "movie":
@@ -213,183 +287,92 @@ func (p *YGGProvider) getCategoryParams(mediaType string) string {
 	}
 }
 
-// fetchHashesForTopResults fetches hashes for torrents with the most seeders
-func (p *YGGProvider) fetchHashesForTopResults(results []models.TorrentSearchResult) {
-	// Only fetch hashes for top 10 results to avoid too many API calls
-	limit := 10
-	if len(results) < limit {
-		limit = len(results)
-	}
-
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, maxConcurrentHashFetches)
-
-	for i := 0; i < limit; i++ {
-		if results[i].ID == "" {
-			continue
-		}
-
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			result := &results[idx]
-			hash, err := p.getTorrentHash(result.ID)
-			if err != nil {
-				log.WithError(err).WithField("torrent_id", result.ID).Error("Failed to get torrent hash")
-				return
-			}
-
-			result.Hash = hash
-			result.MagnetURL = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", hash, url.QueryEscape(result.Title))
-		}(i)
-	}
-
-	wg.Wait()
-}
-
-// getTorrentHash fetches the hash for a specific torrent
-func (p *YGGProvider) getTorrentHash(torrentID string) (string, error) {
-	// Check cache first
-	if cached, ok := p.hashCache.Load(torrentID); ok {
-		if hash, ok := cached.(string); ok {
-			return hash, nil
-		}
-	}
-
-	apiURL := fmt.Sprintf("%s%s/%s", yggAPIBase, yggTorrentEndpoint, torrentID)
-
-	resp, err := p.httpClient.Get(apiURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to get torrent hash: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("YGG API returned status %d for torrent %s", resp.StatusCode, torrentID)
-	}
-
-	var result struct {
-		Hash string `json:"hash"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode hash response: %w", err)
-	}
-
-	// Cache the result
-	p.hashCache.Store(torrentID, result.Hash)
-
-	return result.Hash, nil
-}
-
-// matchesEpisode checks if a torrent title matches a specific episode
+// matchesEpisode checks if title matches a specific episode
 func (p *YGGProvider) matchesEpisode(title string, season, episode int) bool {
 	lowerTitle := strings.ToLower(title)
-
-	// Check common episode patterns
-	patterns := []string{
-		fmt.Sprintf("s%02de%02d", season, episode),
-		fmt.Sprintf("s%de%d", season, episode),
-		fmt.Sprintf("%dx%02d", season, episode),
-		fmt.Sprintf("season %d episode %d", season, episode),
-		fmt.Sprintf("saison %d episode %d", season, episode), // French
-		fmt.Sprintf("saison %d épisode %d", season, episode), // French with accent
-	}
-
+	patterns := p.getEpisodePatterns(season, episode)
+	
 	for _, pattern := range patterns {
 		if strings.Contains(lowerTitle, pattern) {
 			return true
 		}
 	}
-
 	return false
 }
 
-// isSeasonPack checks if a torrent is a complete season pack
+// getEpisodePatterns returns episode naming patterns (including French)
+func (p *YGGProvider) getEpisodePatterns(season, episode int) []string {
+	return []string{
+		fmt.Sprintf("s%02de%02d", season, episode),
+		fmt.Sprintf("s%de%d", season, episode),
+		fmt.Sprintf("%dx%02d", season, episode),
+		fmt.Sprintf("season %d episode %d", season, episode),
+		fmt.Sprintf("saison %d episode %d", season, episode),
+		fmt.Sprintf("saison %d épisode %d", season, episode),
+	}
+}
+
+// isSeasonPack checks if title is a complete season pack
 func (p *YGGProvider) isSeasonPack(title string, season int) bool {
-	lowerTitle := strings.ToLower(title)
-
-	// Check if it mentions the season but not a specific episode
-	seasonPatterns := []string{
-		fmt.Sprintf("season %d", season),
-		fmt.Sprintf("saison %d", season), // French
-		fmt.Sprintf("s%02d", season),
-		fmt.Sprintf("s%d", season),
-	}
-
-	hasSeasonMention := false
-	for _, pattern := range seasonPatterns {
-		if strings.Contains(lowerTitle, pattern) {
-			hasSeasonMention = true
-			break
-		}
-	}
-
-	if !hasSeasonMention {
+	if !p.containsSeason(title, season) {
 		return false
 	}
-
-	// Check for season pack indicators
+	
+	lowerTitle := strings.ToLower(title)
+	
+	// Check for pack indicators
 	packIndicators := []string{
-		"complete",
-		"complet",  // French
-		"complète", // French
-		"full season",
-		"saison complete", // French
-		"saison complète", // French
-		"season pack",
-		"all episodes",
-		"tous les épisodes", // French
-		"integrale",         // French
-		"intégrale",         // French
+		"complete", "complet", "complète",
+		"full season", "saison complete", "saison complète",
+		"season pack", "all episodes", "tous les épisodes",
+		"integrale", "intégrale",
 	}
-
+	
 	for _, indicator := range packIndicators {
 		if strings.Contains(lowerTitle, indicator) {
 			return true
 		}
 	}
-
-	// If it mentions season but not a specific episode, it's likely a pack
-	episodePatterns := []string{
+	
+	// If mentions season but not episode, likely a pack
+	episodeIndicators := []string{
 		fmt.Sprintf("s%02de", season),
 		fmt.Sprintf("s%de", season),
 		fmt.Sprintf("%dx", season),
-		"episode",
-		"épisode", // French
+		"episode", "épisode",
 	}
-
-	for _, pattern := range episodePatterns {
-		if strings.Contains(lowerTitle, pattern) {
+	
+	for _, indicator := range episodeIndicators {
+		if strings.Contains(lowerTitle, indicator) {
 			return false
 		}
 	}
-
+	
 	return true
 }
 
-// mentionsSeason checks if a torrent title mentions a specific season
-func (p *YGGProvider) mentionsSeason(title string, season int) bool {
+// containsSeason checks if title mentions a specific season
+func (p *YGGProvider) containsSeason(title string, season int) bool {
 	lowerTitle := strings.ToLower(title)
+	patterns := p.getSeasonPatterns(season)
+	
+	for _, pattern := range patterns {
+		if strings.Contains(lowerTitle, pattern) {
+			return true
+		}
+	}
+	return false
+}
 
-	// Check various season patterns
-	seasonPatterns := []string{
+// getSeasonPatterns returns season naming patterns (including French)
+func (p *YGGProvider) getSeasonPatterns(season int) []string {
+	return []string{
 		fmt.Sprintf("season %d", season),
-		fmt.Sprintf("saison %d", season), // French
+		fmt.Sprintf("saison %d", season),
 		fmt.Sprintf("s%02d", season),
 		fmt.Sprintf("s%d", season),
 		fmt.Sprintf("season.%d", season),
 		fmt.Sprintf("s.%d", season),
 	}
-
-	for _, pattern := range seasonPatterns {
-		if strings.Contains(lowerTitle, pattern) {
-			return true
-		}
-	}
-
-	return false
 }
+

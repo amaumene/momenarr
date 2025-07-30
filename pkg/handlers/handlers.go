@@ -17,22 +17,22 @@ const (
 	MaxRequestSize = 1 << 20
 )
 
-// NewHandler contains all HTTP handlers for the new torrent/AllDebrid version
-type NewHandler struct {
-	appService *services.NewAppService
+// Handler contains all HTTP handlers for the torrent/AllDebrid version
+type Handler struct {
+	appService *services.AppService
 }
 
-func CreateNewHandler(appService *services.NewAppService) *NewHandler {
-	return &NewHandler{
+func CreateHandler(appService *services.AppService) *Handler {
+	return &Handler{
 		appService: appService,
 	}
 }
 
-func NewAppHandler(appService *services.NewAppService) http.Handler {
-	return CreateNewHandler(appService)
+func NewAppHandler(appService *services.AppService) http.Handler {
+	return CreateHandler(appService)
 }
 
-func (h *NewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Add panic recovery
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -67,7 +67,7 @@ func (h *NewHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *NewHandler) SetupRoutes() {
+func (h *Handler) SetupRoutes() {
 	http.HandleFunc("/api/media", h.handleMedia)
 	http.HandleFunc("/api/media/stats", h.handleMediaStats)
 	http.HandleFunc("/api/torrents/list", h.handleTorrentList)
@@ -90,7 +90,7 @@ type ResponseSuccess struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-func (h *NewHandler) writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
+func (h *Handler) writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
@@ -99,7 +99,7 @@ func (h *NewHandler) writeJSONResponse(w http.ResponseWriter, status int, data i
 	}
 }
 
-func (h *NewHandler) writeErrorResponse(w http.ResponseWriter, status int, message, details string) {
+func (h *Handler) writeErrorResponse(w http.ResponseWriter, status int, message, details string) {
 	response := ResponseError{
 		Error:   message,
 		Message: details,
@@ -107,7 +107,7 @@ func (h *NewHandler) writeErrorResponse(w http.ResponseWriter, status int, messa
 	h.writeJSONResponse(w, status, response)
 }
 
-func (h *NewHandler) writeSuccessResponse(w http.ResponseWriter, message string, data interface{}) {
+func (h *Handler) writeSuccessResponse(w http.ResponseWriter, message string, data interface{}) {
 	response := ResponseSuccess{
 		Message: message,
 		Data:    data,
@@ -116,7 +116,7 @@ func (h *NewHandler) writeSuccessResponse(w http.ResponseWriter, message string,
 }
 
 // writeHTMLErrorResponse writes an HTML error response instead of JSON
-func (h *NewHandler) writeHTMLErrorResponse(w http.ResponseWriter, status int, message, details string) {
+func (h *Handler) writeHTMLErrorResponse(w http.ResponseWriter, status int, message, details string) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(status)
 
@@ -142,7 +142,7 @@ func (h *NewHandler) writeHTMLErrorResponse(w http.ResponseWriter, status int, m
 }
 
 // handleMedia handles media listing requests and returns an HTML page
-func (h *NewHandler) handleMedia(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeHTMLErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", "only GET requests are allowed")
 		return
@@ -326,17 +326,9 @@ func (h *NewHandler) handleMedia(w http.ResponseWriter, r *http.Request) {
 
 	var safeMediaList []SafeMediaData
 	for _, media := range mediaList {
-		// Check if downloading by looking for active torrents
+		// Since torrents are no longer stored in database, downloading status is simplified
+		// Media is either OnDisk or not - no intermediate downloading state
 		isDownloading := false
-		if !media.OnDisk {
-			torrents, _ := h.appService.GetTorrentsByTraktID(media.Trakt)
-			for _, torrent := range torrents {
-				if torrent.AllDebridID > 0 && !torrent.Failed {
-					isDownloading = true
-					break
-				}
-			}
-		}
 
 		safeMediaList = append(safeMediaList, SafeMediaData{
 			Trakt:         media.Trakt,
@@ -377,7 +369,7 @@ func (h *NewHandler) handleMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMediaStats returns JSON media statistics
-func (h *NewHandler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
@@ -393,7 +385,7 @@ func (h *NewHandler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTorrentList handles torrent listing requests for a specific Trakt ID
-func (h *NewHandler) handleTorrentList(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleTorrentList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
@@ -427,7 +419,7 @@ func (h *NewHandler) handleTorrentList(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRetryDownload handles download retry requests
-func (h *NewHandler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
 		return
@@ -456,7 +448,7 @@ func (h *NewHandler) handleRetryDownload(w http.ResponseWriter, r *http.Request)
 }
 
 // handleCancelDownload handles download cancellation requests
-func (h *NewHandler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
 		return
@@ -485,7 +477,7 @@ func (h *NewHandler) handleCancelDownload(w http.ResponseWriter, r *http.Request
 }
 
 // handleDownloadStatus gets the status of a download
-func (h *NewHandler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
@@ -520,7 +512,7 @@ func (h *NewHandler) handleDownloadStatus(w http.ResponseWriter, r *http.Request
 // handleRefresh handles manual refresh requests - syncs with Trakt and searches for torrents
 // GET /api/refresh - Syncs media from Trakt and searches for torrents for media not marked as downloaded
 // This will sync the latest media from Trakt, then search multiple torrent providers and check AllDebrid cache
-func (h *NewHandler) handleRefresh(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return
@@ -559,7 +551,7 @@ func (h *NewHandler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCleanupStats returns cleanup statistics
-func (h *NewHandler) handleCleanupStats(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleCleanupStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
 		return

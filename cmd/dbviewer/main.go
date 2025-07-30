@@ -45,6 +45,7 @@ func main() {
 		showShows  = flag.Bool("shows", false, "Show only TV shows")
 		onDiskOnly = flag.Bool("ondisk", false, "Show only media on disk")
 		noColor    = flag.Bool("no-color", false, "Disable colored output")
+		detailed   = flag.Bool("detailed", false, "Show detailed information including Trakt ID")
 		sortBy     = flag.String("sort", "title", "Sort by: title, year, created, updated, status")
 	)
 	flag.Parse()
@@ -56,6 +57,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nExample:\n")
 		fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -stats\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -movies -ondisk\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -detailed\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -102,7 +104,7 @@ func main() {
 	}
 
 	// Print media collection
-	printMediaCollection(colorize, filteredMedia, store)
+	printMediaCollection(colorize, filteredMedia, store, *detailed)
 
 	// Print summary statistics
 	fmt.Printf("\n" + colorize("cyan", "=== SUMMARY ===") + "\n")
@@ -254,11 +256,11 @@ func printStatistics(colorize func(string, string) string, stats MediaStats) {
 	fmt.Println()
 }
 
-func printMediaCollection(colorize func(string, string) string, media []*models.Media, store *bolthold.Store) {
+func printMediaCollection(colorize func(string, string) string, media []*models.Media, store *bolthold.Store, detailed bool) {
 	fmt.Printf(colorize("bold", "📺 MEDIA COLLECTION\n"))
 
 	for i, item := range media {
-		printMediaItem(colorize, item, i+1)
+		printMediaItem(colorize, item, i+1, detailed)
 
 		if i < len(media)-1 {
 			fmt.Println(colorize("yellow", "────────────────────────────────────────────────────────────────────────────────"))
@@ -266,7 +268,7 @@ func printMediaCollection(colorize func(string, string) string, media []*models.
 	}
 }
 
-func printMediaItem(colorize func(string, string) string, item *models.Media, index int) {
+func printMediaItem(colorize func(string, string) string, item *models.Media, index int, detailed bool) {
 	// Status indicator
 	statusColor := "yellow"
 	statusText := "WANTED"
@@ -313,8 +315,20 @@ func printMediaItem(colorize func(string, string) string, item *models.Media, in
 		details = append(details, colorize(typeColor, typeText))
 	}
 
-	if item.IMDB != "" {
-		details = append(details, colorize("white", fmt.Sprintf("IMDB: %s", item.IMDB)))
+	if item.TMDBID > 0 {
+		details = append(details, colorize("white", fmt.Sprintf("TMDB: %d", item.TMDBID)))
+	}
+
+	if item.OriginalLanguage != "" {
+		details = append(details, colorize("blue", fmt.Sprintf("Lang: %s", item.OriginalLanguage)))
+	}
+
+	if item.FrenchTitle != "" && item.FrenchTitle != item.Title {
+		details = append(details, colorize("green", fmt.Sprintf("FR: %s", item.FrenchTitle)))
+	}
+
+	if detailed && item.Trakt > 0 {
+		details = append(details, colorize("purple", fmt.Sprintf("Trakt: %d", item.Trakt)))
 	}
 
 	if item.DownloadID > 0 {
@@ -323,6 +337,11 @@ func printMediaItem(colorize func(string, string) string, item *models.Media, in
 
 	if len(details) > 0 {
 		fmt.Printf("    %s\n", strings.Join(details, " • "))
+	}
+
+	// Show French title as a separate line if it's different and exists
+	if item.FrenchTitle != "" && item.FrenchTitle != item.Title {
+		fmt.Printf("    %s %s\n", colorize("green", "🇫🇷"), colorize("green", item.FrenchTitle))
 	}
 
 	// File path

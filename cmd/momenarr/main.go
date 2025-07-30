@@ -20,87 +20,77 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type app struct {
+	config          *config.Config
+	repo            repository.Repository
+	appService      *services.AppService
+	server          *http.Server
+	tokenService    *services.TraktTokenService
+	allDebridService services.AllDebridInterface
+}
+
 func main() {
-	log.SetOutput(os.Stdout)
-	log.SetLevel(log.DebugLevel)
-	log.Info("starting momenarr application with alldebrid support")
-
-	cfg, err := config.LoadNewConfig()
+	initLogging()
+	
+	app, store, err := initializeApp()
 	if err != nil {
-		log.WithError(err).Fatal("failed to load configuration")
-	}
-
-	if err := cfg.Validate(); err != nil {
-		log.WithError(err).Fatal("invalid configuration")
-	}
-
-	dbPath := filepath.Join(cfg.DataDir, "data.db")
-	store, err := bolthold.Open(dbPath, 0600, nil)
-	if err != nil {
-		log.WithError(err).Fatal("failed to open database")
+		log.WithError(err).Fatal("Failed to initialize application")
 	}
 	defer func() {
 		if err := store.Close(); err != nil {
-			log.WithError(err).Error("failed to close database")
+			log.WithError(err).Error("Failed to close database")
 		}
 	}()
-
-	repo := repository.NewBoltRepository(store)
-
-	// Initialize Trakt
-	trakt.Key = cfg.TraktAPIKey
-	tokenService := services.NewTraktTokenService(cfg.DataDir, cfg.TraktClientSecret)
-	traktToken, err := tokenService.GetToken()
-	if err != nil {
-		log.WithError(err).Fatal("failed to get trakt token")
-	}
-
-	// Initialize Trakt service first
-	traktService := services.NewTraktService(repo, traktToken)
-
-	// Initialize AllDebrid and torrent services
-	allDebridService := services.NewAllDebridService(
-		repo,
-		cfg.AllDebridAPIKey,
-	)
-
-	torrentService := services.NewTorrentServiceWithTrakt(
-		repo,
-		cfg.BlacklistFile,
-		traktService,
-	)
-
-	downloadService := services.CreateNewDownloadService(
-		repo,
-		allDebridService,
-		torrentService,
-	)
-
-	cleanupService := services.CreateNewCleanupService(repo, allDebridService, traktToken)
-	cleanupService.SetWatchedDays(cfg.WatchedDays)
-
-	// Initialize main application service
-	appService := services.CreateNewAppService(
-		repo,
-		traktService,
-		torrentService,
-		downloadService,
-		cleanupService,
-	)
-
-	handler := handlers.CreateNewHandler(appService)
-	handler.SetupRoutes()
-
+	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
+	
 	var wg sync.WaitGroup
+	
+	// Start background tasks
 	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		startBackgroundTasks(ctx, appService, tokenService, traktToken, repo, allDebridService, cfg)
-	}()
+	go app.runBackgroundTasks(ctx, &wg)
+	
+	// Start HTTP server
+	wg.Add(1)
+	go app.runHTTPServer(&wg)
+	
+	log.Info("Momenarr is ready")
+	logConfiguration(app.config)
+	
+	app.waitForShutdown(ctx, cancel, &wg)
+}
 
+func initLogging() {
+	log.SetOutput(os.Stdout)
+	log.SetLevel(log.DebugLevel)
+	log.Info("Starting Momenarr with AllDebrid support")
+}
+
+func initializeApp() (*app, *bolthold.Store, error) {
+	cfg, err := loadAndValidateConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	store, err := openDatabase(cfg.DataDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	repo := repository.NewBoltRepository(store)
+	
+	// Initialize services
+	services, err := initializeServices(cfg, repo)
+	if err != nil {
+		store.Close()
+		return nil, nil, err
+	}
+	
+	// Create HTTP handler and server
+	handler := handlers.CreateHandler(services.appService)
+	handler.SetupRoutes()
+	
 	server := &http.Server{
 		Addr:         cfg.GetServerAddress(),
 		Handler:      handler,
@@ -108,184 +98,223 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  30 * time.Second,
 	}
+	
+	return &app{
+		config:           cfg,
+		repo:             repo,
+		appService:       services.appService,
+		server:           server,
+		tokenService:     services.tokenService,
+		allDebridService: services.allDebridService,
+	}, store, nil
+}
 
-	// Start server in goroutine
-	wg.Add(1)
+func loadAndValidateConfig() (*config.Config, error) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	
+	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating data directory: %w", err)
+	}
+	
+	return cfg, nil
+}
+
+func openDatabase(dataDir string) (*bolthold.Store, error) {
+	dbPath := filepath.Join(dataDir, "data.db")
+	store, err := bolthold.Open(dbPath, 0600, nil)
+	if err != nil {
+		return nil, fmt.Errorf("opening database: %w", err)
+	}
+	return store, nil
+}
+
+type serviceContainer struct {
+	appService       *services.AppService
+	tokenService     *services.TraktTokenService
+	allDebridService services.AllDebridInterface
+}
+
+func initializeServices(cfg *config.Config, repo repository.Repository) (*serviceContainer, error) {
+	// Initialize Trakt
+	trakt.Key = cfg.TraktAPIKey
+	tokenService := services.NewTraktTokenService(cfg.DataDir, cfg.TraktClientSecret)
+	
+	traktToken, err := tokenService.GetToken()
+	if err != nil {
+		return nil, fmt.Errorf("getting Trakt token: %w", err)
+	}
+	
+	// Initialize optional TMDB service
+	var tmdbService *services.TMDBService
+	if cfg.TMDBAPIKey != "" {
+		tmdbService = services.NewTMDBService(cfg.TMDBAPIKey)
+		log.Info("TMDB service initialized")
+	}
+	
+	// Create services with proper dependencies
+	traktService := createTraktService(repo, traktToken, tmdbService)
+	allDebridService := services.NewAllDebridService(repo, cfg.AllDebridAPIKey)
+	torrentService := createTorrentService(repo, cfg, traktService, tmdbService)
+	downloadService := services.CreateDownloadService(repo, allDebridService, torrentService)
+	
+	cleanupService := services.CreateCleanupService(repo, allDebridService, traktToken)
+	cleanupService.SetWatchedDays(cfg.WatchedDays)
+	
+	appService := services.CreateAppService(
+		repo,
+		traktService,
+		torrentService,
+		downloadService,
+		cleanupService,
+	)
+	
+	return &serviceContainer{
+		appService:       appService,
+		tokenService:     tokenService,
+		allDebridService: allDebridService,
+	}, nil
+}
+
+func createTraktService(repo repository.Repository, token *trakt.Token, tmdb *services.TMDBService) *services.TraktService {
+	if tmdb != nil {
+		return services.NewTraktServiceWithTMDB(repo, token, tmdb)
+	}
+	return services.NewTraktService(repo, token)
+}
+
+func createTorrentService(repo repository.Repository, cfg *config.Config, traktSvc *services.TraktService, tmdb *services.TMDBService) *services.TorrentService {
+	if tmdb != nil {
+		return services.CreateTorrentServiceWithTraktAndTMDB(
+			repo,
+			cfg.BlacklistFile,
+			traktSvc,
+			tmdb,
+		)
+	}
+	return services.CreateTorrentServiceWithTrakt(repo, cfg.BlacklistFile, traktSvc)
+}
+
+func (a *app) runBackgroundTasks(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+	
+	syncInterval := parseSyncInterval(a.config.SyncInterval)
+	ticker := time.NewTicker(syncInterval)
+	defer ticker.Stop()
+	
+	// Run initial tasks
+	if err := a.executeTasksWithRefresh(ctx); err != nil && ctx.Err() == nil {
+		log.WithError(err).Error("Initial task run failed")
+	}
+	
+	// Run periodic tasks
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Background tasks stopped")
+			return
+		case <-ticker.C:
+			if err := a.executeTasksWithRefresh(ctx); err != nil && ctx.Err() == nil {
+				log.WithError(err).Error("Scheduled task run failed")
+			}
+		}
+	}
+}
+
+func (a *app) executeTasksWithRefresh(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	
+	// Refresh Trakt token
+	token, err := a.tokenService.GetToken()
+	if err != nil {
+		return fmt.Errorf("getting token: %w", err)
+	}
+	
+	refreshedToken, err := a.tokenService.RefreshToken(token)
+	if err != nil {
+		log.WithError(err).Warn("Token refresh failed, using existing token")
+	} else {
+		cleanupService := services.CreateCleanupService(a.repo, a.allDebridService, refreshedToken)
+		a.appService.UpdateTraktToken(refreshedToken, cleanupService)
+		log.Debug("Token refreshed successfully")
+	}
+	
+	// Execute main tasks
+	return a.appService.RunTasks(ctx)
+}
+
+func (a *app) runHTTPServer(wg *sync.WaitGroup) {
+	defer wg.Done()
+	
+	log.WithField("address", a.server.Addr).Info("Starting HTTP server")
+	
+	if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.WithError(err).Error("HTTP server error")
+	}
+}
+
+func (a *app) waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	
+	<-sigChan
+	log.Info("Shutdown signal received")
+	
+	// Stop background tasks
+	cancel()
+	
+	// Graceful shutdown with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	
+	// Shutdown HTTP server
 	go func() {
-		defer wg.Done()
-		log.WithField("address", server.Addr).Info("starting http server")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.WithError(err).Error("http server error")
+		if err := a.server.Shutdown(shutdownCtx); err != nil {
+			log.WithError(err).Error("HTTP server shutdown error")
 		}
 	}()
+	
+	// Wait for all goroutines
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	
+	select {
+	case <-done:
+		log.Info("Graceful shutdown completed")
+	case <-shutdownCtx.Done():
+		log.Warn("Shutdown timeout exceeded")
+	}
+	
+	// Close application service
+	if err := a.appService.Close(); err != nil {
+		log.WithError(err).Error("Failed to close app service")
+	}
+}
 
-	log.Info("momenarr is ready")
+func parseSyncInterval(interval string) time.Duration {
+	duration, err := time.ParseDuration(interval)
+	if err != nil {
+		log.WithError(err).Warn("Invalid sync interval, using default")
+		return 6 * time.Hour
+	}
+	return duration
+}
+
+func logConfiguration(cfg *config.Config) {
 	log.WithFields(log.Fields{
 		"data_dir":      cfg.DataDir,
 		"sync_interval": cfg.SyncInterval,
 		"watched_days":  cfg.WatchedDays,
-	}).Info("configuration loaded")
-
-	waitForShutdown(ctx, cancel, server, appService, &wg)
-}
-
-// startBackgroundTasks starts the background task loop with context cancellation
-func startBackgroundTasks(ctx context.Context, appService *services.NewAppService, tokenService *services.TraktTokenService, currentToken *trakt.Token, repo repository.Repository, allDebridService *services.AllDebridService, cfg *config.NewConfig) {
-	syncInterval, err := time.ParseDuration(cfg.SyncInterval)
-	if err != nil {
-		log.WithError(err).Error("invalid sync interval, using default 6h")
-		syncInterval = 6 * time.Hour
-	}
-
-	ticker := time.NewTicker(syncInterval)
-	defer ticker.Stop()
-
-	// Check for cancellation before running initial tasks
-	select {
-	case <-ctx.Done():
-		log.Info("background tasks cancelled before initial run")
-		return
-	default:
-	}
-
-	if err := runTasksWithTokenRefresh(ctx, appService, tokenService, &currentToken, repo, allDebridService); err != nil {
-		// Check if error is due to context cancellation
-		if ctx.Err() != nil {
-			log.Info("background tasks cancelled during initial run")
-			return
-		}
-		log.WithError(err).Error("failed to run initial tasks")
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("background tasks cancelled")
-			return
-		case <-ticker.C:
-			// Check for cancellation before running scheduled tasks
-			select {
-			case <-ctx.Done():
-				log.Info("background tasks cancelled before scheduled run")
-				return
-			default:
-			}
-
-			if err := runTasksWithTokenRefresh(ctx, appService, tokenService, &currentToken, repo, allDebridService); err != nil {
-				// Check if error is due to context cancellation
-				if ctx.Err() != nil {
-					log.Info("background tasks cancelled during scheduled run")
-					return
-				}
-				log.WithError(err).Error("failed to run scheduled tasks")
-			}
-		}
-	}
-}
-
-// runTasksWithTokenRefresh runs tasks and handles token refresh with context
-func runTasksWithTokenRefresh(ctx context.Context, appService *services.NewAppService, tokenService *services.TraktTokenService, currentToken **trakt.Token, repo repository.Repository, allDebridService *services.AllDebridService) error {
-	// Check if context is cancelled before starting
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	// Refresh token before running tasks
-	refreshedToken, err := tokenService.RefreshToken(*currentToken)
-	if err != nil {
-		log.WithError(err).Error("failed to refresh trakt token, using current token")
-	} else {
-		*currentToken = refreshedToken
-		// Update services with the new token
-		traktService := services.NewTraktService(repo, refreshedToken)
-		cleanupService := services.CreateNewCleanupService(repo, allDebridService, refreshedToken)
-		appService.UpdateTraktServices(traktService, cleanupService)
-		log.Debug("updated trakt services with refreshed token")
-	}
-
-	// Run main application tasks with context
-	if err := appService.RunTasks(ctx); err != nil {
-		return fmt.Errorf("running application tasks: %w", err)
-	}
-
-	return nil
-}
-
-// waitForShutdown waits for shutdown signals and gracefully shuts down
-func waitForShutdown(ctx context.Context, cancel context.CancelFunc, server *http.Server, appService *services.NewAppService, wg *sync.WaitGroup) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	sig := <-sigChan
-	shutdownStart := time.Now()
-	log.WithField("signal", sig).Info("received shutdown signal, initiating graceful shutdown")
-
-	// Cancel context to stop background tasks
-	cancel()
-
-	// Create context with timeout for shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	// Shutdown components concurrently
-	type shutdownResult struct {
-		component string
-		err       error
-	}
-
-	resultChan := make(chan shutdownResult, 2)
-
-	// Start HTTP server shutdown
-	go func() {
-		log.Info("shutting down http server")
-		err := server.Shutdown(shutdownCtx)
-		resultChan <- shutdownResult{"HTTP server", err}
-	}()
-
-	// Start background tasks shutdown
-	go func() {
-		log.Info("waiting for background tasks to complete")
-		wg.Wait()
-		resultChan <- shutdownResult{"Background tasks", nil}
-	}()
-
-	// Wait for both to complete or timeout
-	var httpDone, tasksDone bool
-	for !httpDone || !tasksDone {
-		select {
-		case result := <-resultChan:
-			switch result.component {
-			case "HTTP server":
-				if !httpDone { // Prevent duplicate logging
-					httpDone = true
-					if result.err != nil {
-						log.WithError(result.err).Error("failed to shutdown http server gracefully")
-					} else {
-						log.Info("http server shut down successfully")
-					}
-				}
-			case "Background tasks":
-				if !tasksDone { // Prevent duplicate logging
-					tasksDone = true
-					log.Info("all background tasks completed successfully")
-				}
-			}
-
-		case <-shutdownCtx.Done():
-			log.Warn("shutdown timeout reached, forcing exit")
-			return // Exit immediately on timeout
-		}
-	}
-
-	// Shutdown application service
-	if err := appService.Close(); err != nil {
-		log.WithError(err).Error("failed to shutdown application service")
-	} else {
-		log.Info("application service shut down successfully")
-	}
-
-	shutdownDuration := time.Since(shutdownStart)
-	log.WithField("duration", shutdownDuration).Info("graceful shutdown completed")
+	}).Info("Configuration loaded")
 }

@@ -14,17 +14,17 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// NewCleanupService handles cleanup of watched media with AllDebrid support
-type NewCleanupService struct {
+// CleanupService handles cleanup of watched media with AllDebrid support
+type CleanupService struct {
 	repo             repository.Repository
-	allDebridService *AllDebridService
+	allDebridService AllDebridInterface
 	token            *trakt.Token
 	watchedDays      int
 }
 
-// CreateNewCleanupService creates a new cleanup service
-func CreateNewCleanupService(repo repository.Repository, allDebrid *AllDebridService, token *trakt.Token) *NewCleanupService {
-	return &NewCleanupService{
+// CreateCleanupService creates a cleanup service
+func CreateCleanupService(repo repository.Repository, allDebrid AllDebridInterface, token *trakt.Token) *CleanupService {
+	return &CleanupService{
 		repo:             repo,
 		allDebridService: allDebrid,
 		token:            token,
@@ -33,17 +33,17 @@ func CreateNewCleanupService(repo repository.Repository, allDebrid *AllDebridSer
 }
 
 // SetWatchedDays sets the number of days to look back for watched items
-func (s *NewCleanupService) SetWatchedDays(days int) {
+func (s *CleanupService) SetWatchedDays(days int) {
 	s.watchedDays = days
 }
 
 // CleanWatched removes media that has been watched recently
-func (s *NewCleanupService) CleanWatched() error {
+func (s *CleanupService) CleanWatched() error {
 	return s.CleanWatchedWithContext(context.Background())
 }
 
 // CleanWatchedWithContext removes media that has been watched recently with context support
-func (s *NewCleanupService) CleanWatchedWithContext(ctx context.Context) error {
+func (s *CleanupService) CleanWatchedWithContext(ctx context.Context) error {
 	// Add timeout to prevent infinite loops
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -127,7 +127,7 @@ func (s *NewCleanupService) CleanWatchedWithContext(ctx context.Context) error {
 }
 
 // processWatchedItem processes a single watched item
-func (s *NewCleanupService) processWatchedItem(item *trakt.History) error {
+func (s *CleanupService) processWatchedItem(item *trakt.History) error {
 	switch string(item.Type) {
 	case "movie":
 		return s.removeMedia(int64(item.Movie.Trakt), item.Movie.Title, models.MediaTypeMovie, 0, 0)
@@ -141,7 +141,7 @@ func (s *NewCleanupService) processWatchedItem(item *trakt.History) error {
 }
 
 // removeMedia removes media and associated data
-func (s *NewCleanupService) removeMedia(traktID int64, title string, mediaType models.MediaType, season, episode int) error {
+func (s *CleanupService) removeMedia(traktID int64, title string, mediaType models.MediaType, season, episode int) error {
 	media, err := s.repo.GetMedia(traktID)
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -194,86 +194,25 @@ func (s *NewCleanupService) removeMedia(traktID int64, title string, mediaType m
 }
 
 // handleSeasonPackEpisode handles cleanup for episodes that are part of a season pack
-func (s *NewCleanupService) handleSeasonPackEpisode(media *models.Media, season, episode int) error {
-	// Get all torrents for this media
-	torrents, err := s.repo.FindAllTorrentsByTraktID(media.Trakt)
-	if err != nil {
-		return fmt.Errorf("finding torrents: %w", err)
-	}
-
-	for _, torrent := range torrents {
-		if !torrent.IsSeasonPack || torrent.Season != season {
-			continue
-		}
-
-		// Mark this episode as watched in the season pack
-		if err := s.repo.MarkTorrentEpisodeWatched(torrent.ID, episode); err != nil {
-			log.WithError(err).Error("failed to mark episode as watched in season pack")
-			continue
-		}
-
-		// Re-fetch to get updated torrent
-		updatedTorrent, err := s.repo.GetTorrentByAllDebridID(torrent.AllDebridID)
-		if err != nil {
-			log.WithError(err).Error("failed to get updated torrent")
-			continue
-		}
-
-		// Check if all episodes are watched
-		if updatedTorrent.AreAllEpisodesWatched() {
-			log.WithFields(log.Fields{
-				"torrent_id":   torrent.ID,
-				"alldebrid_id": torrent.AllDebridID,
-				"season":       season,
-			}).Info("all episodes watched in season pack, will delete from alldebrid")
-
-			// Delete from AllDebrid
-			if torrent.AllDebridID > 0 {
-				if err := s.allDebridService.DeleteMagnet(torrent.AllDebridID); err != nil {
-					log.WithError(err).Error("failed to delete season pack from alldebrid")
-				}
-			}
-		} else {
-			log.WithFields(log.Fields{
-				"torrent_id":       torrent.ID,
-				"watched_episodes": len(updatedTorrent.WatchedEpisodes),
-				"total_episodes":   len(updatedTorrent.EpisodesInPack),
-			}).Debug("season pack still has unwatched episodes, keeping in alldebrid")
-		}
-	}
-
+func (s *CleanupService) handleSeasonPackEpisode(media *models.Media, season, episode int) error {
+	// Since torrents are no longer stored in database, season pack tracking is not available
+	// Individual episodes will be cleaned up as they are watched
+	log.WithFields(log.Fields{
+		"trakt_id": media.Trakt,
+		"season":   season,
+		"episode":  episode,
+	}).Debug("Season pack episode tracking not available since torrents not stored in database")
 	return nil
 }
 
-// removeTorrents removes torrents and cleans up AllDebrid
-func (s *NewCleanupService) removeTorrents(traktID int64) error {
-	torrents, err := s.repo.FindAllTorrentsByTraktID(traktID)
-	if err != nil {
-		return fmt.Errorf("finding torrents: %w", err)
-	}
-
-	for _, torrent := range torrents {
-		// Only delete from AllDebrid if it's not a season pack, or if all episodes are watched
-		shouldDelete := !torrent.IsSeasonPack || torrent.AreAllEpisodesWatched()
-
-		if shouldDelete && torrent.AllDebridID > 0 {
-			if err := s.allDebridService.DeleteMagnet(torrent.AllDebridID); err != nil {
-				log.WithError(err).WithField("alldebrid_id", torrent.AllDebridID).Error("failed to delete from alldebrid")
-			}
-		}
-	}
-
-	// Remove torrent records from database
-	if err := s.repo.RemoveTorrentsByTraktID(traktID); err != nil {
-		return fmt.Errorf("removing torrents from database: %w", err)
-	}
-
-	log.WithField("trakt_id", traktID).Debug("successfully removed torrent records")
+// removeTorrents is no longer needed since torrents are not stored in database
+func (s *CleanupService) removeTorrents(traktID int64) error {
+	log.WithField("trakt_id", traktID).Debug("removeTorrents called but no-op since torrents not stored in database")
 	return nil
 }
 
 // removePhysicalFile removes the physical media file
-func (s *NewCleanupService) removePhysicalFile(media *models.Media) error {
+func (s *CleanupService) removePhysicalFile(media *models.Media) error {
 	if media.File == "" {
 		log.WithField("trakt_id", media.Trakt).Debug("no file path to remove")
 		return nil
@@ -301,12 +240,12 @@ func (s *NewCleanupService) removePhysicalFile(media *models.Media) error {
 }
 
 // RemoveMediaManually allows manual removal of media
-func (s *NewCleanupService) RemoveMediaManually(traktID int64, reason string) error {
+func (s *CleanupService) RemoveMediaManually(traktID int64, reason string) error {
 	return s.RemoveMediaManuallyWithContext(context.Background(), traktID, reason)
 }
 
 // RemoveMediaManuallyWithContext allows manual removal of media with context support
-func (s *NewCleanupService) RemoveMediaManuallyWithContext(ctx context.Context, traktID int64, reason string) error {
+func (s *CleanupService) RemoveMediaManuallyWithContext(ctx context.Context, traktID int64, reason string) error {
 	// Check for context cancellation
 	if err := utils.CheckContextCancellation(ctx); err != nil {
 		return err
@@ -332,7 +271,7 @@ func (s *NewCleanupService) RemoveMediaManuallyWithContext(ctx context.Context, 
 }
 
 // GetCleanupStats returns statistics about potential cleanup candidates
-func (s *NewCleanupService) GetCleanupStats() (*CleanupStats, error) {
+func (s *CleanupService) GetCleanupStats() (*CleanupStats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 

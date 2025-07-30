@@ -5,18 +5,21 @@ A lightweight media automation tool that monitors your Trakt watchlist and favor
 ## Features
 
 - **Trakt Integration**: Syncs with your watchlist and favorites
-- **Automatic Torrent Search**: Searches YGG and APIBay for media
+- **Multi-Provider Search**: Searches APIBay (international) and YGG (French content)
+- **Language-Aware**: Automatically selects the best torrent provider based on content language
+- **TMDB Integration**: Enhanced metadata with French translations and original language detection
 - **AllDebrid Downloads**: Downloads torrents through AllDebrid's premium service
 - **Smart Cleanup**: Automatically removes watched content after configurable days
 - **Web Interface**: View and manage your media collection
 - **Database Viewer**: Command-line tool to inspect your collection
-- **API Access**: REST API for external integrations
+- **REST API**: Full API for external integrations
 
 ## Requirements
 
-- Go 1.23+ (for building from source)
+- Go 1.24+ (for building from source)
 - AllDebrid account with API key
 - Trakt account with API credentials
+- TMDB API key (optional, for enhanced metadata)
 
 ## Installation
 
@@ -32,6 +35,7 @@ docker run -d \
   -e ALLDEBRID_API_KEY="your-alldebrid-key" \
   -e TRAKT_API_KEY="your-trakt-key" \
   -e TRAKT_CLIENT_SECRET="your-trakt-secret" \
+  -e TMDB_API_KEY="your-tmdb-key" \
   ghcr.io/amaumene/momenarr:latest
 ```
 
@@ -59,10 +63,12 @@ go build -o momenarr ./cmd/momenarr
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HTTP_ADDR` | HTTP server address | `:8080` |
+| `TMDB_API_KEY` | TMDB API for metadata and translations | _(none)_ |
 | `BLACKLIST_FILE` | Path to blacklist file | `{DATA_DIR}/blacklist.txt` |
-| `SYNC_INTERVAL` | How often to sync | `6h` |
-| `WATCHED_DAYS` | Days to look back for watched items | `5` |
-| `MOMENARR_API_KEY` | API key for authentication | _(none)_ |
+| `SYNC_INTERVAL` | How often to sync with Trakt | `6h` |
+| `WATCHED_DAYS` | Days to keep watched items before cleanup | `5` |
+| `MAX_RETRIES` | Maximum download retry attempts | `3` |
+| `REQUEST_TIMEOUT` | HTTP request timeout in seconds | `30` |
 
 ### Setting up Trakt
 
@@ -76,6 +82,15 @@ go build -o momenarr ./cmd/momenarr
 1. Get your API key from [alldebrid.com/apikeys](https://alldebrid.com/apikeys)
 2. Set the `ALLDEBRID_API_KEY` environment variable
 
+### Setting up TMDB (Optional but Recommended)
+
+1. Get your API key from [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
+2. Set the `TMDB_API_KEY` environment variable
+3. This enables:
+   - Original language detection for better provider selection
+   - French title translations for French content
+   - Enhanced metadata
+
 ### Blacklist
 
 Create a `blacklist.txt` file to exclude certain releases:
@@ -83,6 +98,8 @@ Create a `blacklist.txt` file to exclude certain releases:
 cam
 hdcam
 telesync
+ts
+screener
 ```
 
 ## API Endpoints
@@ -99,15 +116,8 @@ All endpoints are prefixed with `/api/`:
 | `/api/download/status?trakt_id=X` | GET | Get download status |
 | `/api/refresh` | GET | Manually trigger sync and search |
 | `/api/cleanup/stats` | GET | Statistics about watched media |
-
-### API Authentication
-
-If `MOMENARR_API_KEY` is set, include it in requests:
-```bash
-curl -H "Authorization: Bearer your-api-key" http://localhost:8080/api/media/stats
-# or
-curl -H "X-API-Key: your-api-key" http://localhost:8080/api/media/stats
-```
+| `/api/trakt/auth` | GET | Initiate Trakt authentication |
+| `/api/trakt/callback` | GET | Trakt OAuth callback |
 
 ## Database Viewer
 
@@ -136,16 +146,33 @@ go build -o dbviewer ./cmd/dbviewer
 ## How It Works
 
 1. **Sync**: Periodically fetches your Trakt watchlist and favorites
-2. **Search**: For each missing media item, searches torrents on YGG and APIBay
-3. **Download**: Sends the best torrent to AllDebrid (checks cache first)
-4. **Monitor**: Tracks download progress
-5. **Cleanup**: Removes media that has been watched (after configured days)
+2. **Metadata Enhancement**: If TMDB is configured, fetches original language and French titles
+3. **Smart Search**: 
+   - For French content (detected via TMDB): Uses YGG (French tracker)
+   - For international content: Uses APIBay
+   - Automatic fallback if preferred provider unavailable
+4. **Download**: Sends the best torrent to AllDebrid (prioritizes cached torrents)
+5. **Monitor**: Tracks download progress and handles failures
+6. **Cleanup**: Removes media that has been watched (after configured days)
 
 The application maintains a BoltDB database tracking:
-- Media items (movies and TV episodes)
-- Torrent information
-- Download status
-- Watch history
+- Media items with enhanced metadata (TMDB ID, original language, French titles)
+- Torrent information from multiple providers
+- Download status and history
+- Watch history from Trakt
+
+## Provider Details
+
+### APIBay
+- International torrent provider
+- Used for non-French content
+- Searches The Pirate Bay database
+
+### YGG (YggTorrent)
+- French torrent tracker
+- Used for French content when original language is detected
+- Requires no authentication
+- Supports hash caching for better performance
 
 ## Development
 
@@ -157,12 +184,22 @@ momenarr/
 │   ├── momenarr/      # Main application
 │   └── dbviewer/      # Database viewer tool
 ├── pkg/
-│   ├── alldebrid/     # AllDebrid API client
-│   ├── config/        # Configuration
+│   ├── config/        # Configuration management
 │   ├── handlers/      # HTTP handlers
 │   ├── models/        # Data models
 │   ├── repository/    # Database layer
 │   ├── services/      # Business logic
+│   │   ├── alldebrid_client.go     # AllDebrid API client
+│   │   ├── alldebrid_service.go    # AllDebrid service layer
+│   │   ├── app_service.go          # Main application service
+│   │   ├── cleanup_service.go      # Cleanup logic
+│   │   ├── download_service.go     # Download management
+│   │   ├── tmdb_service.go         # TMDB integration
+│   │   ├── torrent_search_service.go # Search orchestration
+│   │   ├── torrent_service.go      # Torrent management
+│   │   ├── trakt_service.go        # Trakt integration
+│   │   ├── apibay_provider.go      # APIBay search provider
+│   │   └── ygg_provider.go         # YGG search provider
 │   └── utils/         # Utilities
 ├── bolthold/          # BoltDB wrapper
 └── trakt/             # Trakt API client
@@ -177,10 +214,23 @@ go test ./...
 # Build for current platform
 go build -o momenarr ./cmd/momenarr
 
+# Build with version info
+go build -ldflags "-X main.Version=1.0.0" -o momenarr ./cmd/momenarr
+
 # Cross-compile
 GOOS=linux GOARCH=amd64 go build -o momenarr-linux-amd64 ./cmd/momenarr
 GOOS=darwin GOARCH=arm64 go build -o momenarr-darwin-arm64 ./cmd/momenarr
+GOOS=windows GOARCH=amd64 go build -o momenarr.exe ./cmd/momenarr
 ```
+
+### Code Quality
+
+The codebase follows Go best practices:
+- Clean architecture with separated concerns
+- Interface-based design for testability
+- Comprehensive error handling
+- Structured logging with logrus
+- Concurrent operations where appropriate
 
 ## License
 

@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/repository"
@@ -24,60 +23,64 @@ type TorrentService struct {
 	blacklistMu    sync.RWMutex
 }
 
-// NewTorrentService creates a new TorrentService
+// CreateTorrentService creates a TorrentService
+func CreateTorrentService(repo repository.Repository, blacklistFile string) *TorrentService {
+	return &TorrentService{
+		repo:           repo,
+		searchService:  CreateTorrentSearchService(),
+		blacklistFile:  blacklistFile,
+		blacklistCache: make(map[string]struct{}),
+	}
+}
+
+// NewTorrentService is deprecated, use CreateTorrentService
 func NewTorrentService(repo repository.Repository, blacklistFile string) *TorrentService {
+	return CreateTorrentService(repo, blacklistFile)
+}
+
+// CreateTorrentServiceWithTrakt creates a TorrentService with Trakt support
+func CreateTorrentServiceWithTrakt(repo repository.Repository, blacklistFile string, traktService *TraktService) *TorrentService {
 	return &TorrentService{
 		repo:           repo,
-		searchService:  NewTorrentSearchService(),
+		searchService:  CreateTorrentSearchServiceWithTrakt(traktService),
 		blacklistFile:  blacklistFile,
 		blacklistCache: make(map[string]struct{}),
 	}
 }
 
-// NewTorrentServiceWithTrakt creates a new TorrentService with Trakt support
+// NewTorrentServiceWithTrakt is deprecated, use CreateTorrentServiceWithTrakt
 func NewTorrentServiceWithTrakt(repo repository.Repository, blacklistFile string, traktService *TraktService) *TorrentService {
+	return CreateTorrentServiceWithTrakt(repo, blacklistFile, traktService)
+}
+
+// NewTorrentServiceWithTraktAndTMDB is deprecated, use CreateTorrentServiceWithTraktAndTMDB
+func NewTorrentServiceWithTraktAndTMDB(repo repository.Repository, blacklistFile string, traktService *TraktService, tmdbService *TMDBService) *TorrentService {
+	return CreateTorrentServiceWithTraktAndTMDB(repo, blacklistFile, traktService, tmdbService)
+}
+
+// CreateTorrentServiceWithTraktAndTMDB creates a TorrentService with Trakt and TMDB support
+func CreateTorrentServiceWithTraktAndTMDB(repo repository.Repository, blacklistFile string, traktService *TraktService, tmdbService *TMDBService) *TorrentService {
 	return &TorrentService{
 		repo:           repo,
-		searchService:  NewTorrentSearchServiceWithTrakt(traktService),
+		searchService:  CreateTorrentSearchServiceWithTraktAndTMDB(traktService, tmdbService),
 		blacklistFile:  blacklistFile,
 		blacklistCache: make(map[string]struct{}),
 	}
 }
 
-// GetBestTorrent retrieves the best torrent for a given Trakt ID
-func (s *TorrentService) GetBestTorrent(traktID int64) (*models.Torrent, error) {
-	return s.repo.GetBestTorrent(traktID)
+// NewTorrentServiceWithTraktAndTMDBAndOrionoid is deprecated, kept for backward compatibility
+func NewTorrentServiceWithTraktAndTMDBAndOrionoid(repo repository.Repository, blacklistFile string, traktService *TraktService, tmdbService *TMDBService, _, _ string) *TorrentService {
+	return CreateTorrentServiceWithTraktAndTMDB(repo, blacklistFile, traktService, tmdbService)
 }
 
-// GetSortedTorrents retrieves all torrents for a given Trakt ID sorted by preference
-func (s *TorrentService) GetSortedTorrents(traktID int64) ([]*models.Torrent, error) {
-	torrents, err := s.repo.FindAllTorrentsByTraktID(traktID)
-	if err != nil {
-		return nil, fmt.Errorf("finding torrents: %w", err)
-	}
+// GetBestTorrent is no longer supported since torrents are not stored in database
+func (s *TorrentService) GetBestTorrent(traktID int64) (interface{}, error) {
+	return nil, fmt.Errorf("torrent database functionality has been removed")
+}
 
-	// Filter out failed torrents
-	var validTorrents []*models.Torrent
-	for _, torrent := range torrents {
-		if !torrent.Failed {
-			validTorrents = append(validTorrents, torrent)
-		}
-	}
-
-	if len(validTorrents) == 0 {
-		return nil, fmt.Errorf("no valid torrents found for Trakt ID %d", traktID)
-	}
-
-	// Sort by preference (size descending for now)
-	for i := 0; i < len(validTorrents); i++ {
-		for j := i + 1; j < len(validTorrents); j++ {
-			if validTorrents[j].Size > validTorrents[i].Size {
-				validTorrents[i], validTorrents[j] = validTorrents[j], validTorrents[i]
-			}
-		}
-	}
-
-	return validTorrents, nil
+// GetSortedTorrents is no longer supported since torrents are not stored in database
+func (s *TorrentService) GetSortedTorrents(traktID int64) ([]interface{}, error) {
+	return nil, fmt.Errorf("torrent database functionality has been removed")
 }
 
 // PopulateTorrents is deprecated - using real-time search
@@ -91,7 +94,7 @@ func (s *TorrentService) PopulateTorrentsWithContext(ctx context.Context) error 
 }
 
 // FindBestCachedTorrent searches for torrents in real-time and returns the best one cached on AllDebrid
-func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridService *AllDebridService) (*models.TorrentSearchResult, error) {
+func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridService AllDebridInterface) (*models.TorrentSearchResult, error) {
 	// Determine media type for search
 	mediaType := "movie"
 	if media.IsEpisode() {
@@ -109,32 +112,62 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 		"season":     media.Season,
 		"number":     media.Number,
 		"year":       media.Year,
-		"imdb":       media.IMDB,
-		"trakt_slug": media.TraktSlug,
-	}).Info("Starting torrent search")
+		"tmdb_id":    media.TMDBID,
+	}).Info("Starting torrent search (using stored database data)")
 
-	if media.IsMovie() && media.Year > 0 {
-		// For movies, use year-aware search with Trakt slug
-		results, err = s.searchService.SearchWithYearAndTraktSlug(
-			media.IMDB,
-			media.Title,
-			mediaType,
-			int(media.Season),
-			int(media.Number),
-			int(media.Year),
-			media.TraktSlug,
-		)
+	// Check if we have stored original language data
+	if media.OriginalLanguage != "" {
+		log.WithFields(log.Fields{
+			"original_language": media.OriginalLanguage,
+			"french_title":      media.FrenchTitle,
+		}).Info("Using stored TMDB data from database (no API calls)")
+		
+		// Use stored language for provider selection (preferred method)
+		if media.IsMovie() && media.Year > 0 {
+			// For movies, use year-aware search with stored language
+			results, err = s.searchService.SearchWithLanguageAndFrenchTitle(
+				media.Title,
+				mediaType,
+				int(media.Season),
+				int(media.Number),
+				int(media.Year),
+				media.TMDBID,
+				media.OriginalLanguage,
+				media.FrenchTitle,
+			)
+		} else {
+			// For TV shows or movies without year, use stored language search
+			results, err = s.searchService.SearchWithLanguageAndFrenchTitle(
+				media.Title,
+				mediaType,
+				int(media.Season),
+				int(media.Number),
+				0,
+				media.TMDBID,
+				media.OriginalLanguage,
+				media.FrenchTitle,
+			)
+		}
 	} else {
-		// For TV shows or movies without year, use regular search with Trakt slug
-		results, err = s.searchService.SearchWithYearAndTraktSlug(
-			media.IMDB,
-			media.Title,
-			mediaType,
-			int(media.Season),
-			int(media.Number),
-			0,
-			media.TraktSlug,
-		)
+		// Fallback to basic search if TMDB not available
+		if media.IsMovie() && media.Year > 0 {
+			// For movies, use year-aware search
+			results, err = s.searchService.SearchWithYear(
+				media.Title,
+				mediaType,
+				int(media.Season),
+				int(media.Number),
+				int(media.Year),
+			)
+		} else {
+			// For TV shows or movies without year, use basic search
+			results, err = s.searchService.Search(
+				media.Title,
+				mediaType,
+				int(media.Season),
+				int(media.Number),
+			)
+		}
 	}
 
 	if err != nil {
@@ -157,18 +190,48 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 		return nil, nil
 	}
 
-	s.sortTorrentResults(filteredResults)
-
+	// Group results by provider
+	yggResults := []models.TorrentSearchResult{}
+	apiBayResults := []models.TorrentSearchResult{}
+	
+	for _, result := range filteredResults {
+		switch result.Source {
+		case "YGG":
+			yggResults = append(yggResults, result)
+		case "APIBay":
+			apiBayResults = append(apiBayResults, result)
+		}
+	}
+	
+	// Sort YGG results by size (biggest first)
+	for i := 0; i < len(yggResults); i++ {
+		for j := i + 1; j < len(yggResults); j++ {
+			if yggResults[j].Size > yggResults[i].Size {
+				yggResults[i], yggResults[j] = yggResults[j], yggResults[i]
+			}
+		}
+	}
+	
 	log.WithFields(log.Fields{
-		"trakt_id": media.Trakt,
-		"count":    len(filteredResults),
+		"trakt_id":       media.Trakt,
+		"ygg_count":      len(yggResults),
+		"apibay_count":   len(apiBayResults),
+		"total_count":    len(filteredResults),
 	}).Info("Checking AllDebrid cache")
 
-	// Check each torrent in order of overall quality (best from all providers)
-	for i, result := range filteredResults {
+	// Try YGG results first (biggest to smallest)
+	for i, result := range yggResults {
 		if result.Hash == "" {
 			continue
 		}
+
+		log.WithFields(log.Fields{
+			"provider": "YGG",
+			"rank":     i + 1,
+			"hash":     result.Hash,
+			"title":    result.Title,
+			"size_gb":  fmt.Sprintf("%.2f", float64(result.Size)/(1024*1024*1024)),
+		}).Info("Checking YGG torrent")
 
 		// Check if cached on AllDebrid
 		cached, _, err := allDebridService.IsTorrentCached(result.Hash)
@@ -186,7 +249,36 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 			}).Info("Found cached torrent")
 			return &result, nil
 		}
+	}
+	
+	// Try APIBay results
+	for i, result := range apiBayResults {
+		if result.Hash == "" {
+			continue
+		}
 
+		log.WithFields(log.Fields{
+			"provider": "APIBay",
+			"rank":     i + 1,
+			"hash":     result.Hash,
+			"title":    result.Title,
+		}).Info("Checking APIBay torrent")
+
+		cached, _, err := allDebridService.IsTorrentCached(result.Hash)
+		if err != nil {
+			log.WithError(err).WithField("hash", result.Hash).Error("Failed to check AllDebrid cache")
+			continue
+		}
+
+		if cached {
+			log.WithFields(log.Fields{
+				"trakt_id": media.Trakt,
+				"title":    result.Title,
+				"source":   result.Source,
+				"rank":     i + 1,
+			}).Info("Found cached torrent")
+			return &result, nil
+		}
 	}
 
 	log.WithFields(log.Fields{
@@ -196,6 +288,7 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 
 	return nil, nil
 }
+
 
 // filterBlacklistedTorrents filters out blacklisted torrents from search results
 func (s *TorrentService) filterBlacklistedTorrents(results []models.TorrentSearchResult) ([]models.TorrentSearchResult, error) {
@@ -218,60 +311,6 @@ func (s *TorrentService) sortTorrentResults(results []models.TorrentSearchResult
 	utils.SortTorrentResultsByQuality(results)
 }
 
-// processBatchConcurrently processes a batch of media with controlled concurrency
-func (s *TorrentService) processBatchConcurrently(ctx context.Context, medias []*models.Media, maxConcurrency int) error {
-	semaphore := make(chan struct{}, maxConcurrency)
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(medias))
-
-	for _, media := range medias {
-		if ctx.Err() != nil {
-			break
-		}
-
-		wg.Add(1)
-		go func(m *models.Media) {
-			defer wg.Done()
-			defer func() {
-				select {
-				case <-semaphore:
-				default:
-				}
-			}()
-
-			select {
-			case semaphore <- struct{}{}:
-			case <-ctx.Done():
-				errChan <- ctx.Err()
-				return
-			}
-
-			if ctx.Err() != nil {
-				errChan <- ctx.Err()
-				return
-			}
-
-			if err := s.populateTorrentsForMedia(m); err != nil {
-				log.WithError(err).WithField("trakt_id", m.Trakt).Error("Failed to populate torrents")
-				errChan <- err
-			}
-		}(media)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	var errorCount int
-	for range errChan {
-		errorCount++
-	}
-
-	if errorCount > 0 {
-		log.WithField("error_count", errorCount).Warn("Some operations failed")
-	}
-
-	return ctx.Err()
-}
 
 // populateTorrentsForMedia populates torrent entries for a specific media item
 func (s *TorrentService) populateTorrentsForMedia(media *models.Media) error {
@@ -285,28 +324,54 @@ func (s *TorrentService) populateTorrentsForMedia(media *models.Media) error {
 	var results []models.TorrentSearchResult
 	var err error
 
-	if media.IsMovie() && media.Year > 0 {
-		// For movies, use year-aware search with Trakt slug
-		results, err = s.searchService.SearchWithYearAndTraktSlug(
-			media.IMDB,
-			media.Title,
-			mediaType,
-			int(media.Season),
-			int(media.Number),
-			int(media.Year),
-			media.TraktSlug,
-		)
+	// Check if we have stored original language data
+	if media.OriginalLanguage != "" {
+		// Use stored language for provider selection (preferred method)
+		if media.IsMovie() && media.Year > 0 {
+			// For movies, use year-aware search with stored language
+			results, err = s.searchService.SearchWithLanguageAndFrenchTitle(
+				media.Title,
+				mediaType,
+				int(media.Season),
+				int(media.Number),
+				int(media.Year),
+				media.TMDBID,
+				media.OriginalLanguage,
+				media.FrenchTitle,
+			)
+		} else {
+			// For TV shows or movies without year, use stored language search
+			results, err = s.searchService.SearchWithLanguageAndFrenchTitle(
+				media.Title,
+				mediaType,
+				int(media.Season),
+				int(media.Number),
+				0,
+				media.TMDBID,
+				media.OriginalLanguage,
+				media.FrenchTitle,
+			)
+		}
 	} else {
-		// For TV shows or movies without year, use regular search with Trakt slug
-		results, err = s.searchService.SearchWithYearAndTraktSlug(
-			media.IMDB,
-			media.Title,
-			mediaType,
-			int(media.Season),
-			int(media.Number),
-			0,
-			media.TraktSlug,
-		)
+		// Fallback to basic search if TMDB not available
+		if media.IsMovie() && media.Year > 0 {
+			// For movies, use year-aware search
+			results, err = s.searchService.SearchWithYear(
+				media.Title,
+				mediaType,
+				int(media.Season),
+				int(media.Number),
+				int(media.Year),
+			)
+		} else {
+			// For TV shows or movies without year, use basic search
+			results, err = s.searchService.Search(
+				media.Title,
+				mediaType,
+				int(media.Season),
+				int(media.Number),
+			)
+		}
 	}
 
 	if err != nil {
@@ -324,57 +389,9 @@ func (s *TorrentService) populateTorrentsForMedia(media *models.Media) error {
 	return nil
 }
 
-// insertTorrentResults inserts torrent search results into the database
+// insertTorrentResults is no longer needed since torrents are not stored in database
 func (s *TorrentService) insertTorrentResults(media *models.Media, results []models.TorrentSearchResult) error {
-	blacklist, err := s.getBlacklist()
-	if err != nil {
-		return fmt.Errorf("getting blacklist: %w", err)
-	}
-
-	var savedCount int
-	var filteredCount int
-
-	for _, result := range results {
-		if s.isBlacklisted(result.Title, blacklist) {
-			filteredCount++
-			continue
-		}
-
-		if media.IsMovie() && media.Year > 0 && !result.MatchesYear(int(media.Year)) {
-			filteredCount++
-			continue
-		}
-
-		torrent := &models.Torrent{
-			Trakt:        media.Trakt,
-			Hash:         result.Hash,
-			Title:        result.Title,
-			Size:         result.Size,
-			IsSeasonPack: result.IsSeasonPack(),
-			Failed:       false,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
-		}
-
-		if torrent.IsSeasonPack {
-			torrent.Season = result.ExtractSeason()
-		}
-
-		if err := s.repo.SaveTorrent(torrent); err != nil {
-			log.WithError(err).WithField("title", torrent.Title).Error("Failed to save torrent")
-			continue
-		}
-
-		savedCount++
-	}
-
-	if savedCount > 0 {
-		log.WithFields(log.Fields{
-			"trakt_id": media.Trakt,
-			"count":    savedCount,
-		}).Info("Saved torrents")
-	}
-
+	log.WithField("trakt_id", media.Trakt).Debug("insertTorrentResults called but no-op since torrents not stored in database")
 	return nil
 }
 
@@ -465,22 +482,8 @@ func (s *TorrentService) isBlacklisted(title string, blacklist map[string]struct
 	return false
 }
 
-// MarkTorrentFailed marks a torrent as failed
+// MarkTorrentFailed is no longer supported since torrents are not stored in database
 func (s *TorrentService) MarkTorrentFailed(traktID int64) error {
-	torrent, err := s.repo.GetBestTorrent(traktID)
-	if err != nil {
-		return fmt.Errorf("getting torrent: %w", err)
-	}
-
-	torrent.MarkFailed()
-	if err := s.repo.SaveTorrent(torrent); err != nil {
-		return fmt.Errorf("marking torrent as failed: %w", err)
-	}
-
-	log.WithFields(log.Fields{
-		"trakt_id": traktID,
-		"title":    torrent.Title,
-	}).Info("Marked torrent as failed")
-
+	log.WithField("trakt_id", traktID).Info("MarkTorrentFailed called but no-op since torrents not stored in database")
 	return nil
 }

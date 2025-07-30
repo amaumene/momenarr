@@ -4,18 +4,19 @@ import "time"
 
 // Media represents a media item (movie or TV episode) in the system
 type Media struct {
-	Trakt      int64     `json:"trakt" boltholdIndex:"Trakt" validate:"required"`
-	TraktSlug  string    `json:"trakt_slug,omitempty"` // Added slug field for API calls
-	IMDB       string    `json:"imdb,omitempty"`
-	Number     int64     `json:"number,omitempty"`
-	Season     int64     `json:"season,omitempty"`
-	Title      string    `json:"title" validate:"required"`
-	Year       int64     `json:"year,omitempty"`
-	OnDisk     bool      `json:"on_disk"`
-	File       string    `json:"file,omitempty"`
-	DownloadID int64     `json:"download_id,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Trakt            int64     `json:"trakt" boltholdIndex:"Trakt" validate:"required"`
+	TMDBID           int64     `json:"tmdb_id,omitempty"`           // TMDB ID for translations and metadata
+	OriginalLanguage string    `json:"original_language,omitempty"` // Original language from TMDB (e.g., "fr", "en")
+	FrenchTitle      string    `json:"french_title,omitempty"`      // French title from TMDB when original language is French
+	Number           int64     `json:"number,omitempty"`
+	Season           int64     `json:"season,omitempty"`
+	Title            string    `json:"title" validate:"required"`
+	Year             int64     `json:"year,omitempty"`
+	OnDisk           bool      `json:"on_disk"`
+	File             string    `json:"file,omitempty"`
+	DownloadID       int64     `json:"download_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func (m *Media) IsEpisode() bool {

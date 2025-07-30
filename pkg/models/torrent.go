@@ -7,68 +7,6 @@ import (
 	"time"
 )
 
-// Torrent represents a torrent entry in the database
-type Torrent struct {
-	ID              int64     `json:"id"`
-	Trakt           int64     `json:"trakt"`
-	Hash            string    `json:"hash"`
-	Title           string    `json:"title"`
-	Size            int64     `json:"size"`
-	AllDebridID     int64     `json:"alldebrid_id"`
-	IsSeasonPack    bool      `json:"is_season_pack"`
-	Season          int       `json:"season,omitempty"`
-	EpisodesInPack  []int     `json:"episodes_in_pack,omitempty"`
-	WatchedEpisodes []int     `json:"watched_episodes,omitempty"`
-	Failed          bool      `json:"failed"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-}
-
-// MarkFailed marks the torrent as failed and resets AllDebrid ID
-func (t *Torrent) MarkFailed() {
-	t.Failed = true
-	t.AllDebridID = 0 // Reset AllDebrid ID so it can be re-uploaded if needed
-	t.UpdatedAt = time.Now()
-}
-
-// MarkEpisodeWatched marks an episode as watched in a season pack
-func (t *Torrent) MarkEpisodeWatched(episode int) {
-	if !t.IsSeasonPack {
-		return
-	}
-
-	// Check if already marked as watched
-	for _, ep := range t.WatchedEpisodes {
-		if ep == episode {
-			return
-		}
-	}
-
-	t.WatchedEpisodes = append(t.WatchedEpisodes, episode)
-	t.UpdatedAt = time.Now()
-}
-
-// AreAllEpisodesWatched checks if all episodes in a season pack have been watched
-func (t *Torrent) AreAllEpisodesWatched() bool {
-	if !t.IsSeasonPack {
-		return true
-	}
-
-	// Create a map of watched episodes for efficient lookup
-	watchedMap := make(map[int]bool)
-	for _, ep := range t.WatchedEpisodes {
-		watchedMap[ep] = true
-	}
-
-	// Check if all episodes in pack are watched
-	for _, ep := range t.EpisodesInPack {
-		if !watchedMap[ep] {
-			return false
-		}
-	}
-
-	return true
-}
 
 // TorrentSearchResult represents a torrent search result
 type TorrentSearchResult struct {

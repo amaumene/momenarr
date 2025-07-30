@@ -3,38 +3,34 @@ package services
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/repository"
 	log "github.com/sirupsen/logrus"
 )
 
-type NewDownloadService struct {
+type DownloadService struct {
 	repo             repository.Repository
-	allDebridService *AllDebridService
+	allDebridService AllDebridInterface
 	torrentService   *TorrentService
-	processingMedia  map[int64]bool
-	processingMutex  sync.RWMutex
 }
 
-// CreateNewDownloadService creates a new download service
-func CreateNewDownloadService(repo repository.Repository, allDebrid *AllDebridService, torrentService *TorrentService) *NewDownloadService {
-	return &NewDownloadService{
+// CreateDownloadService creates a download service
+func CreateDownloadService(repo repository.Repository, allDebrid AllDebridInterface, torrentService *TorrentService) *DownloadService {
+	return &DownloadService{
 		repo:             repo,
 		allDebridService: allDebrid,
 		torrentService:   torrentService,
-		processingMedia:  make(map[int64]bool),
 	}
 }
 
 // DownloadNotOnDisk downloads all media that is not on disk
-func (s *NewDownloadService) DownloadNotOnDisk() error {
+func (s *DownloadService) DownloadNotOnDisk() error {
 	return s.DownloadNotOnDiskWithContext(context.Background())
 }
 
 // DownloadNotOnDiskWithContext downloads all media that is not on disk with context support
-func (s *NewDownloadService) DownloadNotOnDiskWithContext(ctx context.Context) error {
+func (s *DownloadService) DownloadNotOnDiskWithContext(ctx context.Context) error {
 	medias, err := s.repo.FindMediaNotOnDisk()
 	if err != nil {
 		return fmt.Errorf("finding media not on disk: %w", err)
@@ -64,21 +60,7 @@ func (s *NewDownloadService) DownloadNotOnDiskWithContext(ctx context.Context) e
 }
 
 // processMediaDownloadWithContext processes download for a single media item with context
-func (s *NewDownloadService) processMediaDownloadWithContext(ctx context.Context, media *models.Media) error {
-	s.processingMutex.Lock()
-	if s.processingMedia[media.Trakt] {
-		s.processingMutex.Unlock()
-		return nil
-	}
-	s.processingMedia[media.Trakt] = true
-	s.processingMutex.Unlock()
-
-	defer func() {
-		s.processingMutex.Lock()
-		delete(s.processingMedia, media.Trakt)
-		s.processingMutex.Unlock()
-	}()
-
+func (s *DownloadService) processMediaDownloadWithContext(ctx context.Context, media *models.Media) error {
 	currentMedia, err := s.repo.GetMedia(media.Trakt)
 	if err == nil && currentMedia.OnDisk {
 		return nil
@@ -119,36 +101,31 @@ func (s *NewDownloadService) processMediaDownloadWithContext(ctx context.Context
 	return nil
 }
 
-// tryTorrent attempts to process a single torrent and returns success status
-func (s *NewDownloadService) tryTorrent(ctx context.Context, torrent *models.Torrent, media *models.Media) (bool, error) {
+// tryTorrent attempts to process a single torrent search result and returns success status
+func (s *DownloadService) tryTorrent(ctx context.Context, result *models.TorrentSearchResult, media *models.Media) (bool, error) {
 	// First check if the torrent is cached on AllDebrid
-	isCached, allDebridID, err := s.allDebridService.IsTorrentCached(torrent.Hash)
+	isCached, allDebridID, err := s.allDebridService.IsTorrentCached(result.Hash)
 	if err != nil {
-		log.WithError(err).WithField("hash", torrent.Hash).Debug("Failed to check if torrent is cached")
+		log.WithError(err).WithField("hash", result.Hash).Debug("Failed to check if torrent is cached")
 		return false, fmt.Errorf("checking if torrent is cached: %w", err)
 	}
 
 	if !isCached {
 		log.WithFields(log.Fields{
-			"hash":     torrent.Hash,
-			"title":    torrent.Title,
-			"size_gb":  fmt.Sprintf("%.2f", float64(torrent.Size)/(1024*1024*1024)),
+			"hash":     result.Hash,
+			"title":    result.Title,
+			"size_gb":  fmt.Sprintf("%.2f", float64(result.Size)/(1024*1024*1024)),
 			"trakt_id": media.Trakt,
 			"media":    media.Title,
 		}).Info("Torrent not cached on AllDebrid")
 		return false, fmt.Errorf("torrent not cached on AllDebrid")
 	}
 
-	// Torrent is cached! Save the AllDebrid ID and mark as done
-	torrent.AllDebridID = allDebridID
-	if err := s.repo.SaveTorrent(torrent); err != nil {
-		log.WithError(err).Error("Failed to save torrent with AllDebrid ID")
-		return false, fmt.Errorf("saving torrent with AllDebrid ID: %w", err)
-	}
+	// Torrent is cached! No need to save to database since we're not storing torrents
 
 	log.WithFields(log.Fields{
-		"hash":         torrent.Hash,
-		"title":        torrent.Title,
+		"hash":         result.Hash,
+		"title":        result.Title,
 		"trakt_id":     media.Trakt,
 		"alldebrid_id": allDebridID,
 	}).Info("Torrent cached on AllDebrid - marking as completed")
@@ -164,92 +141,65 @@ func (s *NewDownloadService) tryTorrent(ctx context.Context, torrent *models.Tor
 	log.WithFields(log.Fields{
 		"trakt_id": media.Trakt,
 		"title":    media.Title,
-		"torrent":  torrent.Title,
+		"torrent":  result.Title,
 	}).Info("Successfully processed cached torrent")
 
 	return true, nil
 }
 
 // RetryFailedDownload retries a failed download
-func (s *NewDownloadService) RetryFailedDownload(traktID int64) error {
-	// Mark current torrent as failed
-	if err := s.torrentService.MarkTorrentFailed(traktID); err != nil {
-		log.WithError(err).WithField("trakt_id", traktID).Error("Failed to mark torrent as failed")
-	}
-
+func (s *DownloadService) RetryFailedDownload(traktID int64) error {
 	// Get media and try to download again
 	media, err := s.repo.GetMedia(traktID)
 	if err != nil {
 		return fmt.Errorf("getting media for retry: %w", err)
 	}
 
+	// Reset OnDisk status to allow retry
+	media.OnDisk = false
+	if err := s.repo.SaveMedia(media); err != nil {
+		log.WithError(err).Error("Failed to reset media OnDisk status for retry")
+	}
+
 	return s.processMediaDownloadWithContext(context.Background(), media)
 }
 
 // GetDownloadStatus gets the status of a download
-func (s *NewDownloadService) GetDownloadStatus(traktID int64) (string, error) {
-	// Get the torrent
-	torrent, err := s.torrentService.GetBestTorrent(traktID)
+func (s *DownloadService) GetDownloadStatus(traktID int64) (string, error) {
+	// Check media status instead of torrent since torrents are no longer stored
+	media, err := s.repo.GetMedia(traktID)
 	if err != nil {
 		return "NOT_FOUND", nil
 	}
 
-	if torrent.AllDebridID == 0 {
-		return "NOT_STARTED", nil
+	// Since we don't store torrents anymore, check media status directly
+	if media.OnDisk {
+		return "COMPLETED", nil
 	}
 
-	// Check AllDebrid status
-	status, err := s.allDebridService.client.GetMagnetStatus(s.allDebridService.apiKey, []int64{torrent.AllDebridID})
-	if err != nil {
-		return "ERROR", err
-	}
-
-	if status.Status != "success" || len(status.Data.Magnets) == 0 {
-		return "ERROR", nil
-	}
-
-	magnet := status.Data.Magnets[0]
-	if magnet.Ready {
-		// Check if on disk
-		media, err := s.repo.GetMedia(traktID)
-		if err == nil && media.OnDisk {
-			return "COMPLETED", nil
-		}
-		return "READY", nil
-	}
-
-	return magnet.Status, nil
+	return "NOT_STARTED", nil
 }
 
 // CancelDownload cancels a download
-func (s *NewDownloadService) CancelDownload(traktID int64) error {
-	// Get the torrent
-	torrent, err := s.torrentService.GetBestTorrent(traktID)
+func (s *DownloadService) CancelDownload(traktID int64) error {
+	// Since we don't store torrents anymore, just reset the media OnDisk status
+	media, err := s.repo.GetMedia(traktID)
 	if err != nil {
-		return fmt.Errorf("getting torrent: %w", err)
+		return fmt.Errorf("getting media: %w", err)
 	}
 
-	if torrent.AllDebridID == 0 {
-		return fmt.Errorf("no active download for Trakt ID %d", traktID)
+	media.OnDisk = false
+	media.File = ""
+	if err := s.repo.SaveMedia(media); err != nil {
+		return fmt.Errorf("resetting media status: %w", err)
 	}
 
-	// Delete from AllDebrid
-	if err := s.allDebridService.DeleteMagnet(torrent.AllDebridID); err != nil {
-		return fmt.Errorf("deleting from AllDebrid: %w", err)
-	}
-
-	// Mark torrent as failed
-	torrent.MarkFailed()
-	if err := s.repo.SaveTorrent(torrent); err != nil {
-		return fmt.Errorf("updating torrent: %w", err)
-	}
-
-	log.WithField("trakt_id", traktID).Info("Download canceled")
+	log.WithField("trakt_id", traktID).Info("Download canceled - media marked as not on disk")
 	return nil
 }
 
 // downloadBestTorrent downloads the best torrent found from real-time search
-func (s *NewDownloadService) downloadBestTorrent(ctx context.Context, media *models.Media, torrent *models.TorrentSearchResult) (bool, error) {
+func (s *DownloadService) downloadBestTorrent(ctx context.Context, media *models.Media, torrent *models.TorrentSearchResult) (bool, error) {
 	// Check if torrent is cached on AllDebrid (double-check)
 	isCached, allDebridID, err := s.allDebridService.IsTorrentCached(torrent.Hash)
 	if err != nil {

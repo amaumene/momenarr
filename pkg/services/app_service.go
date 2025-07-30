@@ -9,26 +9,27 @@ import (
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/repository"
 	"github.com/amaumene/momenarr/pkg/utils"
+	"github.com/amaumene/momenarr/trakt"
 	log "github.com/sirupsen/logrus"
 )
 
-type NewAppService struct {
+type AppService struct {
 	mu              sync.RWMutex
 	repo            repository.Repository
 	traktService    *TraktService
 	torrentService  *TorrentService
-	downloadService *NewDownloadService
-	cleanupService  *NewCleanupService
+	downloadService *DownloadService
+	cleanupService  *CleanupService
 }
 
-func CreateNewAppService(
+func CreateAppService(
 	repo repository.Repository,
 	traktService *TraktService,
 	torrentService *TorrentService,
-	downloadService *NewDownloadService,
-	cleanupService *NewCleanupService,
-) *NewAppService {
-	return &NewAppService{
+	downloadService *DownloadService,
+	cleanupService *CleanupService,
+) *AppService {
+	return &AppService{
 		repo:            repo,
 		traktService:    traktService,
 		torrentService:  torrentService,
@@ -38,7 +39,7 @@ func CreateNewAppService(
 }
 
 // RunTasks executes all main application tasks with proper synchronization
-func (s *NewAppService) RunTasks(ctx context.Context) error {
+func (s *AppService) RunTasks(ctx context.Context) error {
 	log.Info("starting application tasks")
 	startTime := time.Now()
 
@@ -72,7 +73,7 @@ func (s *NewAppService) RunTasks(ctx context.Context) error {
 }
 
 // syncFromTrakt handles the Trakt synchronization and cleanup
-func (s *NewAppService) syncFromTrakt(ctx context.Context) ([]int64, error) {
+func (s *AppService) syncFromTrakt(ctx context.Context) ([]int64, error) {
 	s.mu.RLock()
 	traktService := s.traktService
 	s.mu.RUnlock()
@@ -93,7 +94,7 @@ func (s *NewAppService) syncFromTrakt(ctx context.Context) ([]int64, error) {
 }
 
 // cleanupRemovedMedia removes media that is no longer in the merged list using streaming
-func (s *NewAppService) cleanupRemovedMedia(ctx context.Context, currentTraktIDs []int64) error {
+func (s *AppService) cleanupRemovedMedia(ctx context.Context, currentTraktIDs []int64) error {
 	// Create a map for faster lookup
 	currentIDs := make(map[int64]bool, len(currentTraktIDs))
 	for _, id := range currentTraktIDs {
@@ -131,7 +132,7 @@ func (s *NewAppService) cleanupRemovedMedia(ctx context.Context, currentTraktIDs
 	return nil
 }
 
-func (s *NewAppService) GetMediaStats() (*MediaStats, error) {
+func (s *AppService) GetMediaStats() (*MediaStats, error) {
 	stats := &MediaStats{}
 
 	// Use streaming to avoid loading all media into memory
@@ -149,14 +150,7 @@ func (s *NewAppService) GetMediaStats() (*MediaStats, error) {
 			stats.Episodes++
 		}
 
-		// Check if downloading by looking for associated torrents
-		torrents, _ := s.repo.FindAllTorrentsByTraktID(media.Trakt)
-		for _, torrent := range torrents {
-			if torrent.AllDebridID > 0 && !torrent.Failed {
-				stats.Downloading++
-				break
-			}
-		}
+		// Note: Torrent downloading stats removed since torrents are no longer stored in database
 		return nil
 	})
 
@@ -167,16 +161,17 @@ func (s *NewAppService) GetMediaStats() (*MediaStats, error) {
 	return stats, nil
 }
 
-func (s *NewAppService) GetCleanupStats() (*CleanupStats, error) {
+func (s *AppService) GetCleanupStats() (*CleanupStats, error) {
 	return s.cleanupService.GetCleanupStats()
 }
 
-func (s *NewAppService) GetTorrentsByTraktID(traktID int64) ([]*models.Torrent, error) {
-	return s.repo.FindAllTorrentsByTraktID(traktID)
+// GetTorrentsByTraktID is no longer supported since torrents are not stored in database
+func (s *AppService) GetTorrentsByTraktID(traktID int64) ([]interface{}, error) {
+	return nil, fmt.Errorf("torrent database functionality has been removed")
 }
 
 // GetAllMedia returns all media items for display
-func (s *NewAppService) GetAllMedia() ([]*models.Media, error) {
+func (s *AppService) GetAllMedia() ([]*models.Media, error) {
 	var mediaList []*models.Media
 
 	// Use streaming to avoid loading all media into memory
@@ -193,35 +188,43 @@ func (s *NewAppService) GetAllMedia() ([]*models.Media, error) {
 }
 
 // UpdateTraktServices updates the Trakt-related services with new token (thread-safe)
-func (s *NewAppService) UpdateTraktServices(traktService *TraktService, cleanupService *NewCleanupService) {
+func (s *AppService) UpdateTraktServices(traktService *TraktService, cleanupService *CleanupService) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.traktService = traktService
 	s.cleanupService = cleanupService
 }
 
+// UpdateTraktToken updates the Trakt token while preserving existing service configuration (thread-safe)
+func (s *AppService) UpdateTraktToken(token *trakt.Token, cleanupService *CleanupService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.traktService.UpdateToken(token)
+	s.cleanupService = cleanupService
+}
+
 // RetryDownload retries a failed download
-func (s *NewAppService) RetryDownload(traktID int64) error {
+func (s *AppService) RetryDownload(traktID int64) error {
 	return s.downloadService.RetryFailedDownload(traktID)
 }
 
 // CancelDownload cancels a download
-func (s *NewAppService) CancelDownload(traktID int64) error {
+func (s *AppService) CancelDownload(traktID int64) error {
 	return s.downloadService.CancelDownload(traktID)
 }
 
 // GetDownloadStatus gets the status of a download
-func (s *NewAppService) GetDownloadStatus(traktID int64) (string, error) {
+func (s *AppService) GetDownloadStatus(traktID int64) (string, error) {
 	return s.downloadService.GetDownloadStatus(traktID)
 }
 
 // RefreshAll manually triggers a full refresh
-func (s *NewAppService) RefreshAll(ctx context.Context) error {
+func (s *AppService) RefreshAll(ctx context.Context) error {
 	return s.RunTasks(ctx)
 }
 
 // SearchTorrentsForNotDownloaded syncs with Trakt and searches for torrents for media not marked as downloaded
-func (s *NewAppService) SearchTorrentsForNotDownloaded(ctx context.Context) error {
+func (s *AppService) SearchTorrentsForNotDownloaded(ctx context.Context) error {
 	log.Info("starting trakt sync and torrent search for media not on disk")
 	startTime := time.Now()
 
@@ -280,7 +283,7 @@ func (s *NewAppService) SearchTorrentsForNotDownloaded(ctx context.Context) erro
 	return nil
 }
 
-func (s *NewAppService) Close() error {
+func (s *AppService) Close() error {
 	log.Info("shutting down application service")
 
 	// Add timeout for database closing to prevent hanging

@@ -3,19 +3,11 @@ package repository
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"time"
 
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/pkg/models"
-	log "github.com/sirupsen/logrus"
 )
 
-// Pre-compiled regex patterns for better performance
-var (
-	remuxRegex = regexp.MustCompile("(?i)remux")
-	webDLRegex = regexp.MustCompile("(?i)web-dl")
-)
 
 // Repository defines the interface for data access operations
 type Repository interface {
@@ -33,15 +25,6 @@ type Repository interface {
 	RemoveMedia(traktID int64) error
 	FindAllMedia() ([]*models.Media, error)
 
-	// Torrent operations
-	SaveTorrent(torrent *models.Torrent) error
-	GetBestTorrent(traktID int64) (*models.Torrent, error)
-	GetTorrentByID(id int64) (*models.Torrent, error)
-	GetTorrentByAllDebridID(allDebridID int64) (*models.Torrent, error)
-	FindAllTorrentsByTraktID(traktID int64) ([]*models.Torrent, error)
-	RemoveTorrentsByTraktID(traktID int64) error
-	UpdateTorrentSeasonPack(torrentID int64, episodesInPack []int) error
-	MarkTorrentEpisodeWatched(torrentID int64, episode int) error
 
 	// Utility operations
 	Close() error
@@ -220,115 +203,6 @@ func (r *BoltRepository) FindAllMedia() ([]*models.Media, error) {
 	return medias, nil
 }
 
-// Torrent operations
-func (r *BoltRepository) SaveTorrent(torrent *models.Torrent) error {
-	if torrent.ID == 0 {
-		// Insert new torrent with auto-generated ID
-		if err := r.store.Insert(bolthold.NextSequence(), torrent); err != nil {
-			return fmt.Errorf("failed to insert torrent: %w", err)
-		}
-	} else {
-		// Update existing torrent
-		if err := r.store.Update(torrent.ID, torrent); err != nil {
-			return fmt.Errorf("failed to update torrent: %w", err)
-		}
-	}
-	return nil
-}
-
-func (r *BoltRepository) GetBestTorrent(traktID int64) (*models.Torrent, error) {
-	var torrents []*models.Torrent
-
-	// Get all torrents for this Trakt ID that haven't failed
-	if err := r.store.Find(&torrents,
-		bolthold.Where("Trakt").Eq(traktID).And("Failed").Eq(false)); err != nil {
-		return nil, fmt.Errorf("failed to find torrents: %w", err)
-	}
-
-	log.WithFields(log.Fields{
-		"trakt":       traktID,
-		"found_count": len(torrents),
-	}).Debug("GetBestTorrent query results")
-
-	if len(torrents) == 0 {
-		return nil, fmt.Errorf("no torrents found for Trakt ID %d", traktID)
-	}
-
-	// Find the best torrent (prioritize by size)
-	best := torrents[0]
-	for _, torrent := range torrents[1:] {
-		if torrent.Size > best.Size {
-			best = torrent
-		}
-	}
-
-	return best, nil
-}
-
-func (r *BoltRepository) GetTorrentByID(id int64) (*models.Torrent, error) {
-	var torrent models.Torrent
-
-	if err := r.store.Get(id, &torrent); err != nil {
-		if err == bolthold.ErrNotFound {
-			return nil, fmt.Errorf("torrent with ID %d not found", id)
-		}
-		return nil, fmt.Errorf("failed to get torrent: %w", err)
-	}
-
-	return &torrent, nil
-}
-
-func (r *BoltRepository) GetTorrentByAllDebridID(allDebridID int64) (*models.Torrent, error) {
-	var torrent models.Torrent
-	if err := r.store.FindOne(&torrent, bolthold.Where("AllDebridID").Eq(allDebridID)); err != nil {
-		return nil, fmt.Errorf("failed to get torrent by AllDebrid ID: %w", err)
-	}
-	return &torrent, nil
-}
-
-func (r *BoltRepository) FindAllTorrentsByTraktID(traktID int64) ([]*models.Torrent, error) {
-	var torrents []*models.Torrent
-	if err := r.store.Find(&torrents, bolthold.Where("Trakt").Eq(traktID)); err != nil {
-		return nil, fmt.Errorf("failed to find torrents by Trakt ID: %w", err)
-	}
-	return torrents, nil
-}
-
-func (r *BoltRepository) RemoveTorrentsByTraktID(traktID int64) error {
-	if err := r.store.DeleteMatching(&models.Torrent{}, bolthold.Where("Trakt").Eq(traktID)); err != nil {
-		return fmt.Errorf("failed to remove torrents for Trakt ID %d: %w", traktID, err)
-	}
-	return nil
-}
-
-func (r *BoltRepository) UpdateTorrentSeasonPack(torrentID int64, episodesInPack []int) error {
-	var torrent models.Torrent
-	if err := r.store.Get(torrentID, &torrent); err != nil {
-		return fmt.Errorf("failed to get torrent: %w", err)
-	}
-
-	torrent.EpisodesInPack = episodesInPack
-	torrent.UpdatedAt = time.Now()
-
-	if err := r.store.Update(torrentID, &torrent); err != nil {
-		return fmt.Errorf("failed to update torrent season pack: %w", err)
-	}
-	return nil
-}
-
-func (r *BoltRepository) MarkTorrentEpisodeWatched(torrentID int64, episode int) error {
-	var torrent models.Torrent
-	if err := r.store.Get(torrentID, &torrent); err != nil {
-		return fmt.Errorf("failed to get torrent: %w", err)
-	}
-
-	torrent.MarkEpisodeWatched(episode)
-
-	if err := r.store.Update(torrentID, &torrent); err != nil {
-		return fmt.Errorf("failed to update torrent watched episode: %w", err)
-	}
-	return nil
-}
 
 // Utility operations
 func (r *BoltRepository) Close() error {

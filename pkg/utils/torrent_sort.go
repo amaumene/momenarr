@@ -18,6 +18,17 @@ func SortTorrentResultsByQuality(results []models.TorrentSearchResult) {
 	}
 }
 
+// SortTorrentResultsBySize sorts torrents by size only (largest first)
+func SortTorrentResultsBySize(results []models.TorrentSearchResult) {
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].Size > results[i].Size {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+}
+
 // shouldSwapByQuality determines if torrent j should be ranked higher than torrent i
 func shouldSwapByQuality(i, j models.TorrentSearchResult) bool {
 	iIsRemux := i.IsRemux()

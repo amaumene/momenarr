@@ -15,12 +15,12 @@ func LogMediaOperation(operation string, media *models.Media) *log.Entry {
 	})
 }
 
-// LogTorrentOperation returns a log entry with common torrent fields
-func LogTorrentOperation(operation string, torrent *models.Torrent) *log.Entry {
+// LogTorrentSearchResultOperation returns a log entry with common torrent search result fields
+func LogTorrentSearchResultOperation(operation string, result *models.TorrentSearchResult) *log.Entry {
 	return log.WithFields(log.Fields{
-		"hash":      torrent.Hash,
-		"title":     torrent.Title,
-		"trakt_id":  torrent.Trakt,
+		"hash":      result.Hash,
+		"title":     result.Title,
+		"source":    result.Source,
 		"operation": operation,
 	})
 }
