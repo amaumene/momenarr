@@ -107,7 +107,7 @@ func main() {
 	printMediaCollection(colorize, filteredMedia, store, *detailed)
 
 	// Print summary statistics
-	fmt.Printf("\n" + colorize("cyan", "=== SUMMARY ===") + "\n")
+	fmt.Print("\n" + colorize("cyan", "=== SUMMARY ===") + "\n")
 	printStatistics(colorize, stats)
 }
 
@@ -231,16 +231,16 @@ func getColorizer(noColor bool) func(string, string) string {
 }
 
 func printHeader(colorize func(string, string) string, dbPath string, filtered, total int) {
-	fmt.Printf(colorize("bold", "╔══════════════════════════════════════════════════════════════════════════════╗\n"))
-	fmt.Printf(colorize("bold", "║") + colorize("cyan", "                          MOMENARR DATABASE VIEWER                          ") + colorize("bold", "║\n"))
-	fmt.Printf(colorize("bold", "╚══════════════════════════════════════════════════════════════════════════════╝\n"))
+	fmt.Print(colorize("bold", "╔══════════════════════════════════════════════════════════════════════════════╗\n"))
+	fmt.Print(colorize("bold", "║") + colorize("cyan", "                          MOMENARR DATABASE VIEWER                          ") + colorize("bold", "║\n"))
+	fmt.Print(colorize("bold", "╚══════════════════════════════════════════════════════════════════════════════╝\n"))
 	fmt.Printf(colorize("yellow", "Database: ")+"%s\n", filepath.Base(dbPath))
 	fmt.Printf(colorize("yellow", "Showing: ")+"%d of %d items\n", filtered, total)
 	fmt.Printf(colorize("yellow", "Scanned: ")+"%s\n\n", time.Now().Format("2006-01-02 15:04:05"))
 }
 
 func printStatistics(colorize func(string, string) string, stats MediaStats) {
-	fmt.Printf(colorize("bold", "📊 COLLECTION STATISTICS\n"))
+	fmt.Print(colorize("bold", "📊 COLLECTION STATISTICS\n"))
 	fmt.Printf("  Total Items:     %s\n", colorize("white", fmt.Sprintf("%d", stats.TotalItems)))
 	fmt.Printf("  Movies:          %s\n", colorize("blue", fmt.Sprintf("%d", stats.Movies)))
 	fmt.Printf("  TV Episodes:     %s\n", colorize("purple", fmt.Sprintf("%d", stats.Episodes)))
@@ -257,7 +257,7 @@ func printStatistics(colorize func(string, string) string, stats MediaStats) {
 }
 
 func printMediaCollection(colorize func(string, string) string, media []*models.Media, store *bolthold.Store, detailed bool) {
-	fmt.Printf(colorize("bold", "📺 MEDIA COLLECTION\n"))
+	fmt.Print(colorize("bold", "📺 MEDIA COLLECTION\n"))
 
 	for i, item := range media {
 		printMediaItem(colorize, item, i+1, detailed)

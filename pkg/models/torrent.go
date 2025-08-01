@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-
 // TorrentSearchResult represents a torrent search result
 type TorrentSearchResult struct {
 	Title     string
@@ -20,19 +19,25 @@ type TorrentSearchResult struct {
 	ID        string // Provider-specific ID (e.g., for YGG to fetch hash later)
 }
 
+var (
+	seasonOnlyPattern    = regexp.MustCompile(`(?i)s\d{2}(?:[^e]|$)`)
+	seasonEpisodePattern = regexp.MustCompile(`(?i)s\d{2}e\d{2}`)
+	yearPattern          = regexp.MustCompile(`\b(19|20)\d{2}\b`)
+)
+
+// Season pack indicators across languages
+var seasonPackPatterns = []string{
+	"complete season",
+	"full season",
+	"season pack",
+	"complete series",
+	"integrale", // French
+	"completa",  // Spanish/Italian
+}
+
 // IsSeasonPack checks if the torrent title indicates a complete season
 func (r *TorrentSearchResult) IsSeasonPack() bool {
 	lowerTitle := strings.ToLower(r.Title)
-
-	// Check for season pack indicators
-	seasonPackPatterns := []string{
-		"complete season",
-		"full season",
-		"season pack",
-		"complete series",
-		"integrale", // French
-		"completa",  // Spanish/Italian
-	}
 
 	for _, pattern := range seasonPackPatterns {
 		if strings.Contains(lowerTitle, pattern) {
@@ -41,28 +46,24 @@ func (r *TorrentSearchResult) IsSeasonPack() bool {
 	}
 
 	// Check for season without episode (e.g., "S01" but not "S01E01")
-	if regexp.MustCompile(`(?i)s\d{2}(?:[^e]|$)`).MatchString(r.Title) {
-		// Make sure it's not a single episode
-		if !regexp.MustCompile(`(?i)s\d{2}e\d{2}`).MatchString(r.Title) {
-			return true
-		}
+	if seasonOnlyPattern.MatchString(r.Title) {
+		return !seasonEpisodePattern.MatchString(r.Title)
 	}
 
 	return false
 }
 
+// Season extraction patterns
+var seasonPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)s(\d{1,2})(?:[^e]|$)`),
+	regexp.MustCompile(`(?i)season\s*(\d{1,2})`),
+	regexp.MustCompile(`(?i)saison\s*(\d{1,2})`),
+}
+
 // ExtractSeason extracts the season number from the title
 func (r *TorrentSearchResult) ExtractSeason() int {
-	// Try to extract season number from patterns like S01, Season 1, etc.
-	patterns := []string{
-		`(?i)s(\d{1,2})(?:[^e]|$)`,
-		`(?i)season\s*(\d{1,2})`,
-		`(?i)saison\s*(\d{1,2})`,
-	}
-
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
-		matches := re.FindStringSubmatch(r.Title)
+	for _, pattern := range seasonPatterns {
+		matches := pattern.FindStringSubmatch(r.Title)
 		if len(matches) > 1 {
 			season, err := strconv.Atoi(matches[1])
 			if err == nil {
@@ -70,47 +71,45 @@ func (r *TorrentSearchResult) ExtractSeason() int {
 			}
 		}
 	}
-
 	return 0
 }
 
 // ExtractYear extracts year from the torrent title
 func (r *TorrentSearchResult) ExtractYear() int {
-	// Look for 4-digit year patterns (1900-2099)
-	yearPattern := regexp.MustCompile(`\b(19|20)\d{2}\b`)
 	matches := yearPattern.FindAllString(r.Title, -1)
-
-	if len(matches) > 0 {
-		// Take the first year found
-		if year, err := strconv.Atoi(matches[0]); err == nil {
-			return year
-		}
+	if len(matches) == 0 {
+		return 0
 	}
 
-	return 0
+	year, err := strconv.Atoi(matches[0])
+	if err != nil {
+		return 0
+	}
+
+	return year
 }
 
 // MatchesYear checks if the torrent title contains a year that matches the expected year
 func (r *TorrentSearchResult) MatchesYear(expectedYear int) bool {
 	if expectedYear == 0 {
-		return true // If no year provided, don't filter
+		return true
 	}
 
-	// Look for 4-digit year patterns in the title
-	yearPattern := regexp.MustCompile(`\b(19|20)\d{2}\b`)
 	matches := yearPattern.FindAllString(r.Title, -1)
 
 	for _, match := range matches {
-		if year, err := strconv.Atoi(match); err == nil {
-			// Allow exact year match or year+1 (some torrents are released early)
-			if year == expectedYear || year == expectedYear+1 {
-				return true
-			}
+		year, err := strconv.Atoi(match)
+		if err != nil {
+			continue
+		}
+
+		// Allow exact year match or year+1 (early releases)
+		if year == expectedYear || year == expectedYear+1 {
+			return true
 		}
 	}
 
-	// For movies, be more strict about year matching
-	// Only allow missing year for very recent movies (within 2 years)
+	// Allow missing year for recent movies (within 2 years)
 	if len(matches) == 0 {
 		currentYear := time.Now().Year()
 		return expectedYear >= currentYear-2
@@ -127,47 +126,56 @@ func (r *TorrentSearchResult) IsRemux() bool {
 	return strings.Contains(lowerTitle, "remux")
 }
 
-// ExtractResolution extracts the resolution from the title and returns a numeric value for comparison
+// Resolution mapping (higher number = better quality)
+var resolutionMap = map[string]int{
+	"8k":    8000,
+	"4320p": 4320,
+	"4k":    4000,
+	"2160p": 2160,
+	"1440p": 1440,
+	"1080p": 1080,
+	"720p":  720,
+	"480p":  480,
+	"360p":  360,
+	"240p":  240,
+}
+
+const (
+	resolution4K      = 2160
+	resolution1080p   = 1080
+	resolutionDefault = 480
+)
+
+// ExtractResolution extracts the resolution from the title
 func (r *TorrentSearchResult) ExtractResolution() int {
 	lowerTitle := strings.ToLower(r.Title)
 
-	// Resolution priority mapping (higher number = better quality)
-	resolutionMap := map[string]int{
-		"8k":    8000,
-		"4320p": 4320,
-		"4k":    4000,
-		"2160p": 2160,
-		"1440p": 1440,
-		"1080p": 1080,
-		"720p":  720,
-		"480p":  480,
-		"360p":  360,
-		"240p":  240,
-	}
-
-	// Check for resolution patterns
+	// Check explicit resolution patterns
 	for resolution, value := range resolutionMap {
 		if strings.Contains(lowerTitle, resolution) {
 			return value
 		}
 	}
 
-	// Check for UHD indicators (4K equivalent)
-	uhdPatterns := []string{"uhd", "ultra.hd", "ultra hd"}
-	for _, pattern := range uhdPatterns {
-		if strings.Contains(lowerTitle, pattern) {
-			return 2160 // 4K UHD
-		}
+	// Check UHD indicators (4K equivalent)
+	if containsAny(lowerTitle, "uhd", "ultra.hd", "ultra hd") {
+		return resolution4K
 	}
 
-	// Check for HD indicators (assume 1080p if not specified)
-	hdPatterns := []string{"hd", "high.definition", "full.hd", "fhd"}
-	for _, pattern := range hdPatterns {
-		if strings.Contains(lowerTitle, pattern) {
-			return 1080 // Assume 1080p
-		}
+	// Check HD indicators (assume 1080p)
+	if containsAny(lowerTitle, "hd", "high.definition", "full.hd", "fhd") {
+		return resolution1080p
 	}
 
-	// Default to SD quality if no resolution found
-	return 480
+	return resolutionDefault
+}
+
+// containsAny checks if the string contains any of the patterns
+func containsAny(s string, patterns ...string) bool {
+	for _, pattern := range patterns {
+		if strings.Contains(s, pattern) {
+			return true
+		}
+	}
+	return false
 }

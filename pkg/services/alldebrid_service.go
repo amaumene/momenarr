@@ -165,7 +165,7 @@ func (s *AllDebridService) DownloadFile(allDebridID int64, torrentResult *models
 	}
 
 	// For single episodes or movies, find the best video file
-	var bestFile *struct{
+	var bestFile *struct {
 		Name string `json:"n"`
 		Size int64  `json:"s"`
 		Link string `json:"l"`
@@ -189,7 +189,7 @@ func (s *AllDebridService) DownloadFile(allDebridID int64, torrentResult *models
 }
 
 // handleSeasonPack handles downloading files from a season pack
-func (s *AllDebridService) handleSeasonPack(torrentResult *models.TorrentSearchResult, magnet *struct{
+func (s *AllDebridService) handleSeasonPack(torrentResult *models.TorrentSearchResult, magnet *struct {
 	ID    int `json:"id"`
 	Files []struct {
 		Name string `json:"n"`
@@ -198,7 +198,7 @@ func (s *AllDebridService) handleSeasonPack(torrentResult *models.TorrentSearchR
 	} `json:"files"`
 }, media *models.Media) error {
 	// Extract episode numbers from files
-	episodeFiles := make(map[int]*struct{
+	episodeFiles := make(map[int]*struct {
 		Name string `json:"n"`
 		Size int64  `json:"s"`
 		Link string `json:"l"`
@@ -232,7 +232,7 @@ func (s *AllDebridService) handleSeasonPack(torrentResult *models.TorrentSearchR
 
 	log.WithFields(log.Fields{
 		"torrent_title":    torrentResult.Title,
-		"season":          season,
+		"season":           season,
 		"episodes_in_pack": episodesInPack,
 	}).Info("Found episodes in season pack")
 
@@ -311,4 +311,3 @@ func isVideoFile(filename string) bool {
 
 	return false
 }
-

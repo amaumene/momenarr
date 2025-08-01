@@ -60,4 +60,3 @@ func shouldSwapByQuality(i, j models.TorrentSearchResult) bool {
 
 	return false
 }
-

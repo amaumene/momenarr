@@ -121,7 +121,7 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 			"original_language": media.OriginalLanguage,
 			"french_title":      media.FrenchTitle,
 		}).Info("Using stored TMDB data from database (no API calls)")
-		
+
 		// Use stored language for provider selection (preferred method)
 		if media.IsMovie() && media.Year > 0 {
 			// For movies, use year-aware search with stored language
@@ -193,7 +193,7 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 	// Group results by provider
 	yggResults := []models.TorrentSearchResult{}
 	apiBayResults := []models.TorrentSearchResult{}
-	
+
 	for _, result := range filteredResults {
 		switch result.Source {
 		case "YGG":
@@ -202,7 +202,7 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 			apiBayResults = append(apiBayResults, result)
 		}
 	}
-	
+
 	// Sort YGG results by size (biggest first)
 	for i := 0; i < len(yggResults); i++ {
 		for j := i + 1; j < len(yggResults); j++ {
@@ -211,12 +211,12 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 			}
 		}
 	}
-	
+
 	log.WithFields(log.Fields{
-		"trakt_id":       media.Trakt,
-		"ygg_count":      len(yggResults),
-		"apibay_count":   len(apiBayResults),
-		"total_count":    len(filteredResults),
+		"trakt_id":     media.Trakt,
+		"ygg_count":    len(yggResults),
+		"apibay_count": len(apiBayResults),
+		"total_count":  len(filteredResults),
 	}).Info("Checking AllDebrid cache")
 
 	// Try YGG results first (biggest to smallest)
@@ -250,7 +250,7 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 			return &result, nil
 		}
 	}
-	
+
 	// Try APIBay results
 	for i, result := range apiBayResults {
 		if result.Hash == "" {
@@ -289,7 +289,6 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 	return nil, nil
 }
 
-
 // filterBlacklistedTorrents filters out blacklisted torrents from search results
 func (s *TorrentService) filterBlacklistedTorrents(results []models.TorrentSearchResult) ([]models.TorrentSearchResult, error) {
 	blacklist, err := s.getBlacklist()
@@ -310,7 +309,6 @@ func (s *TorrentService) filterBlacklistedTorrents(results []models.TorrentSearc
 func (s *TorrentService) sortTorrentResults(results []models.TorrentSearchResult) {
 	utils.SortTorrentResultsByQuality(results)
 }
-
 
 // populateTorrentsForMedia populates torrent entries for a specific media item
 func (s *TorrentService) populateTorrentsForMedia(media *models.Media) error {

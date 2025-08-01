@@ -1,8 +1,10 @@
+// Package config handles application configuration management
 package config
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -10,17 +12,17 @@ import (
 type Config struct {
 	// Server
 	HTTPAddr string `json:"http_addr"`
-	
+
 	// Storage
 	DataDir       string `json:"data_dir" validate:"required"`
 	BlacklistFile string `json:"blacklist_file"`
-	
+
 	// Services
 	AllDebridAPIKey   string `json:"alldebrid_api_key" validate:"required"`
 	TraktAPIKey       string `json:"trakt_api_key" validate:"required"`
 	TraktClientSecret string `json:"trakt_client_secret" validate:"required"`
 	TMDBAPIKey        string `json:"tmdb_api_key"`
-	
+
 	// Settings
 	SyncInterval   string `json:"sync_interval"`
 	WatchedDays    int    `json:"watched_days"`
@@ -28,40 +30,35 @@ type Config struct {
 	RequestTimeout int    `json:"request_timeout"`
 }
 
+// Default configuration values
+const (
+	defaultHTTPAddr       = ":8080"
+	defaultSyncInterval   = "6h"
+	defaultBlacklistFile  = "blacklist.txt"
+	defaultWatchedDays    = 5
+	defaultMaxRetries     = 3
+	defaultRequestTimeout = 30
+)
+
 // LoadConfig loads configuration from environment variables
 func LoadConfig() (*Config, error) {
-	config := &Config{
-		HTTPAddr:        getEnv("HTTP_ADDR", ":8080"),
-		SyncInterval:    getEnv("SYNC_INTERVAL", "6h"),
-		BlacklistFile:   getEnv("BLACKLIST_FILE", "blacklist.txt"),
-		TMDBAPIKey:      getEnv("TMDB_API_KEY", ""),
-		WatchedDays:     getEnvInt("WATCHED_DAYS", 5),
-		MaxRetries:      getEnvInt("MAX_RETRIES", 3),
-		RequestTimeout:  getEnvInt("REQUEST_TIMEOUT", 30),
+	cfg := &Config{
+		HTTPAddr:       getEnv("HTTP_ADDR", defaultHTTPAddr),
+		SyncInterval:   getEnv("SYNC_INTERVAL", defaultSyncInterval),
+		BlacklistFile:  getEnv("BLACKLIST_FILE", defaultBlacklistFile),
+		TMDBAPIKey:     getEnv("TMDB_API_KEY", ""),
+		WatchedDays:    getEnvInt("WATCHED_DAYS", defaultWatchedDays),
+		MaxRetries:     getEnvInt("MAX_RETRIES", defaultMaxRetries),
+		RequestTimeout: getEnvInt("REQUEST_TIMEOUT", defaultRequestTimeout),
 	}
-	
-	// Required fields
-	requiredFields := map[string]*string{
-		"DATA_DIR":              &config.DataDir,
-		"ALLDEBRID_API_KEY":     &config.AllDebridAPIKey,
-		"TRAKT_API_KEY":         &config.TraktAPIKey,
-		"TRAKT_CLIENT_SECRET":   &config.TraktClientSecret,
+
+	if err := loadRequiredFields(cfg); err != nil {
+		return nil, err
 	}
-	
-	for env, field := range requiredFields {
-		value := os.Getenv(env)
-		if value == "" {
-			return nil, fmt.Errorf("required env var %s not set", env)
-		}
-		*field = value
-	}
-	
-	// Set blacklist file path
-	if config.BlacklistFile != "" && !os.IsPathSeparator(config.BlacklistFile[0]) {
-		config.BlacklistFile = fmt.Sprintf("%s/%s", config.DataDir, config.BlacklistFile)
-	}
-	
-	return config, nil
+
+	cfg.normalizeBlacklistPath()
+
+	return cfg, nil
 }
 
 // GetServerAddress returns the HTTP server address
@@ -75,15 +72,46 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("data directory required")
 	}
 	if c.AllDebridAPIKey == "" {
-		return fmt.Errorf("AllDebrid API key required")
+		return fmt.Errorf("allDebrid API key required")
 	}
 	if c.TraktAPIKey == "" || c.TraktClientSecret == "" {
-		return fmt.Errorf("Trakt credentials required")
+		return fmt.Errorf("trakt credentials required")
 	}
 	return nil
 }
 
-// Helper functions
+// loadRequiredFields loads all required environment variables
+func loadRequiredFields(cfg *Config) error {
+	requiredFields := map[string]*string{
+		"DATA_DIR":            &cfg.DataDir,
+		"ALLDEBRID_API_KEY":   &cfg.AllDebridAPIKey,
+		"TRAKT_API_KEY":       &cfg.TraktAPIKey,
+		"TRAKT_CLIENT_SECRET": &cfg.TraktClientSecret,
+	}
+
+	for env, field := range requiredFields {
+		value := os.Getenv(env)
+		if value == "" {
+			return fmt.Errorf("required env var %s not set", env)
+		}
+		*field = value
+	}
+
+	return nil
+}
+
+// normalizeBlacklistPath ensures blacklist file has absolute path
+func (c *Config) normalizeBlacklistPath() {
+	if c.BlacklistFile == "" {
+		return
+	}
+
+	if !filepath.IsAbs(c.BlacklistFile) {
+		c.BlacklistFile = filepath.Join(c.DataDir, c.BlacklistFile)
+	}
+}
+
+// getEnv retrieves environment variable with default fallback
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -91,11 +119,17 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+// getEnvInt retrieves integer environment variable with default fallback
 func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
 	}
-	return defaultValue
+
+	intValue, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+
+	return intValue
 }

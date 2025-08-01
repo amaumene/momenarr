@@ -60,10 +60,10 @@ func (t *TMDBService) GetFrenchTitle(mediaType string, tmdbID int64, fallbackTit
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"tmdb_id":      tmdbID,
-		"media_type":   mediaType,
-		"english":      fallbackTitle,
-		"french":       frenchTitle,
+		"tmdb_id":    tmdbID,
+		"media_type": mediaType,
+		"english":    fallbackTitle,
+		"french":     frenchTitle,
 	}).Debug("Retrieved French title from TMDB")
 
 	return frenchTitle

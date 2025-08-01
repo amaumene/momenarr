@@ -1,3 +1,4 @@
+// Package repository provides data access layer abstractions
 package repository
 
 import (
@@ -7,7 +8,6 @@ import (
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/pkg/models"
 )
-
 
 // Repository defines the interface for data access operations
 type Repository interface {
@@ -25,7 +25,6 @@ type Repository interface {
 	RemoveMedia(traktID int64) error
 	FindAllMedia() ([]*models.Media, error)
 
-
 	// Utility operations
 	Close() error
 }
@@ -35,11 +34,12 @@ type BoltRepository struct {
 	store *bolthold.Store
 }
 
+// NewBoltRepository creates a new BoltDB-backed repository
 func NewBoltRepository(store *bolthold.Store) Repository {
 	return &BoltRepository{store: store}
 }
 
-// Media operations
+// SaveMedia saves or updates a media item
 func (r *BoltRepository) SaveMedia(media *models.Media) error {
 	if err := r.store.Upsert(media.Trakt, media); err != nil {
 		return fmt.Errorf("failed to save media: %w", err)
@@ -47,6 +47,7 @@ func (r *BoltRepository) SaveMedia(media *models.Media) error {
 	return nil
 }
 
+// GetMedia retrieves a media item by Trakt ID
 func (r *BoltRepository) GetMedia(traktID int64) (*models.Media, error) {
 	var media models.Media
 	if err := r.store.Get(traktID, &media); err != nil {
@@ -55,6 +56,7 @@ func (r *BoltRepository) GetMedia(traktID int64) (*models.Media, error) {
 	return &media, nil
 }
 
+// FindMediaNotOnDisk returns all media items not currently on disk
 func (r *BoltRepository) FindMediaNotOnDisk() ([]*models.Media, error) {
 	var medias []*models.Media
 	if err := r.store.Find(&medias, bolthold.Where("OnDisk").Eq(false)); err != nil {
@@ -74,7 +76,6 @@ func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 
-	// Track whether we've committed successfully
 	committed := false
 	defer func() {
 		if !committed {
@@ -97,13 +98,12 @@ func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 
 // FindMediaBatch finds multiple media items by their Trakt IDs
 func (r *BoltRepository) FindMediaBatch(traktIDs []int64) ([]*models.Media, error) {
-	var medias []*models.Media
-
-	// Convert []int64 to []interface{}
-	ids := make([]interface{}, len(traktIDs))
-	for i, id := range traktIDs {
-		ids[i] = id
+	if len(traktIDs) == 0 {
+		return nil, nil
 	}
+
+	var medias []*models.Media
+	ids := convertToInterfaces(traktIDs)
 
 	if err := r.store.Find(&medias, bolthold.Where("Trakt").In(ids...)); err != nil {
 		return nil, fmt.Errorf("failed to find media batch: %w", err)
@@ -111,42 +111,35 @@ func (r *BoltRepository) FindMediaBatch(traktIDs []int64) ([]*models.Media, erro
 	return medias, nil
 }
 
-// ProcessMediaBatches processes all media in batches to avoid loading everything into memory
+// ProcessMediaBatches processes all media in batches
 func (r *BoltRepository) ProcessMediaBatches(batchSize int, processor func([]*models.Media) error) error {
 	return r.ProcessMediaBatchesWithContext(context.Background(), batchSize, processor)
 }
 
-// ProcessMediaBatchesWithContext processes all media in batches with context support
+// ProcessMediaBatchesWithContext processes media in batches with context
 func (r *BoltRepository) ProcessMediaBatchesWithContext(ctx context.Context, batchSize int, processor func([]*models.Media) error) error {
-	var lastID int64 = -1
+	lastID := int64(-1)
 
 	for {
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
-		var batch []*models.Media
-
-		// Use cursor-based pagination for better performance
-		if err := r.store.Find(&batch, bolthold.Where("Trakt").Gt(lastID).SortBy("Trakt").Limit(batchSize)); err != nil {
-			return fmt.Errorf("failed to find media batch: %w", err)
+		batch, err := r.findNextBatch(lastID, batchSize)
+		if err != nil {
+			return err
 		}
 
 		if len(batch) == 0 {
-			break // No more records
+			break
 		}
 
 		if err := processor(batch); err != nil {
 			return fmt.Errorf("failed to process media batch: %w", err)
 		}
 
-		// Update lastID for next iteration
 		lastID = batch[len(batch)-1].Trakt
 
-		// If we got fewer records than batch size, we're done
 		if len(batch) < batchSize {
 			break
 		}
@@ -155,19 +148,16 @@ func (r *BoltRepository) ProcessMediaBatchesWithContext(ctx context.Context, bat
 	return nil
 }
 
-// StreamMedia processes media one by one without loading all into memory
+// StreamMedia processes media items one by one
 func (r *BoltRepository) StreamMedia(processor func(*models.Media) error) error {
 	return r.StreamMediaWithContext(context.Background(), processor)
 }
 
-// StreamMediaWithContext processes media one by one with context support
+// StreamMediaWithContext processes media items with context support
 func (r *BoltRepository) StreamMediaWithContext(ctx context.Context, processor func(*models.Media) error) error {
 	return r.store.ForEach(nil, func(record interface{}) error {
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		media, ok := record.(*models.Media)
@@ -178,6 +168,7 @@ func (r *BoltRepository) StreamMediaWithContext(ctx context.Context, processor f
 	})
 }
 
+// UpdateMediaDownloadID updates the download ID for a media item
 func (r *BoltRepository) UpdateMediaDownloadID(traktID, downloadID int64) error {
 	return r.store.UpdateMatching(&models.Media{},
 		bolthold.Where("Trakt").Eq(traktID),
@@ -188,6 +179,7 @@ func (r *BoltRepository) UpdateMediaDownloadID(traktID, downloadID int64) error 
 		})
 }
 
+// RemoveMedia deletes a media item by Trakt ID
 func (r *BoltRepository) RemoveMedia(traktID int64) error {
 	if err := r.store.Delete(traktID, &models.Media{}); err != nil {
 		return fmt.Errorf("failed to remove media: %w", err)
@@ -195,6 +187,7 @@ func (r *BoltRepository) RemoveMedia(traktID int64) error {
 	return nil
 }
 
+// FindAllMedia returns all media items in the database
 func (r *BoltRepository) FindAllMedia() ([]*models.Media, error) {
 	var medias []*models.Media
 	if err := r.store.Find(&medias, nil); err != nil {
@@ -203,11 +196,33 @@ func (r *BoltRepository) FindAllMedia() ([]*models.Media, error) {
 	return medias, nil
 }
 
-
-// Utility operations
+// Close closes the database connection
 func (r *BoltRepository) Close() error {
 	if err := r.store.Close(); err != nil {
 		return fmt.Errorf("failed to close repository: %w", err)
 	}
 	return nil
+}
+
+// Helper functions
+
+// convertToInterfaces converts []int64 to []interface{}
+func convertToInterfaces(ids []int64) []interface{} {
+	result := make([]interface{}, len(ids))
+	for i, id := range ids {
+		result[i] = id
+	}
+	return result
+}
+
+// findNextBatch finds the next batch of media items
+func (r *BoltRepository) findNextBatch(lastID int64, batchSize int) ([]*models.Media, error) {
+	var batch []*models.Media
+
+	query := bolthold.Where("Trakt").Gt(lastID).SortBy("Trakt").Limit(batchSize)
+	if err := r.store.Find(&batch, query); err != nil {
+		return nil, fmt.Errorf("failed to find media batch: %w", err)
+	}
+
+	return batch, nil
 }

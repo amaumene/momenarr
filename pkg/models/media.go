@@ -1,3 +1,4 @@
+// Package models defines data structures used throughout the application
 package models
 
 import "time"
@@ -19,10 +20,12 @@ type Media struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+// IsEpisode checks if the media is a TV episode
 func (m *Media) IsEpisode() bool {
 	return m.Season > 0 && m.Number > 0
 }
 
+// IsMovie checks if the media is a movie
 func (m *Media) IsMovie() bool {
 	return !m.IsEpisode()
 }
@@ -35,6 +38,7 @@ const (
 	MediaTypeEpisode MediaType = "episode"
 )
 
+// GetType returns the media type (movie or episode)
 func (m *Media) GetType() MediaType {
 	if m.IsEpisode() {
 		return MediaTypeEpisode

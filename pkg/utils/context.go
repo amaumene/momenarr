@@ -23,4 +23,3 @@ func WrapServiceError(action string, err error) error {
 	log.WithError(err).Errorf("Failed to %s", action)
 	return fmt.Errorf("%s: %w", action, err)
 }
-

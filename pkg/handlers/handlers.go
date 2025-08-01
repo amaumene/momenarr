@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/services"
 	log "github.com/sirupsen/logrus"
 )
@@ -15,6 +16,9 @@ import (
 const (
 	// MaxRequestSize is the maximum allowed request body size (1MB)
 	MaxRequestSize = 1 << 20
+
+	// RefreshTimeout is the timeout for refresh operations
+	RefreshTimeout = 20 * time.Minute
 )
 
 // Handler contains all HTTP handlers for the torrent/AllDebrid version
@@ -143,12 +147,10 @@ func (h *Handler) writeHTMLErrorResponse(w http.ResponseWriter, status int, mess
 
 // handleMedia handles media listing requests and returns an HTML page
 func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeHTMLErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed", "only GET requests are allowed")
+	if !h.validateMethod(w, r, http.MethodGet, true) {
 		return
 	}
 
-	// Get all media with their status
 	mediaList, err := h.appService.GetAllMedia()
 	if err != nil {
 		log.WithError(err).Error("Failed to get all media")
@@ -156,7 +158,6 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get statistics
 	stats, err := h.appService.GetMediaStats()
 	if err != nil {
 		log.WithError(err).Error("Failed to get media stats")
@@ -164,7 +165,6 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create HTML template
 	tmpl := `
 <!DOCTYPE html>
 <html>
@@ -292,86 +292,14 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 </html>
 `
 
-	// Parse template
-	t, err := template.New("media").Parse(tmpl)
-	if err != nil {
-		log.WithError(err).Error("Failed to parse template")
-		h.writeHTMLErrorResponse(w, http.StatusInternalServerError, "Template error", "There was an error creating the page template")
-		return
-	}
-
-	// Prepare safe data for template
-	type SafeMediaData struct {
-		Trakt         int64
-		Title         string
-		Year          int64
-		Season        int64
-		Number        int64
-		OnDisk        bool
-		File          string
-		IsMovie       bool
-		IsDownloading bool
-		CreatedAt     time.Time
-		UpdatedAt     time.Time
-	}
-
-	type SafeStats struct {
-		Total       int
-		OnDisk      int
-		NotOnDisk   int
-		Movies      int
-		Episodes    int
-		Downloading int
-	}
-
-	var safeMediaList []SafeMediaData
-	for _, media := range mediaList {
-		// Since torrents are no longer stored in database, downloading status is simplified
-		// Media is either OnDisk or not - no intermediate downloading state
-		isDownloading := false
-
-		safeMediaList = append(safeMediaList, SafeMediaData{
-			Trakt:         media.Trakt,
-			Title:         media.Title,
-			Year:          media.Year,
-			Season:        media.Season,
-			Number:        media.Number,
-			OnDisk:        media.OnDisk,
-			File:          media.File,
-			IsMovie:       media.IsMovie(),
-			IsDownloading: isDownloading,
-			CreatedAt:     media.CreatedAt,
-			UpdatedAt:     media.UpdatedAt,
-		})
-	}
-
-	data := struct {
-		Media []SafeMediaData
-		Stats SafeStats
-	}{
-		Media: safeMediaList,
-		Stats: SafeStats{
-			Total:       stats.Total,
-			OnDisk:      stats.OnDisk,
-			NotOnDisk:   stats.NotOnDisk,
-			Movies:      stats.Movies,
-			Episodes:    stats.Episodes,
-			Downloading: stats.Downloading,
-		},
-	}
-
-	// Set content type and execute template
-	w.Header().Set("Content-Type", "text/html")
-	if err := t.Execute(w, data); err != nil {
-		log.WithError(err).Error("Failed to execute template")
-		// Don't try to write another response here as headers are already sent
+	if err := h.renderMediaPage(w, mediaList, stats, tmpl); err != nil {
+		log.WithError(err).Error("Failed to render media page")
 	}
 }
 
 // handleMediaStats returns JSON media statistics
 func (h *Handler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
 	}
 
@@ -386,20 +314,12 @@ func (h *Handler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
 
 // handleTorrentList handles torrent listing requests for a specific Trakt ID
 func (h *Handler) handleTorrentList(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
 	}
 
-	traktIDStr := r.URL.Query().Get("trakt_id")
-	if traktIDStr == "" {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Missing parameter", "trakt_id parameter is required")
-		return
-	}
-
-	traktID, err := validateTraktID(traktIDStr)
+	traktID, err := h.getTraktIDFromQuery(w, r)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid positive integer")
 		return
 	}
 
@@ -420,26 +340,16 @@ func (h *Handler) handleTorrentList(w http.ResponseWriter, r *http.Request) {
 
 // handleRetryDownload handles download retry requests
 func (h *Handler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
+	if !h.validateMethod(w, r, http.MethodPost, false) {
 		return
 	}
 
-	var req struct {
-		TraktID int64 `json:"trakt_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON", err.Error())
+	traktID, err := h.getTraktIDFromBody(w, r)
+	if err != nil {
 		return
 	}
 
-	if req.TraktID <= 0 {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a positive integer")
-		return
-	}
-
-	if err := h.appService.RetryDownload(req.TraktID); err != nil {
+	if err := h.appService.RetryDownload(traktID); err != nil {
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to retry download", err.Error())
 		return
 	}
@@ -449,26 +359,16 @@ func (h *Handler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
 
 // handleCancelDownload handles download cancellation requests
 func (h *Handler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only POST requests are allowed")
+	if !h.validateMethod(w, r, http.MethodPost, false) {
 		return
 	}
 
-	var req struct {
-		TraktID int64 `json:"trakt_id"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON", err.Error())
+	traktID, err := h.getTraktIDFromBody(w, r)
+	if err != nil {
 		return
 	}
 
-	if req.TraktID <= 0 {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a positive integer")
-		return
-	}
-
-	if err := h.appService.CancelDownload(req.TraktID); err != nil {
+	if err := h.appService.CancelDownload(traktID); err != nil {
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to cancel download", err.Error())
 		return
 	}
@@ -478,20 +378,12 @@ func (h *Handler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
 
 // handleDownloadStatus gets the status of a download
 func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
 	}
 
-	traktIDStr := r.URL.Query().Get("trakt_id")
-	if traktIDStr == "" {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Missing parameter", "trakt_id parameter is required")
-		return
-	}
-
-	traktID, err := validateTraktID(traktIDStr)
+	traktID, err := h.getTraktIDFromQuery(w, r)
 	if err != nil {
-		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid positive integer")
 		return
 	}
 
@@ -513,47 +405,22 @@ func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 // GET /api/refresh - Syncs media from Trakt and searches for torrents for media not marked as downloaded
 // This will sync the latest media from Trakt, then search multiple torrent providers and check AllDebrid cache
 func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
 	}
 
-	// Run torrent search asynchronously with panic recovery
-	go func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				log.WithField("panic", rec).Error("Panic recovered in refresh handler")
-			}
-		}()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-		defer cancel()
-
-		if err := h.appService.SearchTorrentsForNotDownloaded(ctx); err != nil {
-			log.WithError(err).Error("Failed to sync with Trakt and search torrents for media not on disk")
-		} else {
-			log.Info("Trakt sync and torrent search for media not on disk completed successfully")
-		}
-	}()
+	h.startAsyncRefresh()
 
 	h.writeSuccessResponse(w, "Trakt sync and torrent search initiated", map[string]interface{}{
 		"description": "Syncing latest media from Trakt, then searching for torrents and checking AllDebrid cache for media not marked as downloaded",
 		"timeout":     "20 minutes",
-		"steps": []string{
-			"1. Sync movies and episodes from Trakt watchlist and favorites",
-			"2. Clean up media no longer in Trakt lists",
-			"3. Find media not marked as downloaded",
-			"4. Search torrent providers (YGG, APIBay) for each media item",
-			"5. Check AllDebrid cache for available torrents",
-			"6. Mark cached torrents as downloaded",
-		},
+		"steps":       getRefreshSteps(),
 	})
 }
 
 // handleCleanupStats returns cleanup statistics
 func (h *Handler) handleCleanupStats(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", "Only GET requests are allowed")
+	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
 	}
 
@@ -564,4 +431,172 @@ func (h *Handler) handleCleanupStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeSuccessResponse(w, "Cleanup statistics retrieved", stats)
+}
+
+// Helper functions
+
+// recoverPanic recovers from panics in HTTP handlers
+func (h *Handler) recoverPanic(w http.ResponseWriter, r *http.Request) {
+	if rec := recover(); rec != nil {
+		log.WithFields(log.Fields{
+			"panic":  rec,
+			"path":   r.URL.Path,
+			"method": r.Method,
+		}).Error("panic recovered in http handler")
+		h.writeErrorResponse(w, http.StatusInternalServerError, "internal server error", "an unexpected error occurred")
+	}
+}
+
+// validateMethod validates HTTP method
+func (h *Handler) validateMethod(w http.ResponseWriter, r *http.Request, expected string, isHTML bool) bool {
+	if r.Method != expected {
+		msg := fmt.Sprintf("Only %s requests are allowed", expected)
+		if isHTML {
+			h.writeHTMLErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", msg)
+		} else {
+			h.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", msg)
+		}
+		return false
+	}
+	return true
+}
+
+// getTraktIDFromQuery extracts Trakt ID from query parameters
+func (h *Handler) getTraktIDFromQuery(w http.ResponseWriter, r *http.Request) (int64, error) {
+	traktIDStr := r.URL.Query().Get("trakt_id")
+	if traktIDStr == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Missing parameter", "trakt_id parameter is required")
+		return 0, fmt.Errorf("missing trakt_id")
+	}
+
+	traktID, err := validateTraktID(traktIDStr)
+	if err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a valid positive integer")
+		return 0, err
+	}
+
+	return traktID, nil
+}
+
+// getTraktIDFromBody extracts Trakt ID from request body
+func (h *Handler) getTraktIDFromBody(w http.ResponseWriter, r *http.Request) (int64, error) {
+	var req struct {
+		TraktID int64 `json:"trakt_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid JSON", err.Error())
+		return 0, err
+	}
+
+	if req.TraktID <= 0 {
+		h.writeErrorResponse(w, http.StatusBadRequest, "Invalid parameter", "trakt_id must be a positive integer")
+		return 0, fmt.Errorf("invalid trakt_id")
+	}
+
+	return req.TraktID, nil
+}
+
+// startAsyncRefresh starts refresh operation asynchronously
+func (h *Handler) startAsyncRefresh() {
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.WithField("panic", rec).Error("Panic recovered in refresh handler")
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), RefreshTimeout)
+		defer cancel()
+
+		if err := h.appService.SearchTorrentsForNotDownloaded(ctx); err != nil {
+			log.WithError(err).Error("Failed to sync with Trakt and search torrents")
+		} else {
+			log.Info("Trakt sync and torrent search completed successfully")
+		}
+	}()
+}
+
+// getRefreshSteps returns the refresh operation steps
+func getRefreshSteps() []string {
+	return []string{
+		"1. Sync movies and episodes from Trakt watchlist and favorites",
+		"2. Clean up media no longer in Trakt lists",
+		"3. Find media not marked as downloaded",
+		"4. Search torrent providers (YGG, APIBay) for each media item",
+		"5. Check AllDebrid cache for available torrents",
+		"6. Mark cached torrents as downloaded",
+	}
+}
+
+// renderMediaPage renders the media HTML page
+func (h *Handler) renderMediaPage(w http.ResponseWriter, mediaList []*models.Media, stats *services.MediaStats, tmpl string) error {
+	t, err := template.New("media").Parse(tmpl)
+	if err != nil {
+		h.writeHTMLErrorResponse(w, http.StatusInternalServerError, "Template error", "There was an error creating the page template")
+		return err
+	}
+
+	type mediaData struct {
+		Trakt         int64
+		Title         string
+		Year          int64
+		Season        int64
+		Number        int64
+		OnDisk        bool
+		File          string
+		IsMovie       bool
+		IsDownloading bool
+		CreatedAt     time.Time
+		UpdatedAt     time.Time
+	}
+
+	safeMediaList := make([]mediaData, 0, len(mediaList))
+	for _, media := range mediaList {
+		safeMediaList = append(safeMediaList, mediaData{
+			Trakt:         media.Trakt,
+			Title:         media.Title,
+			Year:          media.Year,
+			Season:        media.Season,
+			Number:        media.Number,
+			OnDisk:        media.OnDisk,
+			File:          media.File,
+			IsMovie:       media.IsMovie(),
+			IsDownloading: false,
+			CreatedAt:     media.CreatedAt,
+			UpdatedAt:     media.UpdatedAt,
+		})
+	}
+
+	data := struct {
+		Media []mediaData
+		Stats struct {
+			Total       int
+			OnDisk      int
+			NotOnDisk   int
+			Movies      int
+			Episodes    int
+			Downloading int
+		}
+	}{
+		Media: safeMediaList,
+		Stats: struct {
+			Total       int
+			OnDisk      int
+			NotOnDisk   int
+			Movies      int
+			Episodes    int
+			Downloading int
+		}{
+			Total:       stats.Total,
+			OnDisk:      stats.OnDisk,
+			NotOnDisk:   stats.NotOnDisk,
+			Movies:      stats.Movies,
+			Episodes:    stats.Episodes,
+			Downloading: stats.Downloading,
+		},
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	return t.Execute(w, data)
 }

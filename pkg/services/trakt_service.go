@@ -59,17 +59,17 @@ func (s *TraktService) getOriginalLanguageFromTMDB(mediaType string, tmdbID int6
 		log.Debug("TMDB service not available for language lookup")
 		return ""
 	}
-	
+
 	if tmdbID == 0 {
 		log.Debug("TMDB ID is 0, skipping language lookup")
 		return ""
 	}
-	
+
 	log.WithFields(log.Fields{
 		"tmdb_id":    tmdbID,
 		"media_type": mediaType,
 	}).Info("Fetching original language from TMDB during sync")
-	
+
 	originalLang := s.tmdbService.GetOriginalLanguage(mediaType, tmdbID)
 	if originalLang != "" {
 		log.WithFields(log.Fields{
@@ -83,14 +83,14 @@ func (s *TraktService) getOriginalLanguageFromTMDB(mediaType string, tmdbID int6
 			"media_type": mediaType,
 		}).Warn("Failed to retrieve original language from TMDB")
 	}
-	
+
 	return originalLang
 }
 
 // SyncFromTraktWithContext synchronizes movies and episodes from Trakt with context support
 func (s *TraktService) SyncFromTraktWithContext(ctx context.Context) ([]int64, error) {
 	log.Info("Starting database sync from Trakt API")
-	
+
 	// Check context before starting
 	select {
 	case <-ctx.Done():
@@ -285,7 +285,7 @@ func (s *TraktService) createMovieMedia(movie *trakt.Movie) (*models.Media, erro
 		// Update existing media but preserve OnDisk status and File path
 		existing.Title = movie.Title
 		existing.Year = movie.Year
-		
+
 		// Update original language and French title if TMDB service is available
 		if existing.TMDBID > 0 && existing.OriginalLanguage == "" {
 			existing.OriginalLanguage = s.getOriginalLanguageFromTMDB("movie", existing.TMDBID)
@@ -294,7 +294,7 @@ func (s *TraktService) createMovieMedia(movie *trakt.Movie) (*models.Media, erro
 				existing.FrenchTitle = s.tmdbService.GetFrenchTitle("movie", existing.TMDBID, existing.Title)
 			}
 		}
-		
+
 		existing.UpdatedAt = time.Now()
 		return existing, nil
 	}
@@ -306,9 +306,9 @@ func (s *TraktService) createMovieMedia(movie *trakt.Movie) (*models.Media, erro
 		"title":    movie.Title,
 		"tmdb_id":  tmdbID,
 	}).Info("Creating new movie media during sync")
-	
+
 	originalLanguage := s.getOriginalLanguageFromTMDB("movie", tmdbID)
-	
+
 	// Get French title if original language is French
 	var frenchTitle string
 	if originalLanguage == "fr" && s.tmdbService != nil {
@@ -316,13 +316,13 @@ func (s *TraktService) createMovieMedia(movie *trakt.Movie) (*models.Media, erro
 		frenchTitle = s.tmdbService.GetFrenchTitle("movie", tmdbID, movie.Title)
 		if frenchTitle != "" {
 			log.WithFields(log.Fields{
-				"tmdb_id":      tmdbID,
-				"english":      movie.Title,
-				"french":       frenchTitle,
+				"tmdb_id": tmdbID,
+				"english": movie.Title,
+				"french":  frenchTitle,
 			}).Info("Successfully retrieved French title during sync")
 		}
 	}
-	
+
 	return &models.Media{
 		Trakt:            int64(movie.Trakt),
 		TMDBID:           tmdbID,
@@ -504,7 +504,7 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 		existing.Season = ep.Season
 		existing.Title = show.Title // Use show title for torrent searches
 		existing.Year = show.Year
-		
+
 		// Update original language and French title if TMDB service is available
 		if existing.TMDBID > 0 && existing.OriginalLanguage == "" {
 			existing.OriginalLanguage = s.getOriginalLanguageFromTMDB("show", existing.TMDBID)
@@ -513,7 +513,7 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 				existing.FrenchTitle = s.tmdbService.GetFrenchTitle("show", existing.TMDBID, existing.Title)
 			}
 		}
-		
+
 		existing.UpdatedAt = time.Now()
 
 		if err := s.repo.SaveMedia(existing); err != nil {
@@ -531,9 +531,9 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 		"season":   ep.Season,
 		"episode":  ep.Number,
 	}).Info("Creating new episode media during sync")
-	
+
 	originalLanguage := s.getOriginalLanguageFromTMDB("show", tmdbID)
-	
+
 	// Get French title if original language is French
 	var frenchTitle string
 	if originalLanguage == "fr" && s.tmdbService != nil {
@@ -541,13 +541,13 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 		frenchTitle = s.tmdbService.GetFrenchTitle("show", tmdbID, show.Title)
 		if frenchTitle != "" {
 			log.WithFields(log.Fields{
-				"tmdb_id":      tmdbID,
-				"english":      show.Title,
-				"french":       frenchTitle,
+				"tmdb_id": tmdbID,
+				"english": show.Title,
+				"french":  frenchTitle,
 			}).Info("Successfully retrieved French title during sync")
 		}
 	}
-	
+
 	media := &models.Media{
 		Trakt:            int64(ep.Trakt),
 		TMDBID:           tmdbID,
@@ -571,4 +571,3 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 
 	return nil
 }
-

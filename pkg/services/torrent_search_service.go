@@ -62,17 +62,17 @@ func NewTorrentSearchServiceWithTraktAndTMDBAndOrionoid(traktService *TraktServi
 // createService is a helper to create the service with proper providers
 func createService(traktService *TraktService, tmdbService *TMDBService) *TorrentSearchService {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	
+
 	providers := []TorrentSearchProvider{
 		CreateAPIBayProvider(httpClient),
 	}
-	
+
 	if tmdbService != nil {
 		providers = append(providers, CreateYGGProviderWithTMDB(httpClient, tmdbService))
 	} else {
 		providers = append(providers, CreateYGGProvider(httpClient))
 	}
-	
+
 	return &TorrentSearchService{
 		httpClient:   httpClient,
 		traktService: traktService,
@@ -113,20 +113,20 @@ func (s *TorrentSearchService) SearchWithLanguageAndFrenchTitle(title string, me
 	if provider == nil {
 		return nil, fmt.Errorf("no suitable provider found")
 	}
-	
+
 	query := s.buildQuery(searchTitle, mediaType, season, episode, year, 0)
-	
+
 	log.WithFields(log.Fields{
 		"provider": provider.GetName(),
 		"language": originalLanguage,
 		"query":    query,
 	}).Debug("Performing language-aware search")
-	
+
 	results, err := s.performProviderSearch(provider, query, mediaType, season, episode, tmdbID, title)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	s.applySorting(provider.GetName(), results)
 	return results, nil
 }
@@ -137,15 +137,15 @@ func (s *TorrentSearchService) searchWithFallback(title string, mediaType string
 	if provider == nil {
 		return nil, fmt.Errorf("no providers available")
 	}
-	
+
 	query := s.buildQuery(title, mediaType, season, episode, year, 0)
-	
+
 	results, err := provider.Search(query, mediaType, season, episode)
 	if err != nil {
 		log.WithError(err).WithField("provider", provider.GetName()).Error("Search failed")
 		return nil, err
 	}
-	
+
 	s.applySorting(provider.GetName(), results)
 	return results, nil
 }
@@ -153,7 +153,7 @@ func (s *TorrentSearchService) searchWithFallback(title string, mediaType string
 // searchAllProviders searches across all available providers
 func (s *TorrentSearchService) searchAllProviders(query string, mediaType string, season, episode int) ([]models.TorrentSearchResult, error) {
 	var allResults []models.TorrentSearchResult
-	
+
 	for _, provider := range s.providers {
 		results, err := provider.Search(query, mediaType, season, episode)
 		if err != nil {
@@ -162,7 +162,7 @@ func (s *TorrentSearchService) searchAllProviders(query string, mediaType string
 		}
 		allResults = append(allResults, results...)
 	}
-	
+
 	s.sortResults(allResults)
 	return allResults, nil
 }
@@ -171,29 +171,29 @@ func (s *TorrentSearchService) searchAllProviders(query string, mediaType string
 func (s *TorrentSearchService) selectProviderByLanguage(language, title, frenchTitle string) (TorrentSearchProvider, string) {
 	isFrench := language == "fr"
 	searchTitle := title
-	
+
 	if isFrench && frenchTitle != "" {
 		searchTitle = frenchTitle
 	}
-	
+
 	targetProvider := "APIBay"
 	if isFrench {
 		targetProvider = "YGG"
 	}
-	
+
 	// Find preferred provider
 	for _, provider := range s.providers {
 		if provider.GetName() == targetProvider {
 			return provider, searchTitle
 		}
 	}
-	
+
 	// Fallback to any available provider
 	if len(s.providers) > 0 {
 		log.WithField("target", targetProvider).Warn("Preferred provider not found, using fallback")
 		return s.providers[0], searchTitle
 	}
-	
+
 	return nil, searchTitle
 }
 
@@ -205,12 +205,12 @@ func (s *TorrentSearchService) selectFallbackProvider() TorrentSearchProvider {
 			return provider
 		}
 	}
-	
+
 	// Fallback to first available
 	if len(s.providers) > 0 {
 		return s.providers[0]
 	}
-	
+
 	return nil
 }
 
@@ -222,7 +222,7 @@ func (s *TorrentSearchService) performProviderSearch(provider TorrentSearchProvi
 			return yggProvider.SearchWithStoredFrenchTitle(query, mediaType, season, episode, tmdbID, englishTitle)
 		}
 	}
-	
+
 	return provider.Search(query, mediaType, season, episode)
 }
 
@@ -230,7 +230,7 @@ func (s *TorrentSearchService) performProviderSearch(provider TorrentSearchProvi
 func (s *TorrentSearchService) buildQuery(title string, mediaType string, season, episode, year int, traktID int64) string {
 	encodedTitle := strings.ReplaceAll(title, " ", "+")
 	var query string
-	
+
 	switch mediaType {
 	case "movie":
 		if year > 0 {
@@ -247,12 +247,12 @@ func (s *TorrentSearchService) buildQuery(title string, mediaType string, season
 	default:
 		query = encodedTitle
 	}
-	
+
 	// Add Trakt ID suffix if available
 	if traktID > 0 {
 		query = fmt.Sprintf("%s [%d]", query, traktID)
 	}
-	
+
 	return query
 }
 

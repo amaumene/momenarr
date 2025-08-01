@@ -1,3 +1,4 @@
+// Package utils provides utility functions used across the application
 package utils
 
 import (
@@ -26,7 +27,7 @@ func LogTorrentSearchResultOperation(operation string, result *models.TorrentSea
 }
 
 // LogDownloadOperation returns a log entry with download-related fields
-func LogDownloadOperation(operation string, traktID int, title string) *log.Entry {
+func LogDownloadOperation(operation string, traktID int64, title string) *log.Entry {
 	return log.WithFields(log.Fields{
 		"trakt_id":  traktID,
 		"title":     title,
