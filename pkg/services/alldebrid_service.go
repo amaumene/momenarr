@@ -34,26 +34,72 @@ func NewAllDebridService(repo repository.Repository, apiKey string) *AllDebridSe
 func (s *AllDebridService) IsTorrentCached(hash string) (bool, int64, error) {
 	magnetURL := fmt.Sprintf("magnet:?xt=urn:btih:%s", hash)
 
-	// Upload magnet to check if it's cached (AllDebrid will instantly download if cached)
+	uploadResult, err := s.uploadMagnetForCheck(magnetURL)
+	if err != nil {
+		return false, 0, err
+	}
+
+	magnet, err := s.validateUploadResult(uploadResult)
+	if err != nil {
+		return false, 0, err
+	}
+
+	return s.handleCacheCheck(magnet)
+}
+
+// uploadMagnetForCheck uploads magnet to check if cached
+func (s *AllDebridService) uploadMagnetForCheck(magnetURL string) (*MagnetUploadResponse, error) {
 	uploadResult, err := s.client.UploadMagnet([]string{magnetURL})
 	if err != nil {
-		return false, 0, fmt.Errorf("failed to upload magnet: %w", err)
+		return nil, fmt.Errorf("failed to upload magnet: %w", err)
+	}
+	return uploadResult, nil
+}
+
+// validateUploadResult validates the upload response
+func (s *AllDebridService) validateUploadResult(result *MagnetUploadResponse) (*struct {
+	ID    int    `json:"id"`
+	Hash  string `json:"hash"`
+	Name  string `json:"name"`
+	Size  int64  `json:"size"`
+	Ready bool   `json:"ready"`
+	Error *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}, error) {
+	if result.Error != nil {
+		return nil, fmt.Errorf("upload error: %s", result.Error.Message)
 	}
 
-	if uploadResult.Error != nil {
-		return false, 0, fmt.Errorf("upload error: %s", uploadResult.Error.Message)
+	if len(result.Data.Magnets) == 0 {
+		return nil, nil
 	}
 
-	if len(uploadResult.Data.Magnets) == 0 {
+	magnet := &result.Data.Magnets[0]
+	if magnet.Error != nil {
+		return nil, fmt.Errorf("magnet error: %s", magnet.Error.Message)
+	}
+
+	return magnet, nil
+}
+
+// handleCacheCheck handles the cache check result
+func (s *AllDebridService) handleCacheCheck(magnet *struct {
+	ID    int    `json:"id"`
+	Hash  string `json:"hash"`
+	Name  string `json:"name"`
+	Size  int64  `json:"size"`
+	Ready bool   `json:"ready"`
+	Error *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}) (bool, int64, error) {
+	if magnet == nil {
 		return false, 0, nil
 	}
 
-	magnet := uploadResult.Data.Magnets[0]
-	if magnet.Error != nil {
-		return false, 0, fmt.Errorf("magnet error: %s", magnet.Error.Message)
-	}
-
-	// If Ready is true, it was cached
 	if magnet.Ready {
 		return true, int64(magnet.ID), nil
 	}
@@ -68,42 +114,84 @@ func (s *AllDebridService) IsTorrentCached(hash string) (bool, int64, error) {
 
 // UploadTorrent uploads a torrent to AllDebrid and returns the AllDebrid ID
 func (s *AllDebridService) UploadTorrent(result *models.TorrentSearchResult) (int64, error) {
-	magnetURL := result.MagnetURL
-	if magnetURL == "" {
-		magnetURL = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", result.Hash, url.QueryEscape(result.Title))
+	magnetURL := s.buildMagnetURL(result)
+	s.logTorrentUpload(result, magnetURL)
+
+	uploadResult, err := s.uploadMagnet(magnetURL)
+	if err != nil {
+		return 0, err
 	}
 
+	magnet, err := s.processMagnetUpload(uploadResult)
+	if err != nil {
+		return 0, err
+	}
+
+	s.logSuccessfulUpload(result, magnet.ID)
+	return int64(magnet.ID), nil
+}
+
+// buildMagnetURL builds magnet URL from torrent result
+func (s *AllDebridService) buildMagnetURL(result *models.TorrentSearchResult) string {
+	if result.MagnetURL != "" {
+		return result.MagnetURL
+	}
+	return fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", result.Hash, url.QueryEscape(result.Title))
+}
+
+// logTorrentUpload logs torrent upload details
+func (s *AllDebridService) logTorrentUpload(result *models.TorrentSearchResult, magnetURL string) {
 	log.WithFields(log.Fields{
 		"hash":       result.Hash,
 		"title":      result.Title,
 		"magnet_url": magnetURL,
 	}).Debug("Uploading torrent to AllDebrid")
+}
 
+// uploadMagnet uploads magnet URL to AllDebrid
+func (s *AllDebridService) uploadMagnet(magnetURL string) (*MagnetUploadResponse, error) {
 	uploadResult, err := s.client.UploadMagnet([]string{magnetURL})
 	if err != nil {
-		return 0, fmt.Errorf("failed to upload magnet to AllDebrid: %w", err)
+		return nil, fmt.Errorf("failed to upload magnet to AllDebrid: %w", err)
 	}
+	return uploadResult, nil
+}
 
+// processMagnetUpload processes the magnet upload response
+func (s *AllDebridService) processMagnetUpload(uploadResult *MagnetUploadResponse) (*struct {
+	ID    int    `json:"id"`
+	Hash  string `json:"hash"`
+	Name  string `json:"name"`
+	Size  int64  `json:"size"`
+	Ready bool   `json:"ready"`
+	Error *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}, error) {
 	if uploadResult.Error != nil {
-		return 0, fmt.Errorf("upload error: %s", uploadResult.Error.Message)
+		return nil, fmt.Errorf("upload error: %s", uploadResult.Error.Message)
 	}
 
 	if len(uploadResult.Data.Magnets) == 0 {
-		return 0, fmt.Errorf("no magnet data returned from AllDebrid")
+		return nil, fmt.Errorf("no magnet data returned from AllDebrid")
 	}
 
-	magnet := uploadResult.Data.Magnets[0]
+	magnet := &uploadResult.Data.Magnets[0]
 	if magnet.Error != nil {
-		return 0, fmt.Errorf("magnet upload error: %s", magnet.Error.Message)
+		return nil, fmt.Errorf("magnet upload error: %s", magnet.Error.Message)
 	}
 
+	return magnet, nil
+}
+
+// logSuccessfulUpload logs successful torrent upload
+func (s *AllDebridService) logSuccessfulUpload(result *models.TorrentSearchResult, magnetID int) {
 	log.WithFields(log.Fields{
 		"hash":         result.Hash,
 		"title":        result.Title,
-		"alldebrid_id": magnet.ID,
+		"alldebrid_id": magnetID,
 	}).Info("Successfully uploaded torrent to AllDebrid")
-
-	return int64(magnet.ID), nil
 }
 
 // WaitForTorrentReady waits for a torrent to be ready in AllDebrid
@@ -114,57 +202,122 @@ func (s *AllDebridService) WaitForTorrentReady(allDebridID int64, timeout time.D
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
+	return s.pollTorrentStatus(ctx, ticker, allDebridID)
+}
+
+// pollTorrentStatus polls torrent status until ready or timeout
+func (s *AllDebridService) pollTorrentStatus(ctx context.Context, ticker *time.Ticker, allDebridID int64) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for torrent to be ready")
 		case <-ticker.C:
-			result, err := s.client.GetMagnetStatus(int(allDebridID))
-			if err != nil {
+			if ready, err := s.checkTorrentReady(allDebridID); err != nil {
 				log.WithError(err).Debug("Failed to get magnet status, retrying...")
 				continue
-			}
-
-			if result.Data.Magnet.Ready {
-				log.WithFields(log.Fields{
-					"status":      result.Data.Magnet.Status,
-					"status_code": result.Data.Magnet.StatusCode,
-				}).Debug("Torrent is ready")
+			} else if ready {
 				return nil
 			}
-
-			log.WithFields(log.Fields{
-				"status":      result.Data.Magnet.Status,
-				"status_code": result.Data.Magnet.StatusCode,
-			}).Debug("Torrent not ready yet, waiting...")
 		}
+	}
+}
+
+// checkTorrentReady checks if torrent is ready
+func (s *AllDebridService) checkTorrentReady(allDebridID int64) (bool, error) {
+	result, err := s.client.GetMagnetStatus(int(allDebridID))
+	if err != nil {
+		return false, err
+	}
+
+	magnetStatus := result.Data.Magnet
+	s.logTorrentStatus(magnetStatus.Status, magnetStatus.StatusCode, magnetStatus.Ready)
+
+	return magnetStatus.Ready, nil
+}
+
+// logTorrentStatus logs torrent status
+func (s *AllDebridService) logTorrentStatus(status string, statusCode int, ready bool) {
+	fields := log.Fields{
+		"status":      status,
+		"status_code": statusCode,
+	}
+
+	if ready {
+		log.WithFields(fields).Debug("Torrent is ready")
+	} else {
+		log.WithFields(fields).Debug("Torrent not ready yet, waiting...")
 	}
 }
 
 // DownloadFile downloads a file from AllDebrid
 func (s *AllDebridService) DownloadFile(allDebridID int64, torrentResult *models.TorrentSearchResult, media *models.Media) error {
-	// Get magnet files
+	magnetFiles, err := s.getMagnetFiles(allDebridID)
+	if err != nil {
+		return err
+	}
+
+	if torrentResult.IsSeasonPack() {
+		return s.handleSeasonPack(torrentResult, magnetFiles, media)
+	}
+
+	return s.downloadBestVideoFile(magnetFiles, media)
+}
+
+// getMagnetFiles retrieves files for a magnet
+func (s *AllDebridService) getMagnetFiles(allDebridID int64) (*struct {
+	ID    int `json:"id"`
+	Files []struct {
+		Name string `json:"n"`
+		Size int64  `json:"s"`
+		Link string `json:"l"`
+	} `json:"files"`
+}, error) {
 	result, err := s.client.GetMagnetFiles(int(allDebridID))
 	if err != nil {
-		return fmt.Errorf("failed to get magnet files: %w", err)
+		return nil, fmt.Errorf("failed to get magnet files: %w", err)
 	}
 
 	if result.Error != nil {
-		return fmt.Errorf("get files error: %s", result.Error.Message)
+		return nil, fmt.Errorf("get files error: %s", result.Error.Message)
 	}
 
 	if len(result.Data.Magnets) == 0 {
-		return fmt.Errorf("no files found for magnet")
+		return nil, fmt.Errorf("no files found for magnet")
 	}
 
-	magnetFiles := result.Data.Magnets[0]
+	return &result.Data.Magnets[0], nil
+}
 
-	// Handle season packs
-	if torrentResult.IsSeasonPack() {
-		return s.handleSeasonPack(torrentResult, &magnetFiles, media)
+// downloadBestVideoFile finds and downloads the best video file
+func (s *AllDebridService) downloadBestVideoFile(magnetFiles *struct {
+	ID    int `json:"id"`
+	Files []struct {
+		Name string `json:"n"`
+		Size int64  `json:"s"`
+		Link string `json:"l"`
+	} `json:"files"`
+}, media *models.Media) error {
+	bestFile := s.findBestVideoFile(magnetFiles)
+	if bestFile == nil {
+		return fmt.Errorf("no video file found in torrent")
 	}
 
-	// For single episodes or movies, find the best video file
+	return s.downloadSingleFile(bestFile.Link, bestFile.Name, media)
+}
+
+// findBestVideoFile finds the largest video file
+func (s *AllDebridService) findBestVideoFile(magnetFiles *struct {
+	ID    int `json:"id"`
+	Files []struct {
+		Name string `json:"n"`
+		Size int64  `json:"s"`
+		Link string `json:"l"`
+	} `json:"files"`
+}) *struct {
+	Name string `json:"n"`
+	Size int64  `json:"s"`
+	Link string `json:"l"`
+} {
 	var bestFile *struct {
 		Name string `json:"n"`
 		Size int64  `json:"s"`
@@ -180,12 +333,7 @@ func (s *AllDebridService) DownloadFile(allDebridID int64, torrentResult *models
 		}
 	}
 
-	if bestFile == nil {
-		return fmt.Errorf("no video file found in torrent")
-	}
-
-	// Generate download link and mark as available
-	return s.downloadSingleFile(bestFile.Link, bestFile.Name, media)
+	return bestFile
 }
 
 // handleSeasonPack handles downloading files from a season pack
@@ -197,7 +345,25 @@ func (s *AllDebridService) handleSeasonPack(torrentResult *models.TorrentSearchR
 		Link string `json:"l"`
 	} `json:"files"`
 }, media *models.Media) error {
-	// Extract episode numbers from files
+	episodeFiles := s.extractEpisodeFiles(torrentResult, magnet)
+	s.logSeasonPackInfo(torrentResult, episodeFiles)
+
+	return s.downloadRequestedEpisode(episodeFiles, media)
+}
+
+// extractEpisodeFiles extracts episode files from season pack
+func (s *AllDebridService) extractEpisodeFiles(torrentResult *models.TorrentSearchResult, magnet *struct {
+	ID    int `json:"id"`
+	Files []struct {
+		Name string `json:"n"`
+		Size int64  `json:"s"`
+		Link string `json:"l"`
+	} `json:"files"`
+}) map[int]*struct {
+	Name string `json:"n"`
+	Size int64  `json:"s"`
+	Link string `json:"l"`
+} {
 	episodeFiles := make(map[int]*struct {
 		Name string `json:"n"`
 		Size int64  `json:"s"`
@@ -209,22 +375,45 @@ func (s *AllDebridService) handleSeasonPack(torrentResult *models.TorrentSearchR
 
 	for i := range magnet.Files {
 		file := &magnet.Files[i]
-		if !isVideoFile(file.Name) {
-			continue
-		}
-
-		matches := episodeRegex.FindStringSubmatch(file.Name)
-		if len(matches) == 3 {
-			fileSeason, _ := strconv.Atoi(matches[1])
-			episode, _ := strconv.Atoi(matches[2])
-
-			if fileSeason == season {
-				episodeFiles[episode] = file
-			}
+		if episode := s.extractEpisodeFromFile(file, episodeRegex, season); episode > 0 {
+			episodeFiles[episode] = file
 		}
 	}
 
-	// Log episodes found in pack
+	return episodeFiles
+}
+
+// extractEpisodeFromFile extracts episode number from file
+func (s *AllDebridService) extractEpisodeFromFile(file *struct {
+	Name string `json:"n"`
+	Size int64  `json:"s"`
+	Link string `json:"l"`
+}, regex *regexp.Regexp, targetSeason int) int {
+	if !isVideoFile(file.Name) {
+		return 0
+	}
+
+	matches := regex.FindStringSubmatch(file.Name)
+	if len(matches) != 3 {
+		return 0
+	}
+
+	fileSeason, _ := strconv.Atoi(matches[1])
+	episode, _ := strconv.Atoi(matches[2])
+
+	if fileSeason == targetSeason {
+		return episode
+	}
+	return 0
+}
+
+// logSeasonPackInfo logs season pack information
+func (s *AllDebridService) logSeasonPackInfo(torrentResult *models.TorrentSearchResult,
+	episodeFiles map[int]*struct {
+		Name string `json:"n"`
+		Size int64  `json:"s"`
+		Link string `json:"l"`
+	}) {
 	var episodesInPack []int
 	for ep := range episodeFiles {
 		episodesInPack = append(episodesInPack, ep)
@@ -232,15 +421,20 @@ func (s *AllDebridService) handleSeasonPack(torrentResult *models.TorrentSearchR
 
 	log.WithFields(log.Fields{
 		"torrent_title":    torrentResult.Title,
-		"season":           season,
+		"season":           torrentResult.ExtractSeason(),
 		"episodes_in_pack": episodesInPack,
 	}).Info("Found episodes in season pack")
+}
 
-	// Download only the requested episode
+// downloadRequestedEpisode downloads the requested episode from pack
+func (s *AllDebridService) downloadRequestedEpisode(episodeFiles map[int]*struct {
+	Name string `json:"n"`
+	Size int64  `json:"s"`
+	Link string `json:"l"`
+}, media *models.Media) error {
 	if file, ok := episodeFiles[int(media.Number)]; ok {
 		return s.downloadSingleFile(file.Link, file.Name, media)
 	}
-
 	return fmt.Errorf("episode %d not found in season pack", media.Number)
 }
 

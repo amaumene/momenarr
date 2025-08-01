@@ -1,4 +1,4 @@
-// Package services contains business logic and service layer components
+// Package services contains business logic and service layer components for momenarr.
 package services
 
 import (
@@ -24,7 +24,7 @@ type AppService struct {
 	cleanupService  *CleanupService
 }
 
-// CreateAppService creates a new application service instance
+// CreateAppService creates a new application service instance.
 func CreateAppService(
 	repo repository.Repository,
 	traktService *TraktService,
@@ -41,11 +41,22 @@ func CreateAppService(
 	}
 }
 
-// RunTasks executes all main application tasks
+// RunTasks executes all main application tasks.
 func (s *AppService) RunTasks(ctx context.Context) error {
 	log.Info("starting application tasks")
 	startTime := time.Now()
 
+	if err := s.executeTasks(ctx); err != nil {
+		return err
+	}
+
+	duration := time.Since(startTime)
+	log.WithField("duration", duration).Info("completed all application tasks successfully")
+	return nil
+}
+
+// executeTasks runs all application tasks in sequence
+func (s *AppService) executeTasks(ctx context.Context) error {
 	services := s.getServices()
 
 	if _, err := s.syncFromTrakt(ctx); err != nil {
@@ -60,14 +71,8 @@ func (s *AppService) RunTasks(ctx context.Context) error {
 		return utils.WrapServiceError("download media not on disk", err)
 	}
 
-	if err := services.cleanup.CleanWatchedWithContext(ctx); err != nil {
-		return utils.WrapServiceError("clean watched media", err)
-	}
-
-	duration := time.Since(startTime)
-	log.WithField("duration", duration).Info("completed all application tasks successfully")
-
-	return nil
+	return utils.WrapServiceError("clean watched media",
+		services.cleanup.CleanWatchedWithContext(ctx))
 }
 
 // syncFromTrakt handles the Trakt synchronization and cleanup
@@ -93,21 +98,10 @@ func (s *AppService) cleanupRemovedMedia(ctx context.Context, currentTraktIDs []
 	currentIDs := createIDLookup(currentTraktIDs)
 	removedCount := 0
 
-	err := s.repo.ProcessMediaBatchesWithContext(ctx, 100, func(batch []*models.Media) error {
-		if err := utils.CheckContextCancellation(ctx); err != nil {
-			return err
-		}
-
-		for _, media := range batch {
-			if !currentIDs[media.Trakt] {
-				if err := s.removeMedia(ctx, media); err != nil {
-					continue
-				}
-				removedCount++
-			}
-		}
-		return nil
-	})
+	err := s.repo.ProcessMediaBatchesWithContext(ctx, 100,
+		func(batch []*models.Media) error {
+			return s.processBatchForCleanup(ctx, batch, currentIDs, &removedCount)
+		})
 
 	if err != nil {
 		return fmt.Errorf("processing media batches for cleanup: %w", err)
@@ -117,6 +111,24 @@ func (s *AppService) cleanupRemovedMedia(ctx context.Context, currentTraktIDs []
 		log.WithField("count", removedCount).Info("removed media no longer in trakt lists")
 	}
 
+	return nil
+}
+
+// processBatchForCleanup processes a batch of media for cleanup
+func (s *AppService) processBatchForCleanup(ctx context.Context, batch []*models.Media,
+	currentIDs map[int64]bool, removedCount *int) error {
+	if err := utils.CheckContextCancellation(ctx); err != nil {
+		return err
+	}
+
+	for _, media := range batch {
+		if !currentIDs[media.Trakt] {
+			if err := s.removeMedia(ctx, media); err != nil {
+				continue
+			}
+			*removedCount++
+		}
+	}
 	return nil
 }
 

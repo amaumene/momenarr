@@ -91,13 +91,39 @@ func (s *TraktService) getOriginalLanguageFromTMDB(mediaType string, tmdbID int6
 func (s *TraktService) SyncFromTraktWithContext(ctx context.Context) ([]int64, error) {
 	log.Info("Starting database sync from Trakt API")
 
-	// Check context before starting
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	if err := s.checkContext(ctx); err != nil {
+		return nil, err
 	}
 
+	movies, err := s.syncMoviesWithLogging(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.checkContext(ctx); err != nil {
+		return nil, err
+	}
+
+	episodes, err := s.syncEpisodesWithLogging(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.mergeAndLogResults(movies, episodes)
+}
+
+// checkContext checks if context is cancelled
+func (s *TraktService) checkContext(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+// syncMoviesWithLogging syncs movies with logging
+func (s *TraktService) syncMoviesWithLogging(ctx context.Context) ([]int64, error) {
 	log.Info("Syncing movies from Trakt watchlist and favorites")
 	movies, err := s.syncMoviesFromTraktWithContext(ctx)
 	if err != nil {
@@ -105,14 +131,11 @@ func (s *TraktService) SyncFromTraktWithContext(ctx context.Context) ([]int64, e
 		return nil, fmt.Errorf("syncing movies from Trakt: %w", err)
 	}
 	log.WithField("count", len(movies)).Info("Completed movie sync from Trakt")
+	return movies, nil
+}
 
-	// Check context between operations
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
+// syncEpisodesWithLogging syncs episodes with logging
+func (s *TraktService) syncEpisodesWithLogging(ctx context.Context) ([]int64, error) {
 	log.Info("Syncing TV episodes from Trakt watchlist and favorites")
 	episodes, err := s.syncEpisodesFromTraktWithContext(ctx)
 	if err != nil {
@@ -120,14 +143,17 @@ func (s *TraktService) SyncFromTraktWithContext(ctx context.Context) ([]int64, e
 		return nil, fmt.Errorf("syncing episodes from Trakt: %w", err)
 	}
 	log.WithField("count", len(episodes)).Info("Completed episode sync from Trakt")
+	return episodes, nil
+}
 
+// mergeAndLogResults merges results and logs summary
+func (s *TraktService) mergeAndLogResults(movies, episodes []int64) ([]int64, error) {
 	merged := append(movies, episodes...)
 	if len(merged) == 0 {
 		return nil, fmt.Errorf("no media found during sync")
 	}
 
 	log.WithField("total_items", len(merged)).Info("Database sync from Trakt completed")
-
 	log.WithFields(log.Fields{
 		"movies":   len(movies),
 		"episodes": len(episodes),

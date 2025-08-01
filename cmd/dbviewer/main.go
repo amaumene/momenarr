@@ -1,3 +1,4 @@
+// Package main provides a database viewer for the momenarr application.
 package main
 
 import (
@@ -13,17 +14,33 @@ import (
 	"github.com/amaumene/momenarr/pkg/models"
 )
 
-// Colors for terminal output
 const (
-	ColorReset  = "\033[0m"
-	ColorRed    = "\033[31m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorBlue   = "\033[34m"
-	ColorPurple = "\033[35m"
-	ColorCyan   = "\033[36m"
-	ColorWhite  = "\033[37m"
-	ColorBold   = "\033[1m"
+	// ANSI color codes
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorPurple = "\033[35m"
+	colorCyan   = "\033[36m"
+	colorWhite  = "\033[37m"
+	colorBold   = "\033[1m"
+
+	// Database settings
+	dbFileMode = 0600
+
+	// Display constants
+	maxLineWidth    = 80
+	separatorChar   = "─"
+	headerBoxChar   = "═"
+	completedIcon   = "✅"
+	downloadingIcon = "⬇️"
+	wantedIcon      = "⏳"
+	movieIcon       = "🎬"
+	episodeIcon     = "📺"
+	frenchFlagIcon  = "🇫🇷"
+	folderIcon      = "📁"
+	statsIcon       = "📊"
 )
 
 // MediaStats holds statistics about the media collection
@@ -37,76 +54,103 @@ type MediaStats struct {
 	UniqueShows int
 }
 
+// flags holds command line flags
+type flags struct {
+	dbPath     *string
+	showStats  *bool
+	showMovies *bool
+	showShows  *bool
+	onDiskOnly *bool
+	noColor    *bool
+	detailed   *bool
+	sortBy     *string
+}
+
 func main() {
-	var (
-		dbPath     = flag.String("db", "", "Path to the database file (required)")
-		showStats  = flag.Bool("stats", false, "Show only statistics")
-		showMovies = flag.Bool("movies", false, "Show only movies")
-		showShows  = flag.Bool("shows", false, "Show only TV shows")
-		onDiskOnly = flag.Bool("ondisk", false, "Show only media on disk")
-		noColor    = flag.Bool("no-color", false, "Disable colored output")
-		detailed   = flag.Bool("detailed", false, "Show detailed information including Trakt ID")
-		sortBy     = flag.String("sort", "title", "Sort by: title, year, created, updated, status")
-	)
-	flag.Parse()
+	flags := parseFlags()
 
-	if *dbPath == "" {
-		fmt.Fprintf(os.Stderr, "Usage: %s -db <database-path> [options]\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "\nOptions:\n")
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExample:\n")
-		fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -stats\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -movies -ondisk\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -detailed\n", os.Args[0])
-		os.Exit(1)
-	}
+	validateFlags(flags)
 
-	// Check if database file exists
-	if _, err := os.Stat(*dbPath); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "Error: Database file '%s' does not exist\n", *dbPath)
-		os.Exit(1)
-	}
-
-	// Open database
-	store, err := bolthold.Open(*dbPath, 0600, &bolthold.Options{})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
-		os.Exit(1)
-	}
+	store := openDatabaseStore(flags.dbPath)
 	defer store.Close()
 
-	// Fetch all media
-	var mediaItems []*models.Media
-	err = store.Find(&mediaItems, nil)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading media from database: %v\n", err)
+	mediaItems := fetchAllMedia(store)
+
+	processAndDisplay(flags, store, mediaItems)
+}
+
+// parseFlags parses command line flags
+func parseFlags() *flags {
+	return &flags{
+		dbPath:     flag.String("db", "", "Path to the database file (required)"),
+		showStats:  flag.Bool("stats", false, "Show only statistics"),
+		showMovies: flag.Bool("movies", false, "Show only movies"),
+		showShows:  flag.Bool("shows", false, "Show only TV shows"),
+		onDiskOnly: flag.Bool("ondisk", false, "Show only media on disk"),
+		noColor:    flag.Bool("no-color", false, "Disable colored output"),
+		detailed:   flag.Bool("detailed", false, "Show detailed information including Trakt ID"),
+		sortBy:     flag.String("sort", "title", "Sort by: title, year, created, updated, status"),
+	}
+}
+
+// validateFlags validates command line flags
+func validateFlags(f *flags) {
+	flag.Parse()
+
+	if *f.dbPath == "" {
+		printUsage()
 		os.Exit(1)
 	}
 
-	// Filter media based on flags
-	filteredMedia := filterMedia(mediaItems, *showMovies, *showShows, *onDiskOnly)
+	if _, err := os.Stat(*f.dbPath); os.IsNotExist(err) {
+		exitWithError("Database file '%s' does not exist", *f.dbPath)
+	}
+}
 
-	// Sort media
-	sortMedia(filteredMedia, *sortBy)
+// printUsage prints usage information
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "Usage: %s -db <database-path> [options]\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "\nOptions:\n")
+	flag.PrintDefaults()
+	fmt.Fprintf(os.Stderr, "\nExample:\n")
+	fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -stats\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -movies -ondisk\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -detailed\n", os.Args[0])
+}
 
-	// Calculate statistics
+// openDatabaseStore opens the database store
+func openDatabaseStore(dbPath *string) *bolthold.Store {
+	store, err := bolthold.Open(*dbPath, dbFileMode, &bolthold.Options{})
+	if err != nil {
+		exitWithError("Error opening database: %v", err)
+	}
+	return store
+}
+
+// fetchAllMedia fetches all media from the database
+func fetchAllMedia(store *bolthold.Store) []*models.Media {
+	var mediaItems []*models.Media
+	if err := store.Find(&mediaItems, nil); err != nil {
+		exitWithError("Error reading media from database: %v", err)
+	}
+	return mediaItems
+}
+
+// processAndDisplay processes and displays media based on flags
+func processAndDisplay(f *flags, store *bolthold.Store, mediaItems []*models.Media) {
+	filteredMedia := filterMedia(mediaItems, *f.showMovies, *f.showShows, *f.onDiskOnly)
+	sortMedia(filteredMedia, *f.sortBy)
 	stats := calculateStats(mediaItems)
+	colorize := getColorizer(*f.noColor)
 
-	// Set color functions
-	colorize := getColorizer(*noColor)
+	printHeader(colorize, *f.dbPath, len(filteredMedia), len(mediaItems))
 
-	// Print header
-	printHeader(colorize, *dbPath, len(filteredMedia), len(mediaItems))
-
-	if *showStats {
+	if *f.showStats {
 		printStatistics(colorize, stats)
 		return
 	}
 
-	// Print media collection
-	printMediaCollection(colorize, filteredMedia, store, *detailed)
-
-	// Print summary statistics
+	printMediaCollection(colorize, filteredMedia, store, *f.detailed)
 	fmt.Print("\n" + colorize("cyan", "=== SUMMARY ===") + "\n")
 	printStatistics(colorize, stats)
 }
@@ -175,35 +219,51 @@ func calculateStats(media []*models.Media) MediaStats {
 
 	for _, item := range media {
 		stats.TotalItems++
-
-		if item.IsMovie() {
-			stats.Movies++
-		} else {
-			stats.Episodes++
-			// Extract show title (remove episode info)
-			showTitle := item.Title
-			if strings.Contains(showTitle, " - ") {
-				parts := strings.Split(showTitle, " - ")
-				if len(parts) > 0 {
-					showTitle = parts[0]
-				}
-			}
-			shows[showTitle] = true
-		}
-
-		if item.OnDisk {
-			stats.OnDisk++
-		} else {
-			stats.NotOnDisk++
-		}
-
-		if item.DownloadID > 0 {
-			stats.Downloading++
-		}
+		updateMediaTypeStats(&stats, item, shows)
+		updateDiskStats(&stats, item)
+		updateDownloadStats(&stats, item)
 	}
 
 	stats.UniqueShows = len(shows)
 	return stats
+}
+
+// updateMediaTypeStats updates movie/episode counts
+func updateMediaTypeStats(stats *MediaStats, item *models.Media, shows map[string]bool) {
+	if item.IsMovie() {
+		stats.Movies++
+	} else {
+		stats.Episodes++
+		showTitle := extractShowTitle(item.Title)
+		shows[showTitle] = true
+	}
+}
+
+// extractShowTitle extracts show title from episode title
+func extractShowTitle(title string) string {
+	if strings.Contains(title, " - ") {
+		parts := strings.Split(title, " - ")
+		if len(parts) > 0 {
+			return parts[0]
+		}
+	}
+	return title
+}
+
+// updateDiskStats updates on-disk/not-on-disk counts
+func updateDiskStats(stats *MediaStats, item *models.Media) {
+	if item.OnDisk {
+		stats.OnDisk++
+	} else {
+		stats.NotOnDisk++
+	}
+}
+
+// updateDownloadStats updates downloading count
+func updateDownloadStats(stats *MediaStats, item *models.Media) {
+	if item.DownloadID > 0 {
+		stats.Downloading++
+	}
 }
 
 func getColorizer(noColor bool) func(string, string) string {
@@ -212,35 +272,41 @@ func getColorizer(noColor bool) func(string, string) string {
 	}
 
 	colors := map[string]string{
-		"red":    ColorRed,
-		"green":  ColorGreen,
-		"yellow": ColorYellow,
-		"blue":   ColorBlue,
-		"purple": ColorPurple,
-		"cyan":   ColorCyan,
-		"white":  ColorWhite,
-		"bold":   ColorBold,
+		"red":    colorRed,
+		"green":  colorGreen,
+		"yellow": colorYellow,
+		"blue":   colorBlue,
+		"purple": colorPurple,
+		"cyan":   colorCyan,
+		"white":  colorWhite,
+		"bold":   colorBold,
 	}
 
 	return func(color, text string) string {
 		if c, ok := colors[color]; ok {
-			return c + text + ColorReset
+			return c + text + colorReset
 		}
 		return text
 	}
 }
 
 func printHeader(colorize func(string, string) string, dbPath string, filtered, total int) {
-	fmt.Print(colorize("bold", "╔══════════════════════════════════════════════════════════════════════════════╗\n"))
-	fmt.Print(colorize("bold", "║") + colorize("cyan", "                          MOMENARR DATABASE VIEWER                          ") + colorize("bold", "║\n"))
-	fmt.Print(colorize("bold", "╚══════════════════════════════════════════════════════════════════════════════╝\n"))
+	boxTop := "╔" + strings.Repeat(headerBoxChar, maxLineWidth-2) + "╗\n"
+	boxBottom := "╚" + strings.Repeat(headerBoxChar, maxLineWidth-2) + "╝\n"
+	title := "MOMENARR DATABASE VIEWER"
+	padding := (maxLineWidth - 2 - len(title)) / 2
+	paddedTitle := strings.Repeat(" ", padding) + title + strings.Repeat(" ", maxLineWidth-2-len(title)-padding)
+
+	fmt.Print(colorize("bold", boxTop))
+	fmt.Print(colorize("bold", "║") + colorize("cyan", paddedTitle) + colorize("bold", "║\n"))
+	fmt.Print(colorize("bold", boxBottom))
 	fmt.Printf(colorize("yellow", "Database: ")+"%s\n", filepath.Base(dbPath))
 	fmt.Printf(colorize("yellow", "Showing: ")+"%d of %d items\n", filtered, total)
 	fmt.Printf(colorize("yellow", "Scanned: ")+"%s\n\n", time.Now().Format("2006-01-02 15:04:05"))
 }
 
 func printStatistics(colorize func(string, string) string, stats MediaStats) {
-	fmt.Print(colorize("bold", "📊 COLLECTION STATISTICS\n"))
+	fmt.Print(colorize("bold", fmt.Sprintf("%s COLLECTION STATISTICS\n", statsIcon)))
 	fmt.Printf("  Total Items:     %s\n", colorize("white", fmt.Sprintf("%d", stats.TotalItems)))
 	fmt.Printf("  Movies:          %s\n", colorize("blue", fmt.Sprintf("%d", stats.Movies)))
 	fmt.Printf("  TV Episodes:     %s\n", colorize("purple", fmt.Sprintf("%d", stats.Episodes)))
@@ -263,57 +329,85 @@ func printMediaCollection(colorize func(string, string) string, media []*models.
 		printMediaItem(colorize, item, i+1, detailed)
 
 		if i < len(media)-1 {
-			fmt.Println(colorize("yellow", "────────────────────────────────────────────────────────────────────────────────"))
+			fmt.Println(colorize("yellow", strings.Repeat(separatorChar, maxLineWidth)))
 		}
 	}
 }
 
 func printMediaItem(colorize func(string, string) string, item *models.Media, index int, detailed bool) {
-	// Status indicator
-	statusColor := "yellow"
-	statusText := "WANTED"
-	statusIcon := "⏳"
+	status := getMediaStatus(item)
+	mediaType := getMediaType(item)
 
+	printMainInfo(colorize, item, index, status, mediaType)
+	printDetailsLine(colorize, item, mediaType, detailed)
+	printAdditionalInfo(colorize, item)
+
+	fmt.Println()
+}
+
+// mediaStatus holds status information
+type mediaStatus struct {
+	color string
+	text  string
+	icon  string
+}
+
+// mediaType holds type information
+type mediaType struct {
+	icon  string
+	color string
+	text  string
+}
+
+// getMediaStatus determines the media status
+func getMediaStatus(item *models.Media) mediaStatus {
 	if item.OnDisk {
-		statusColor = "green"
-		statusText = "AVAILABLE"
-		statusIcon = "✅"
-	} else if item.DownloadID > 0 {
-		statusColor = "cyan"
-		statusText = "DOWNLOADING"
-		statusIcon = "⬇️"
+		return mediaStatus{"green", "AVAILABLE", completedIcon}
 	}
+	if item.DownloadID > 0 {
+		return mediaStatus{"cyan", "DOWNLOADING", downloadingIcon}
+	}
+	return mediaStatus{"yellow", "WANTED", wantedIcon}
+}
 
-	// Type indicator
-	typeIcon := "🎬" // Movie
-	typeColor := "blue"
-	typeText := "MOVIE"
-
+// getMediaType determines the media type
+func getMediaType(item *models.Media) mediaType {
 	if item.IsEpisode() {
-		typeIcon = "📺"
-		typeColor = "purple"
-		typeText = fmt.Sprintf("S%02dE%02d", item.Season, item.Number)
+		return mediaType{
+			icon:  episodeIcon,
+			color: "purple",
+			text:  fmt.Sprintf("S%02dE%02d", item.Season, item.Number),
+		}
 	}
+	return mediaType{movieIcon, "blue", "MOVIE"}
+}
 
-	// Print main info
+// printMainInfo prints the main media information line
+func printMainInfo(colorize func(string, string) string, item *models.Media, index int, status mediaStatus, mediaType mediaType) {
 	fmt.Printf("%s %s %s %s\n",
 		colorize("white", fmt.Sprintf("[%03d]", index)),
-		typeIcon,
+		mediaType.icon,
 		colorize("bold", item.Title),
-		colorize(statusColor, fmt.Sprintf("[%s %s]", statusIcon, statusText)))
+		colorize(status.color, fmt.Sprintf("[%s %s]", status.icon, status.text)))
+}
 
-	// Print details
-	details := []string{}
+// printDetailsLine prints the details line
+func printDetailsLine(colorize func(string, string) string, item *models.Media, mediaType mediaType, detailed bool) {
+	details := buildDetails(colorize, item, mediaType, detailed)
+	if len(details) > 0 {
+		fmt.Printf("    %s\n", strings.Join(details, " • "))
+	}
+}
+
+// buildDetails builds the details array
+func buildDetails(colorize func(string, string) string, item *models.Media, mediaType mediaType, detailed bool) []string {
+	var details []string
 
 	if item.Year > 0 {
 		details = append(details, colorize("yellow", fmt.Sprintf("Year: %d", item.Year)))
 	}
 
-	if item.IsEpisode() {
-		details = append(details, colorize(typeColor, typeText))
-	} else {
-		details = append(details, colorize(typeColor, typeText))
-	}
+	details = append(details, colorize(mediaType.color, mediaType.text))
 
 	if item.TMDBID > 0 {
 		details = append(details, colorize("white", fmt.Sprintf("TMDB: %d", item.TMDBID)))
@@ -335,37 +429,26 @@ func printMediaItem(colorize func(string, string) string, item *models.Media, in
 		details = append(details, colorize("cyan", fmt.Sprintf("Download ID: %d", item.DownloadID)))
 	}
 
-	if len(details) > 0 {
-		fmt.Printf("    %s\n", strings.Join(details, " • "))
-	}
+	return details
+}
 
-	// Show French title as a separate line if it's different and exists
+// printAdditionalInfo prints additional information
+func printAdditionalInfo(colorize func(string, string) string, item *models.Media) {
 	if item.FrenchTitle != "" && item.FrenchTitle != item.Title {
-		fmt.Printf("    %s %s\n", colorize("green", "🇫🇷"), colorize("green", item.FrenchTitle))
+		fmt.Printf("    %s %s\n", colorize("green", frenchFlagIcon), colorize("green", item.FrenchTitle))
 	}
 
-	// File path
 	if item.OnDisk && item.File != "" {
-		fmt.Printf("    %s %s\n", colorize("green", "📁"), filepath.Base(item.File))
+		fmt.Printf("    %s %s\n", colorize("green", folderIcon), filepath.Base(item.File))
 	}
 
-	// Timestamps
 	fmt.Printf("    %s %s • %s %s\n",
 		colorize("white", "Created:"), item.CreatedAt.Format("2006-01-02 15:04"),
 		colorize("white", "Updated:"), item.UpdatedAt.Format("2006-01-02 15:04"))
-
-	fmt.Println()
 }
 
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+// exitWithError prints an error message and exits with status 1.
+func exitWithError(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
+	os.Exit(1)
 }

@@ -1,4 +1,4 @@
-// Package config handles application configuration management
+// Package config handles application configuration management for momenarr.
 package config
 
 import (
@@ -30,7 +30,6 @@ type Config struct {
 	RequestTimeout int    `json:"request_timeout"`
 }
 
-// Default configuration values
 const (
 	defaultHTTPAddr       = ":8080"
 	defaultSyncInterval   = "6h"
@@ -40,7 +39,7 @@ const (
 	defaultRequestTimeout = 30
 )
 
-// LoadConfig loads configuration from environment variables
+// LoadConfig loads configuration from environment variables.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
 		HTTPAddr:       getEnv("HTTP_ADDR", defaultHTTPAddr),
@@ -61,26 +60,28 @@ func LoadConfig() (*Config, error) {
 	return cfg, nil
 }
 
-// GetServerAddress returns the HTTP server address
+// GetServerAddress returns the HTTP server address.
 func (c *Config) GetServerAddress() string {
 	return c.HTTPAddr
 }
 
-// Validate checks if all required fields are set
+// Validate checks if all required fields are set.
 func (c *Config) Validate() error {
 	if c.DataDir == "" {
 		return fmt.Errorf("data directory required")
 	}
 	if c.AllDebridAPIKey == "" {
-		return fmt.Errorf("allDebrid API key required")
+		return fmt.Errorf("AllDebrid API key required")
 	}
-	if c.TraktAPIKey == "" || c.TraktClientSecret == "" {
-		return fmt.Errorf("trakt credentials required")
+	if c.TraktAPIKey == "" {
+		return fmt.Errorf("Trakt API key required")
+	}
+	if c.TraktClientSecret == "" {
+		return fmt.Errorf("Trakt client secret required")
 	}
 	return nil
 }
 
-// loadRequiredFields loads all required environment variables
 func loadRequiredFields(cfg *Config) error {
 	requiredFields := map[string]*string{
 		"DATA_DIR":            &cfg.DataDir,
@@ -100,7 +101,6 @@ func loadRequiredFields(cfg *Config) error {
 	return nil
 }
 
-// normalizeBlacklistPath ensures blacklist file has absolute path
 func (c *Config) normalizeBlacklistPath() {
 	if c.BlacklistFile == "" {
 		return
@@ -111,7 +111,6 @@ func (c *Config) normalizeBlacklistPath() {
 	}
 }
 
-// getEnv retrieves environment variable with default fallback
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -119,7 +118,6 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getEnvInt retrieves integer environment variable with default fallback
 func getEnvInt(key string, defaultValue int) int {
 	value := os.Getenv(key)
 	if value == "" {

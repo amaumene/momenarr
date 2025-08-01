@@ -1,4 +1,4 @@
-// Package querystring provides URL query string encoding functionality
+// Package querystring provides URL query string encoding functionality for structs.
 package querystring
 
 import (
@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Values encodes a struct into URL query parameters
+// Values encodes a struct into URL query parameters.
 func Values(v interface{}) (url.Values, error) {
 	values := url.Values{}
 	rv := reflect.ValueOf(v)

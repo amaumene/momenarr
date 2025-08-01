@@ -1,4 +1,4 @@
-// Package utils provides utility functions used across the application
+// Package utils provides utility functions used across the momenarr application.
 package utils
 
 import (
@@ -6,7 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// LogMediaOperation returns a log entry with common media fields
+// LogMediaOperation returns a log entry with common media fields.
 func LogMediaOperation(operation string, media *models.Media) *log.Entry {
 	return log.WithFields(log.Fields{
 		"trakt_id":  media.Trakt,
@@ -16,7 +16,7 @@ func LogMediaOperation(operation string, media *models.Media) *log.Entry {
 	})
 }
 
-// LogTorrentSearchResultOperation returns a log entry with common torrent search result fields
+// LogTorrentSearchResultOperation returns a log entry with common torrent search result fields.
 func LogTorrentSearchResultOperation(operation string, result *models.TorrentSearchResult) *log.Entry {
 	return log.WithFields(log.Fields{
 		"hash":      result.Hash,
@@ -26,7 +26,7 @@ func LogTorrentSearchResultOperation(operation string, result *models.TorrentSea
 	})
 }
 
-// LogDownloadOperation returns a log entry with download-related fields
+// LogDownloadOperation returns a log entry with download-related fields.
 func LogDownloadOperation(operation string, traktID int64, title string) *log.Entry {
 	return log.WithFields(log.Fields{
 		"trakt_id":  traktID,

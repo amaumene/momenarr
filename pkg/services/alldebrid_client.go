@@ -9,7 +9,13 @@ import (
 	"time"
 )
 
-// AllDebridClient is a minimal AllDebrid API client inspired by stremthru
+const (
+	allDebridBaseURL     = "https://api.alldebrid.com"
+	allDebridUserAgent   = "momenarr"
+	allDebridHTTPTimeout = 60 * time.Second
+)
+
+// AllDebridClient is a minimal AllDebrid API client inspired by stremthru.
 type AllDebridClient struct {
 	BaseURL    string
 	APIKey     string
@@ -17,19 +23,19 @@ type AllDebridClient struct {
 	UserAgent  string
 }
 
-// NewAllDebridClient creates a new AllDebrid API client
+// NewAllDebridClient creates a new AllDebrid API client.
 func NewAllDebridClient(apiKey string) *AllDebridClient {
 	return &AllDebridClient{
-		BaseURL:   "https://api.alldebrid.com",
+		BaseURL:   allDebridBaseURL,
 		APIKey:    apiKey,
-		UserAgent: "momenarr",
+		UserAgent: allDebridUserAgent,
 		HTTPClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: allDebridHTTPTimeout,
 		},
 	}
 }
 
-// MagnetUploadResponse represents magnet upload response
+// MagnetUploadResponse represents magnet upload response.
 type MagnetUploadResponse struct {
 	Status string `json:"status"`
 	Data   struct {
@@ -51,7 +57,7 @@ type MagnetUploadResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// MagnetStatusResponse represents magnet status response
+// MagnetStatusResponse represents magnet status response.
 type MagnetStatusResponse struct {
 	Status string `json:"status"`
 	Data   struct {
@@ -72,7 +78,7 @@ type MagnetStatusResponse struct {
 	} `json:"data"`
 }
 
-// MagnetFilesResponse represents magnet files response
+// MagnetFilesResponse represents magnet files response.
 type MagnetFilesResponse struct {
 	Status string `json:"status"`
 	Data   struct {

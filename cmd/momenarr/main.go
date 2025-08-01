@@ -1,3 +1,4 @@
+// Package main provides the entry point for the momenarr application.
 package main
 
 import (
@@ -18,6 +19,16 @@ import (
 	"github.com/amaumene/momenarr/pkg/services"
 	"github.com/amaumene/momenarr/trakt"
 	log "github.com/sirupsen/logrus"
+)
+
+const (
+	defaultSyncInterval = 6 * time.Hour
+	shutdownTimeout     = 30 * time.Second
+	dbFileMode          = 0600
+	dataDirMode         = 0755
+	httpReadTimeout     = 15 * time.Second
+	httpWriteTimeout    = 15 * time.Second
+	httpIdleTimeout     = 30 * time.Second
 )
 
 // app contains all application dependencies and services
@@ -62,17 +73,10 @@ func initLogging() {
 
 // initializeApp creates and configures the application instance
 func initializeApp() (*app, *bolthold.Store, error) {
-	cfg, err := loadAndValidateConfig()
+	cfg, store, repo, err := setupInfrastructure()
 	if err != nil {
 		return nil, nil, err
 	}
-
-	store, err := openDatabase(cfg.DataDir)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	repo := repository.NewBoltRepository(store)
 
 	services, err := initializeServices(cfg, repo)
 	if err != nil {
@@ -80,6 +84,27 @@ func initializeApp() (*app, *bolthold.Store, error) {
 		return nil, nil, err
 	}
 
+	return createApp(cfg, repo, services, store)
+}
+
+// setupInfrastructure sets up config, database, and repository
+func setupInfrastructure() (*config.Config, *bolthold.Store, repository.Repository, error) {
+	cfg, err := loadAndValidateConfig()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	store, err := openDatabase(cfg.DataDir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	repo := repository.NewBoltRepository(store)
+	return cfg, store, repo, nil
+}
+
+// createApp creates the application instance with all dependencies
+func createApp(cfg *config.Config, repo repository.Repository, services *servicesContainer, store *bolthold.Store) (*app, *bolthold.Store, error) {
 	server := createHTTPServer(cfg, services.appService)
 
 	return &app{
@@ -103,7 +128,7 @@ func loadAndValidateConfig() (*config.Config, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
+	if err := os.MkdirAll(cfg.DataDir, dataDirMode); err != nil {
 		return nil, fmt.Errorf("creating data directory: %w", err)
 	}
 
@@ -113,31 +138,65 @@ func loadAndValidateConfig() (*config.Config, error) {
 // openDatabase opens the BoltDB database
 func openDatabase(dataDir string) (*bolthold.Store, error) {
 	dbPath := filepath.Join(dataDir, "data.db")
-	store, err := bolthold.Open(dbPath, 0600, nil)
+	store, err := bolthold.Open(dbPath, dbFileMode, nil)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 	return store, nil
 }
 
-// serviceContainer holds initialized services
-type serviceContainer struct {
+// servicesContainer holds initialized services
+type servicesContainer struct {
 	appService       *services.AppService
 	tokenService     *services.TraktTokenService
 	allDebridService services.AllDebridInterface
 }
 
 // initializeServices creates and configures all application services
-func initializeServices(cfg *config.Config, repo repository.Repository) (*serviceContainer, error) {
+func initializeServices(cfg *config.Config, repo repository.Repository) (*servicesContainer, error) {
 	trakt.Key = cfg.TraktAPIKey
+
+	tokenService, traktToken, err := setupTraktAuth(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	tmdbService := initializeTMDB(cfg)
+
+	coreServices := createCoreServices(cfg, repo, traktToken, tmdbService)
+
+	appService := createAppService(repo, coreServices, traktToken)
+
+	return &servicesContainer{
+		appService:       appService,
+		tokenService:     tokenService,
+		allDebridService: coreServices.allDebrid,
+	}, nil
+}
+
+// setupTraktAuth sets up Trakt authentication
+func setupTraktAuth(cfg *config.Config) (*services.TraktTokenService, *trakt.Token, error) {
 	tokenService := services.NewTraktTokenService(cfg.DataDir, cfg.TraktClientSecret)
 
 	traktToken, err := tokenService.GetToken()
 	if err != nil {
-		return nil, fmt.Errorf("getting Trakt token: %w", err)
+		return nil, nil, fmt.Errorf("getting Trakt token: %w", err)
 	}
 
-	tmdbService := initializeTMDB(cfg)
+	return tokenService, traktToken, nil
+}
+
+// coreServices holds the core service dependencies
+type coreServices struct {
+	trakt     *services.TraktService
+	allDebrid services.AllDebridInterface
+	torrent   *services.TorrentService
+	download  *services.DownloadService
+	cleanup   *services.CleanupService
+}
+
+// createCoreServices creates the core services
+func createCoreServices(cfg *config.Config, repo repository.Repository, traktToken *trakt.Token, tmdbService *services.TMDBService) *coreServices {
 	traktService := createTraktService(repo, traktToken, tmdbService)
 	allDebridService := services.NewAllDebridService(repo, cfg.AllDebridAPIKey)
 	torrentService := createTorrentService(repo, cfg, traktService, tmdbService)
@@ -146,19 +205,24 @@ func initializeServices(cfg *config.Config, repo repository.Repository) (*servic
 	cleanupService := services.CreateCleanupService(repo, allDebridService, traktToken)
 	cleanupService.SetWatchedDays(cfg.WatchedDays)
 
-	appService := services.CreateAppService(
-		repo,
-		traktService,
-		torrentService,
-		downloadService,
-		cleanupService,
-	)
+	return &coreServices{
+		trakt:     traktService,
+		allDebrid: allDebridService,
+		torrent:   torrentService,
+		download:  downloadService,
+		cleanup:   cleanupService,
+	}
+}
 
-	return &serviceContainer{
-		appService:       appService,
-		tokenService:     tokenService,
-		allDebridService: allDebridService,
-	}, nil
+// createAppService creates the main application service
+func createAppService(repo repository.Repository, core *coreServices, traktToken *trakt.Token) *services.AppService {
+	return services.CreateAppService(
+		repo,
+		core.trakt,
+		core.torrent,
+		core.download,
+		core.cleanup,
+	)
 }
 
 // createTraktService creates TraktService with optional TMDB integration
@@ -233,25 +297,50 @@ func (a *app) runHTTPServer(wg *sync.WaitGroup) {
 
 // waitForShutdown handles graceful shutdown
 func (a *app) waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	<-sigChan
-	log.Info("Shutdown signal received")
-
+	waitForSignal()
 	cancel()
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
-	a.shutdownHTTPServer(shutdownCtx)
+	a.performShutdown(shutdownCtx, wg)
+}
 
-	if a.waitForGoroutines(shutdownCtx, wg) {
+// waitForSignal waits for shutdown signal
+func waitForSignal() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	log.Info("Shutdown signal received")
+}
+
+// performShutdown performs the actual shutdown sequence
+func (a *app) performShutdown(ctx context.Context, wg *sync.WaitGroup) {
+	shutdownWg := a.startHTTPShutdown(ctx)
+
+	if a.waitForGoroutines(ctx, wg) {
 		log.Info("Graceful shutdown completed")
 	} else {
 		log.Warn("Shutdown timeout exceeded")
 	}
 
+	shutdownWg.Wait()
+	a.closeAppService()
+}
+
+// startHTTPShutdown starts HTTP server shutdown in parallel
+func (a *app) startHTTPShutdown(ctx context.Context) *sync.WaitGroup {
+	var shutdownWg sync.WaitGroup
+	shutdownWg.Add(1)
+	go func() {
+		defer shutdownWg.Done()
+		a.shutdownHTTPServer(ctx)
+	}()
+	return &shutdownWg
+}
+
+// closeAppService closes the app service with error logging
+func (a *app) closeAppService() {
 	if err := a.appService.Close(); err != nil {
 		log.WithError(err).Error("Failed to close app service")
 	}
@@ -259,12 +348,10 @@ func (a *app) waitForShutdown(ctx context.Context, cancel context.CancelFunc, wg
 
 // parseSyncInterval parses sync interval with fallback to default
 func parseSyncInterval(interval string) time.Duration {
-	const defaultInterval = 6 * time.Hour
-
 	duration, err := time.ParseDuration(interval)
 	if err != nil {
 		log.WithError(err).Warn("Invalid sync interval, using default")
-		return defaultInterval
+		return defaultSyncInterval
 	}
 	return duration
 }
@@ -277,8 +364,6 @@ func logConfiguration(cfg *config.Config) {
 		"watched_days":  cfg.WatchedDays,
 	}).Info("Configuration loaded")
 }
-
-// Helper functions
 
 // closeStore safely closes the database store
 func closeStore(store *bolthold.Store) {
@@ -307,9 +392,9 @@ func createHTTPServer(cfg *config.Config, appService *services.AppService) *http
 	return &http.Server{
 		Addr:         cfg.GetServerAddress(),
 		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  30 * time.Second,
+		ReadTimeout:  httpReadTimeout,
+		WriteTimeout: httpWriteTimeout,
+		IdleTimeout:  httpIdleTimeout,
 	}
 }
 
@@ -344,11 +429,9 @@ func (a *app) refreshTraktToken() error {
 
 // shutdownHTTPServer gracefully shuts down the HTTP server
 func (a *app) shutdownHTTPServer(ctx context.Context) {
-	go func() {
-		if err := a.server.Shutdown(ctx); err != nil {
-			log.WithError(err).Error("HTTP server shutdown error")
-		}
-	}()
+	if err := a.server.Shutdown(ctx); err != nil {
+		log.WithError(err).Error("HTTP server shutdown error")
+	}
 }
 
 // waitForGoroutines waits for all goroutines with timeout

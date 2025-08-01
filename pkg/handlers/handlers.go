@@ -1,3 +1,4 @@
+// Package handlers provides HTTP request handlers for the momenarr application.
 package handlers
 
 import (
@@ -14,40 +15,30 @@ import (
 )
 
 const (
-	// MaxRequestSize is the maximum allowed request body size (1MB)
-	MaxRequestSize = 1 << 20
-
-	// RefreshTimeout is the timeout for refresh operations
-	RefreshTimeout = 20 * time.Minute
+	maxRequestSize = 1 << 20
+	refreshTimeout = 20 * time.Minute
 )
 
-// Handler contains all HTTP handlers for the torrent/AllDebrid version
+// Handler contains all HTTP handlers for the application.
 type Handler struct {
 	appService *services.AppService
 }
 
+// CreateHandler creates a new handler instance with the given app service.
 func CreateHandler(appService *services.AppService) *Handler {
 	return &Handler{
 		appService: appService,
 	}
 }
 
+// NewAppHandler creates a new HTTP handler for the application.
 func NewAppHandler(appService *services.AppService) http.Handler {
 	return CreateHandler(appService)
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Add panic recovery
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.WithFields(log.Fields{
-				"panic":  rec,
-				"path":   r.URL.Path,
-				"method": r.Method,
-			}).Error("panic recovered in http handler")
-			h.writeErrorResponse(w, http.StatusInternalServerError, "internal server error", "an unexpected error occurred")
-		}
-	}()
+	defer h.recoverPanic(w, r)
 
 	switch r.URL.Path {
 	case "/api/media":
@@ -71,25 +62,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// SetupRoutes registers all HTTP routes for the application.
 func (h *Handler) SetupRoutes() {
-	http.HandleFunc("/api/media", h.handleMedia)
-	http.HandleFunc("/api/media/stats", h.handleMediaStats)
-	http.HandleFunc("/api/torrents/list", h.handleTorrentList)
-	http.HandleFunc("/api/download/retry", h.handleRetryDownload)
-	http.HandleFunc("/api/download/cancel", h.handleCancelDownload)
-	http.HandleFunc("/api/download/status", h.handleDownloadStatus)
-	http.HandleFunc("/api/refresh", h.handleRefresh)
-	http.HandleFunc("/api/cleanup/stats", h.handleCleanupStats)
+	routes := map[string]http.HandlerFunc{
+		"/api/media":           h.handleMedia,
+		"/api/media/stats":     h.handleMediaStats,
+		"/api/torrents/list":   h.handleTorrentList,
+		"/api/download/retry":  h.handleRetryDownload,
+		"/api/download/cancel": h.handleCancelDownload,
+		"/api/download/status": h.handleDownloadStatus,
+		"/api/refresh":         h.handleRefresh,
+		"/api/cleanup/stats":   h.handleCleanupStats,
+	}
+
+	for path, handler := range routes {
+		http.HandleFunc(path, handler)
+	}
 }
 
-// ResponseError represents an error response
-type ResponseError struct {
+// responseError represents an error response.
+type responseError struct {
 	Error   string `json:"error"`
 	Message string `json:"message,omitempty"`
 }
 
-// ResponseSuccess represents a success response
-type ResponseSuccess struct {
+// responseSuccess represents a success response.
+type responseSuccess struct {
 	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
 }
@@ -104,7 +102,7 @@ func (h *Handler) writeJSONResponse(w http.ResponseWriter, status int, data inte
 }
 
 func (h *Handler) writeErrorResponse(w http.ResponseWriter, status int, message, details string) {
-	response := ResponseError{
+	response := responseError{
 		Error:   message,
 		Message: details,
 	}
@@ -112,7 +110,7 @@ func (h *Handler) writeErrorResponse(w http.ResponseWriter, status int, message,
 }
 
 func (h *Handler) writeSuccessResponse(w http.ResponseWriter, message string, data interface{}) {
-	response := ResponseSuccess{
+	response := responseSuccess{
 		Message: message,
 		Data:    data,
 	}
@@ -506,7 +504,7 @@ func (h *Handler) startAsyncRefresh() {
 			}
 		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), RefreshTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
 		defer cancel()
 
 		if err := h.appService.SearchTorrentsForNotDownloaded(ctx); err != nil {

@@ -95,81 +95,10 @@ func (s *TorrentService) PopulateTorrentsWithContext(ctx context.Context) error 
 
 // FindBestCachedTorrent searches for torrents in real-time and returns the best one cached on AllDebrid
 func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridService AllDebridInterface) (*models.TorrentSearchResult, error) {
-	// Determine media type for search
-	mediaType := "movie"
-	if media.IsEpisode() {
-		mediaType = "series"
-	}
+	mediaType := s.getMediaType(media)
+	s.logSearchStart(media, mediaType)
 
-	// Search for torrents with year validation for movies
-	var results []models.TorrentSearchResult
-	var err error
-
-	log.WithFields(log.Fields{
-		"trakt_id":   media.Trakt,
-		"title":      media.Title,
-		"media_type": mediaType,
-		"season":     media.Season,
-		"number":     media.Number,
-		"year":       media.Year,
-		"tmdb_id":    media.TMDBID,
-	}).Info("Starting torrent search (using stored database data)")
-
-	// Check if we have stored original language data
-	if media.OriginalLanguage != "" {
-		log.WithFields(log.Fields{
-			"original_language": media.OriginalLanguage,
-			"french_title":      media.FrenchTitle,
-		}).Info("Using stored TMDB data from database (no API calls)")
-
-		// Use stored language for provider selection (preferred method)
-		if media.IsMovie() && media.Year > 0 {
-			// For movies, use year-aware search with stored language
-			results, err = s.searchService.SearchWithLanguageAndFrenchTitle(
-				media.Title,
-				mediaType,
-				int(media.Season),
-				int(media.Number),
-				int(media.Year),
-				media.TMDBID,
-				media.OriginalLanguage,
-				media.FrenchTitle,
-			)
-		} else {
-			// For TV shows or movies without year, use stored language search
-			results, err = s.searchService.SearchWithLanguageAndFrenchTitle(
-				media.Title,
-				mediaType,
-				int(media.Season),
-				int(media.Number),
-				0,
-				media.TMDBID,
-				media.OriginalLanguage,
-				media.FrenchTitle,
-			)
-		}
-	} else {
-		// Fallback to basic search if TMDB not available
-		if media.IsMovie() && media.Year > 0 {
-			// For movies, use year-aware search
-			results, err = s.searchService.SearchWithYear(
-				media.Title,
-				mediaType,
-				int(media.Season),
-				int(media.Number),
-				int(media.Year),
-			)
-		} else {
-			// For TV shows or movies without year, use basic search
-			results, err = s.searchService.Search(
-				media.Title,
-				mediaType,
-				int(media.Season),
-				int(media.Number),
-			)
-		}
-	}
-
+	results, err := s.searchTorrents(media, mediaType)
 	if err != nil {
 		return nil, fmt.Errorf("searching torrents for media %d: %w", media.Trakt, err)
 	}
@@ -179,7 +108,89 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 		return nil, nil
 	}
 
-	// Filter out blacklisted torrents
+	filteredResults, err := s.applyBlacklistFilter(results, media)
+	if err != nil || len(filteredResults) == 0 {
+		return nil, err
+	}
+
+	return s.findCachedFromResults(filteredResults, media, allDebridService)
+}
+
+// getMediaType determines if media is movie or series
+func (s *TorrentService) getMediaType(media *models.Media) string {
+	if media.IsEpisode() {
+		return "series"
+	}
+	return "movie"
+}
+
+// logSearchStart logs the start of torrent search
+func (s *TorrentService) logSearchStart(media *models.Media, mediaType string) {
+	log.WithFields(log.Fields{
+		"trakt_id":   media.Trakt,
+		"title":      media.Title,
+		"media_type": mediaType,
+		"season":     media.Season,
+		"number":     media.Number,
+		"year":       media.Year,
+		"tmdb_id":    media.TMDBID,
+	}).Info("Starting torrent search (using stored database data)")
+}
+
+// searchTorrents performs the torrent search
+func (s *TorrentService) searchTorrents(media *models.Media, mediaType string) ([]models.TorrentSearchResult, error) {
+	if media.OriginalLanguage != "" {
+		return s.searchWithLanguage(media, mediaType)
+	}
+	return s.searchBasic(media, mediaType)
+}
+
+// searchWithLanguage searches using stored language data
+func (s *TorrentService) searchWithLanguage(media *models.Media, mediaType string) ([]models.TorrentSearchResult, error) {
+	log.WithFields(log.Fields{
+		"original_language": media.OriginalLanguage,
+		"french_title":      media.FrenchTitle,
+	}).Info("Using stored TMDB data from database (no API calls)")
+
+	yearParam := 0
+	if media.IsMovie() && media.Year > 0 {
+		yearParam = int(media.Year)
+	}
+
+	return s.searchService.SearchWithLanguageAndFrenchTitle(
+		media.Title,
+		mediaType,
+		int(media.Season),
+		int(media.Number),
+		yearParam,
+		media.TMDBID,
+		media.OriginalLanguage,
+		media.FrenchTitle,
+	)
+}
+
+// searchBasic performs basic search without language data
+func (s *TorrentService) searchBasic(media *models.Media, mediaType string) ([]models.TorrentSearchResult, error) {
+	if media.IsMovie() && media.Year > 0 {
+		return s.searchService.SearchWithYear(
+			media.Title,
+			mediaType,
+			int(media.Season),
+			int(media.Number),
+			int(media.Year),
+		)
+	}
+
+	return s.searchService.Search(
+		media.Title,
+		mediaType,
+		int(media.Season),
+		int(media.Number),
+	)
+}
+
+// applyBlacklistFilter filters out blacklisted torrents
+func (s *TorrentService) applyBlacklistFilter(results []models.TorrentSearchResult, media *models.Media) ([]models.TorrentSearchResult, error) {
 	filteredResults, err := s.filterBlacklistedTorrents(results)
 	if err != nil {
 		return nil, fmt.Errorf("filtering blacklisted torrents: %w", err)
@@ -190,11 +201,38 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 		return nil, nil
 	}
 
-	// Group results by provider
-	yggResults := []models.TorrentSearchResult{}
-	apiBayResults := []models.TorrentSearchResult{}
+	return filteredResults, nil
+}
 
-	for _, result := range filteredResults {
+// findCachedFromResults finds cached torrent from results
+func (s *TorrentService) findCachedFromResults(results []models.TorrentSearchResult, media *models.Media, allDebridService AllDebridInterface) (*models.TorrentSearchResult, error) {
+	yggResults, apiBayResults := s.groupResultsByProvider(results)
+	s.sortYGGBySize(yggResults)
+	s.logCacheCheck(media, len(yggResults), len(apiBayResults), len(results))
+
+	// Try YGG results first
+	if cached := s.findCachedInProvider(yggResults, "YGG", media, allDebridService); cached != nil {
+		return cached, nil
+	}
+
+	// Try APIBay results
+	if cached := s.findCachedInProvider(apiBayResults, "APIBay", media, allDebridService); cached != nil {
+		return cached, nil
+	}
+
+	log.WithFields(log.Fields{
+		"trakt_id": media.Trakt,
+		"checked":  len(results),
+	}).Info("No cached torrents found")
+
+	return nil, nil
+}
+
+// groupResultsByProvider groups results by provider
+func (s *TorrentService) groupResultsByProvider(results []models.TorrentSearchResult) ([]models.TorrentSearchResult, []models.TorrentSearchResult) {
+	var yggResults, apiBayResults []models.TorrentSearchResult
+
+	for _, result := range results {
 		switch result.Source {
 		case "YGG":
 			yggResults = append(yggResults, result)
@@ -203,66 +241,38 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 		}
 	}
 
-	// Sort YGG results by size (biggest first)
-	for i := 0; i < len(yggResults); i++ {
-		for j := i + 1; j < len(yggResults); j++ {
-			if yggResults[j].Size > yggResults[i].Size {
-				yggResults[i], yggResults[j] = yggResults[j], yggResults[i]
+	return yggResults, apiBayResults
+}
+
+// sortYGGBySize sorts YGG results by size (biggest first)
+func (s *TorrentService) sortYGGBySize(results []models.TorrentSearchResult) {
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].Size > results[i].Size {
+				results[i], results[j] = results[j], results[i]
 			}
 		}
 	}
+}
 
+// logCacheCheck logs cache check start
+func (s *TorrentService) logCacheCheck(media *models.Media, yggCount, apiBayCount, totalCount int) {
 	log.WithFields(log.Fields{
 		"trakt_id":     media.Trakt,
-		"ygg_count":    len(yggResults),
-		"apibay_count": len(apiBayResults),
-		"total_count":  len(filteredResults),
+		"ygg_count":    yggCount,
+		"apibay_count": apiBayCount,
+		"total_count":  totalCount,
 	}).Info("Checking AllDebrid cache")
+}
 
-	// Try YGG results first (biggest to smallest)
-	for i, result := range yggResults {
+// findCachedInProvider checks for cached torrents in a provider
+func (s *TorrentService) findCachedInProvider(results []models.TorrentSearchResult, provider string, media *models.Media, allDebridService AllDebridInterface) *models.TorrentSearchResult {
+	for i, result := range results {
 		if result.Hash == "" {
 			continue
 		}
 
-		log.WithFields(log.Fields{
-			"provider": "YGG",
-			"rank":     i + 1,
-			"hash":     result.Hash,
-			"title":    result.Title,
-			"size_gb":  fmt.Sprintf("%.2f", float64(result.Size)/(1024*1024*1024)),
-		}).Info("Checking YGG torrent")
-
-		// Check if cached on AllDebrid
-		cached, _, err := allDebridService.IsTorrentCached(result.Hash)
-		if err != nil {
-			log.WithError(err).WithField("hash", result.Hash).Error("Failed to check AllDebrid cache")
-			continue
-		}
-
-		if cached {
-			log.WithFields(log.Fields{
-				"trakt_id": media.Trakt,
-				"title":    result.Title,
-				"source":   result.Source,
-				"rank":     i + 1,
-			}).Info("Found cached torrent")
-			return &result, nil
-		}
-	}
-
-	// Try APIBay results
-	for i, result := range apiBayResults {
-		if result.Hash == "" {
-			continue
-		}
-
-		log.WithFields(log.Fields{
-			"provider": "APIBay",
-			"rank":     i + 1,
-			"hash":     result.Hash,
-			"title":    result.Title,
-		}).Info("Checking APIBay torrent")
+		s.logCheckingTorrent(provider, i+1, result)
 
 		cached, _, err := allDebridService.IsTorrentCached(result.Hash)
 		if err != nil {
@@ -271,22 +281,37 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 		}
 
 		if cached {
-			log.WithFields(log.Fields{
-				"trakt_id": media.Trakt,
-				"title":    result.Title,
-				"source":   result.Source,
-				"rank":     i + 1,
-			}).Info("Found cached torrent")
-			return &result, nil
+			s.logFoundCached(media, result, i+1)
+			return &result
 		}
 	}
+	return nil
+}
 
+// logCheckingTorrent logs torrent check
+func (s *TorrentService) logCheckingTorrent(provider string, rank int, result models.TorrentSearchResult) {
+	fields := log.Fields{
+		"provider": provider,
+		"rank":     rank,
+		"hash":     result.Hash,
+		"title":    result.Title,
+	}
+
+	if provider == "YGG" {
+		fields["size_gb"] = fmt.Sprintf("%.2f", float64(result.Size)/(1024*1024*1024))
+	}
+
+	log.WithFields(fields).Info(fmt.Sprintf("Checking %s torrent", provider))
+}
+
+// logFoundCached logs when cached torrent is found
+func (s *TorrentService) logFoundCached(media *models.Media, result models.TorrentSearchResult, rank int) {
 	log.WithFields(log.Fields{
 		"trakt_id": media.Trakt,
-		"checked":  len(filteredResults),
-	}).Info("No cached torrents found")
-
-	return nil, nil
+		"title":    result.Title,
+		"source":   result.Source,
+		"rank":     rank,
+	}).Info("Found cached torrent")
 }
 
 // filterBlacklistedTorrents filters out blacklisted torrents from search results
@@ -312,66 +337,8 @@ func (s *TorrentService) sortTorrentResults(results []models.TorrentSearchResult
 
 // populateTorrentsForMedia populates torrent entries for a specific media item
 func (s *TorrentService) populateTorrentsForMedia(media *models.Media) error {
-	// Determine media type for search
-	mediaType := "movie"
-	if media.IsEpisode() {
-		mediaType = "series"
-	}
-
-	// Search for torrents with year validation for movies
-	var results []models.TorrentSearchResult
-	var err error
-
-	// Check if we have stored original language data
-	if media.OriginalLanguage != "" {
-		// Use stored language for provider selection (preferred method)
-		if media.IsMovie() && media.Year > 0 {
-			// For movies, use year-aware search with stored language
-			results, err = s.searchService.SearchWithLanguageAndFrenchTitle(
-				media.Title,
-				mediaType,
-				int(media.Season),
-				int(media.Number),
-				int(media.Year),
-				media.TMDBID,
-				media.OriginalLanguage,
-				media.FrenchTitle,
-			)
-		} else {
-			// For TV shows or movies without year, use stored language search
-			results, err = s.searchService.SearchWithLanguageAndFrenchTitle(
-				media.Title,
-				mediaType,
-				int(media.Season),
-				int(media.Number),
-				0,
-				media.TMDBID,
-				media.OriginalLanguage,
-				media.FrenchTitle,
-			)
-		}
-	} else {
-		// Fallback to basic search if TMDB not available
-		if media.IsMovie() && media.Year > 0 {
-			// For movies, use year-aware search
-			results, err = s.searchService.SearchWithYear(
-				media.Title,
-				mediaType,
-				int(media.Season),
-				int(media.Number),
-				int(media.Year),
-			)
-		} else {
-			// For TV shows or movies without year, use basic search
-			results, err = s.searchService.Search(
-				media.Title,
-				mediaType,
-				int(media.Season),
-				int(media.Number),
-			)
-		}
-	}
-
+	mediaType := s.getMediaType(media)
+	results, err := s.searchTorrents(media, mediaType)
 	if err != nil {
 		return fmt.Errorf("searching torrents for media %d: %w", media.Trakt, err)
 	}
@@ -395,28 +362,32 @@ func (s *TorrentService) insertTorrentResults(media *models.Media, results []mod
 
 // getBlacklist retrieves the blacklist with thread-safe caching
 func (s *TorrentService) getBlacklist() (map[string]struct{}, error) {
-	s.blacklistMu.RLock()
-	if len(s.blacklistCache) > 0 {
-		// Return a copy to prevent external modifications
-		cachedMap := make(map[string]struct{}, len(s.blacklistCache))
-		for k := range s.blacklistCache {
-			cachedMap[k] = struct{}{}
-		}
-		s.blacklistMu.RUnlock()
-		return cachedMap, nil
+	if cached := s.getCachedBlacklist(); cached != nil {
+		return cached, nil
 	}
-	s.blacklistMu.RUnlock()
 
+	return s.loadAndCacheBlacklist()
+}
+
+// getCachedBlacklist returns cached blacklist if available
+func (s *TorrentService) getCachedBlacklist() map[string]struct{} {
+	s.blacklistMu.RLock()
+	defer s.blacklistMu.RUnlock()
+
+	if len(s.blacklistCache) > 0 {
+		return s.copyBlacklistMap(s.blacklistCache)
+	}
+	return nil
+}
+
+// loadAndCacheBlacklist loads blacklist from file and caches it
+func (s *TorrentService) loadAndCacheBlacklist() (map[string]struct{}, error) {
 	s.blacklistMu.Lock()
 	defer s.blacklistMu.Unlock()
 
 	// Double-check after acquiring write lock
 	if len(s.blacklistCache) > 0 {
-		cachedMap := make(map[string]struct{}, len(s.blacklistCache))
-		for k := range s.blacklistCache {
-			cachedMap[k] = struct{}{}
-		}
-		return cachedMap, nil
+		return s.copyBlacklistMap(s.blacklistCache), nil
 	}
 
 	blacklistWords, err := s.readBlacklist()
@@ -424,20 +395,28 @@ func (s *TorrentService) getBlacklist() (map[string]struct{}, error) {
 		return nil, err
 	}
 
-	// Convert to map for O(1) lookups
-	blacklistMap := make(map[string]struct{}, len(blacklistWords))
-	for _, word := range blacklistWords {
-		blacklistMap[strings.ToLower(word)] = struct{}{}
-	}
-
+	blacklistMap := s.createBlacklistMap(blacklistWords)
 	s.blacklistCache = blacklistMap
 
-	// Return a copy
-	result := make(map[string]struct{}, len(blacklistMap))
-	for k := range blacklistMap {
-		result[k] = struct{}{}
+	return s.copyBlacklistMap(blacklistMap), nil
+}
+
+// copyBlacklistMap creates a copy of the blacklist map
+func (s *TorrentService) copyBlacklistMap(source map[string]struct{}) map[string]struct{} {
+	copy := make(map[string]struct{}, len(source))
+	for k := range source {
+		copy[k] = struct{}{}
 	}
-	return result, nil
+	return copy
+}
+
+// createBlacklistMap converts words to a map for O(1) lookups
+func (s *TorrentService) createBlacklistMap(words []string) map[string]struct{} {
+	blacklistMap := make(map[string]struct{}, len(words))
+	for _, word := range words {
+		blacklistMap[strings.ToLower(word)] = struct{}{}
+	}
+	return blacklistMap
 }
 
 // readBlacklist reads the blacklist file

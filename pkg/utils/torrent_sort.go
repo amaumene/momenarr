@@ -1,62 +1,39 @@
 package utils
 
 import (
+	"sort"
+
 	"github.com/amaumene/momenarr/pkg/models"
 )
 
-// SortTorrentResultsByQuality sorts torrents by quality priority:
-// 1. Remux first (highest quality)
-// 2. Resolution (higher is better)
-// 3. Size (larger is better)
+// SortTorrentResultsByQuality sorts torrents by quality priority.
 func SortTorrentResultsByQuality(results []models.TorrentSearchResult) {
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			if shouldSwapByQuality(results[i], results[j]) {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
-	}
+	sort.Slice(results, func(i, j int) bool {
+		return isHigherQuality(results[j], results[i])
+	})
 }
 
-// SortTorrentResultsBySize sorts torrents by size only (largest first)
+// SortTorrentResultsBySize sorts torrents by size only (largest first).
 func SortTorrentResultsBySize(results []models.TorrentSearchResult) {
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			if results[j].Size > results[i].Size {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
-	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Size > results[j].Size
+	})
 }
 
-// shouldSwapByQuality determines if torrent j should be ranked higher than torrent i
-func shouldSwapByQuality(i, j models.TorrentSearchResult) bool {
-	iIsRemux := i.IsRemux()
-	jIsRemux := j.IsRemux()
+func isHigherQuality(a, b models.TorrentSearchResult) bool {
+	aIsRemux := a.IsRemux()
+	bIsRemux := b.IsRemux()
 
-	// 1. Remux always wins over non-remux
-	if jIsRemux && !iIsRemux {
-		return true
-	}
-	if iIsRemux && !jIsRemux {
-		return false
+	if aIsRemux != bIsRemux {
+		return aIsRemux
 	}
 
-	// 2. If both are remux or both are not remux, compare by resolution
-	iResolution := i.ExtractResolution()
-	jResolution := j.ExtractResolution()
+	aResolution := a.ExtractResolution()
+	bResolution := b.ExtractResolution()
 
-	if jResolution > iResolution {
-		return true
-	}
-	if iResolution > jResolution {
-		return false
+	if aResolution != bResolution {
+		return aResolution > bResolution
 	}
 
-	// 3. If same remux status and resolution, larger size wins
-	if j.Size > i.Size {
-		return true
-	}
-
-	return false
+	return a.Size > b.Size
 }

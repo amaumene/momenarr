@@ -1,4 +1,4 @@
-// Package repository provides data access layer abstractions
+// Package repository provides data access layer abstractions for momenarr.
 package repository
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/amaumene/momenarr/pkg/models"
 )
 
-// Repository defines the interface for data access operations
+// Repository defines the interface for data access operations.
 type Repository interface {
 	// Media operations
 	SaveMedia(media *models.Media) error
@@ -29,17 +29,17 @@ type Repository interface {
 	Close() error
 }
 
-// BoltRepository implements Repository using BoltDB
+// BoltRepository implements Repository using BoltDB.
 type BoltRepository struct {
 	store *bolthold.Store
 }
 
-// NewBoltRepository creates a new BoltDB-backed repository
+// NewBoltRepository creates a new BoltDB-backed repository.
 func NewBoltRepository(store *bolthold.Store) Repository {
 	return &BoltRepository{store: store}
 }
 
-// SaveMedia saves or updates a media item
+// SaveMedia saves or updates a media item.
 func (r *BoltRepository) SaveMedia(media *models.Media) error {
 	if err := r.store.Upsert(media.Trakt, media); err != nil {
 		return fmt.Errorf("failed to save media: %w", err)
@@ -47,7 +47,7 @@ func (r *BoltRepository) SaveMedia(media *models.Media) error {
 	return nil
 }
 
-// GetMedia retrieves a media item by Trakt ID
+// GetMedia retrieves a media item by Trakt ID.
 func (r *BoltRepository) GetMedia(traktID int64) (*models.Media, error) {
 	var media models.Media
 	if err := r.store.Get(traktID, &media); err != nil {
@@ -56,7 +56,7 @@ func (r *BoltRepository) GetMedia(traktID int64) (*models.Media, error) {
 	return &media, nil
 }
 
-// FindMediaNotOnDisk returns all media items not currently on disk
+// FindMediaNotOnDisk returns all media items not currently on disk.
 func (r *BoltRepository) FindMediaNotOnDisk() ([]*models.Media, error) {
 	var medias []*models.Media
 	if err := r.store.Find(&medias, bolthold.Where("OnDisk").Eq(false)); err != nil {
@@ -65,7 +65,7 @@ func (r *BoltRepository) FindMediaNotOnDisk() ([]*models.Media, error) {
 	return medias, nil
 }
 
-// SaveMediaBatch saves multiple media items in a single transaction
+// SaveMediaBatch saves multiple media items in a single transaction.
 func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 	if len(medias) == 0 {
 		return nil
@@ -96,7 +96,7 @@ func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 	return nil
 }
 
-// FindMediaBatch finds multiple media items by their Trakt IDs
+// FindMediaBatch finds multiple media items by their Trakt IDs.
 func (r *BoltRepository) FindMediaBatch(traktIDs []int64) ([]*models.Media, error) {
 	if len(traktIDs) == 0 {
 		return nil, nil
@@ -111,12 +111,12 @@ func (r *BoltRepository) FindMediaBatch(traktIDs []int64) ([]*models.Media, erro
 	return medias, nil
 }
 
-// ProcessMediaBatches processes all media in batches
+// ProcessMediaBatches processes all media in batches.
 func (r *BoltRepository) ProcessMediaBatches(batchSize int, processor func([]*models.Media) error) error {
 	return r.ProcessMediaBatchesWithContext(context.Background(), batchSize, processor)
 }
 
-// ProcessMediaBatchesWithContext processes media in batches with context
+// ProcessMediaBatchesWithContext processes media in batches with context.
 func (r *BoltRepository) ProcessMediaBatchesWithContext(ctx context.Context, batchSize int, processor func([]*models.Media) error) error {
 	lastID := int64(-1)
 
@@ -148,12 +148,12 @@ func (r *BoltRepository) ProcessMediaBatchesWithContext(ctx context.Context, bat
 	return nil
 }
 
-// StreamMedia processes media items one by one
+// StreamMedia processes media items one by one.
 func (r *BoltRepository) StreamMedia(processor func(*models.Media) error) error {
 	return r.StreamMediaWithContext(context.Background(), processor)
 }
 
-// StreamMediaWithContext processes media items with context support
+// StreamMediaWithContext processes media items with context support.
 func (r *BoltRepository) StreamMediaWithContext(ctx context.Context, processor func(*models.Media) error) error {
 	return r.store.ForEach(nil, func(record interface{}) error {
 		if err := ctx.Err(); err != nil {
@@ -168,7 +168,7 @@ func (r *BoltRepository) StreamMediaWithContext(ctx context.Context, processor f
 	})
 }
 
-// UpdateMediaDownloadID updates the download ID for a media item
+// UpdateMediaDownloadID updates the download ID for a media item.
 func (r *BoltRepository) UpdateMediaDownloadID(traktID, downloadID int64) error {
 	return r.store.UpdateMatching(&models.Media{},
 		bolthold.Where("Trakt").Eq(traktID),
@@ -179,7 +179,7 @@ func (r *BoltRepository) UpdateMediaDownloadID(traktID, downloadID int64) error 
 		})
 }
 
-// RemoveMedia deletes a media item by Trakt ID
+// RemoveMedia deletes a media item by Trakt ID.
 func (r *BoltRepository) RemoveMedia(traktID int64) error {
 	if err := r.store.Delete(traktID, &models.Media{}); err != nil {
 		return fmt.Errorf("failed to remove media: %w", err)
@@ -187,7 +187,7 @@ func (r *BoltRepository) RemoveMedia(traktID int64) error {
 	return nil
 }
 
-// FindAllMedia returns all media items in the database
+// FindAllMedia returns all media items in the database.
 func (r *BoltRepository) FindAllMedia() ([]*models.Media, error) {
 	var medias []*models.Media
 	if err := r.store.Find(&medias, nil); err != nil {
@@ -196,7 +196,7 @@ func (r *BoltRepository) FindAllMedia() ([]*models.Media, error) {
 	return medias, nil
 }
 
-// Close closes the database connection
+// Close closes the database connection.
 func (r *BoltRepository) Close() error {
 	if err := r.store.Close(); err != nil {
 		return fmt.Errorf("failed to close repository: %w", err)
@@ -204,9 +204,6 @@ func (r *BoltRepository) Close() error {
 	return nil
 }
 
-// Helper functions
-
-// convertToInterfaces converts []int64 to []interface{}
 func convertToInterfaces(ids []int64) []interface{} {
 	result := make([]interface{}, len(ids))
 	for i, id := range ids {
@@ -215,7 +212,6 @@ func convertToInterfaces(ids []int64) []interface{} {
 	return result
 }
 
-// findNextBatch finds the next batch of media items
 func (r *BoltRepository) findNextBatch(lastID int64, batchSize int) ([]*models.Media, error) {
 	var batch []*models.Media
 
