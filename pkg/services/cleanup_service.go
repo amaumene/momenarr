@@ -16,33 +16,33 @@ import (
 )
 
 const (
-	defaultWatchedDays     = 5
-	cleanupTimeout         = 5 * time.Minute
-	historyPageLimit       = 1
-	deleteRequestTimeout   = 2 * time.Minute
-	rateLimitDelay         = 2 * time.Second
-	maxWatchedItems        = 30
+	defaultWatchedDays   = 5
+	cleanupTimeout       = 5 * time.Minute
+	historyPageLimit     = 1
+	deleteRequestTimeout = 2 * time.Minute
+	rateLimitDelay       = 2 * time.Second
+	maxWatchedItems      = 30
 )
 
 // CleanupService handles cleanup of watched media with AllDebrid support
 type CleanupService struct {
-	repo             repository.Repository
-	allDebridClient  *alldebrid.Client
-	apiKey           string
-	token            *trakt.Token
-	watchedDays      int
-	rateLimiter      *utils.RateLimiter
+	repo            repository.Repository
+	allDebridClient *alldebrid.Client
+	apiKey          string
+	token           *trakt.Token
+	watchedDays     int
+	rateLimiter     *utils.RateLimiter
 }
 
 // CreateCleanupService creates a cleanup service
 func CreateCleanupService(repo repository.Repository, allDebridClient *alldebrid.Client, apiKey string, token *trakt.Token) *CleanupService {
 	return &CleanupService{
-		repo:             repo,
-		allDebridClient:  allDebridClient,
-		apiKey:           apiKey,
-		token:            token,
-		watchedDays:      defaultWatchedDays,
-		rateLimiter:      utils.TraktRateLimiter(),
+		repo:            repo,
+		allDebridClient: allDebridClient,
+		apiKey:          apiKey,
+		token:           token,
+		watchedDays:     defaultWatchedDays,
+		rateLimiter:     utils.TraktRateLimiter(),
 	}
 }
 
@@ -93,15 +93,15 @@ func (s *CleanupService) ProcessWatchedMediaEnhanced(ctx context.Context) error 
 
 // WatchedItem represents a watched media item
 type WatchedItem struct {
-	TraktID      int64
-	TMDBID       int64
-	Title        string
-	MediaType    models.MediaType
-	Season       int64
-	Episode      int64
-	WatchedAt    time.Time
-	ShowTitle    string
-	ShowTMDBID   int64
+	TraktID    int64
+	TMDBID     int64
+	Title      string
+	MediaType  models.MediaType
+	Season     int64
+	Episode    int64
+	WatchedAt  time.Time
+	ShowTitle  string
+	ShowTMDBID int64
 }
 
 // collectWatchedItem collects watched item information
@@ -138,22 +138,22 @@ func (s *CleanupService) collectWatchedEpisode(item *trakt.History, watchedItems
 		ShowTitle:  item.Show.Title,
 		ShowTMDBID: int64(item.Show.MediaIDs.TMDB),
 	}
-	
+
 	s.updateSeasonWatchStatus(item, seasonWatchStatus)
 }
 
 func (s *CleanupService) updateSeasonWatchStatus(item *trakt.History, seasonWatchStatus map[string]*models.SeasonWatchStatus) {
 	seasonKey := fmt.Sprintf("%d_S%d", item.Show.MediaIDs.TMDB, item.Episode.Season)
-	
+
 	if _, exists := seasonWatchStatus[seasonKey]; !exists {
 		seasonWatchStatus[seasonKey] = &models.SeasonWatchStatus{
-			ShowTMDBID:    int64(item.Show.MediaIDs.TMDB),
-			ShowTitle:     item.Show.Title,
-			Season:        item.Episode.Season,
-			WatchedList:   []int64{},
+			ShowTMDBID:  int64(item.Show.MediaIDs.TMDB),
+			ShowTitle:   item.Show.Title,
+			Season:      item.Episode.Season,
+			WatchedList: []int64{},
 		}
 	}
-	
+
 	status := seasonWatchStatus[seasonKey]
 	status.WatchedList = append(status.WatchedList, item.Episode.Number)
 	status.WatchedEpisodes = len(status.WatchedList)
@@ -165,12 +165,12 @@ func (s *CleanupService) updateSeasonWatchStatus(item *trakt.History, seasonWatc
 // processAllDeletions processes all types of deletions
 func (s *CleanupService) processAllDeletions(ctx context.Context, watchedItems map[string]*WatchedItem, seasonStatus map[string]*models.SeasonWatchStatus) error {
 	s.checkAllSeasons(ctx, seasonStatus)
-	
+
 	deletedCount := 0
 	deletedCount += s.deleteMovies(watchedItems)
 	deletedCount += s.deleteCompleteSeasons(seasonStatus, watchedItems)
 	deletedCount += s.deleteRemainingEpisodes(watchedItems, seasonStatus)
-	
+
 	log.WithField("deleted_count", deletedCount).Info("Completed cleanup of watched media")
 	return nil
 }
@@ -218,12 +218,12 @@ func (s *CleanupService) deleteRemainingEpisodes(watchedItems map[string]*Watche
 		if item.MediaType != models.MediaTypeEpisode {
 			continue
 		}
-		
+
 		seasonKey := fmt.Sprintf("%d_S%d", item.ShowTMDBID, item.Season)
 		if status, exists := seasonStatus[seasonKey]; exists && status.IsComplete {
 			continue
 		}
-		
+
 		if err := s.deleteWatchedMedia(item); err != nil {
 			log.WithError(err).WithField("episode", item.Title).Error("Failed to delete episode")
 		} else {
@@ -262,7 +262,6 @@ func (s *CleanupService) logCleanupStart() {
 		"max_items": maxWatchedItems,
 	}).Info("starting cleanup of watched media")
 }
-
 
 // RemoveMediaManually allows manual removal of media
 func (s *CleanupService) RemoveMediaManually(traktID int64, reason string) error {
@@ -390,15 +389,15 @@ func (s *CleanupService) checkSeasonCompletion(ctx context.Context, status *mode
 	if err != nil {
 		return err
 	}
-	
+
 	seasonInfo, err := s.getSeasonInfo(showTraktID, status.Season)
 	if err != nil {
 		return err
 	}
-	
+
 	status.TotalEpisodes = len(seasonInfo)
 	status.IsComplete = status.WatchedEpisodes >= status.TotalEpisodes
-	
+
 	if status.IsComplete {
 		log.WithFields(log.Fields{
 			"show":     status.ShowTitle,
@@ -406,7 +405,7 @@ func (s *CleanupService) checkSeasonCompletion(ctx context.Context, status *mode
 			"episodes": fmt.Sprintf("%d/%d", status.WatchedEpisodes, status.TotalEpisodes),
 		}).Info("Season fully watched - eligible for cleanup")
 	}
-	
+
 	return nil
 }
 
@@ -438,7 +437,7 @@ func (s *CleanupService) deleteWatchedMedia(item *WatchedItem) error {
 	if err != nil {
 		return nil
 	}
-	
+
 	if media.MagnetID != "" {
 		magnetID, err := strconv.ParseInt(media.MagnetID, 10, 64)
 		if err == nil {
@@ -452,36 +451,36 @@ func (s *CleanupService) deleteWatchedMedia(item *WatchedItem) error {
 			}
 		}
 	}
-	
+
 	if err := s.repo.RemoveMedia(item.TraktID); err != nil {
 		return fmt.Errorf("removing from database: %w", err)
 	}
-	
+
 	log.WithFields(log.Fields{
 		"title": item.Title,
 		"type":  item.MediaType,
 	}).Info("Deleted watched media")
-	
+
 	return nil
 }
 
 // deleteCompleteSeason deletes all episodes in a complete season
 func (s *CleanupService) deleteCompleteSeason(status *models.SeasonWatchStatus, watchedItems map[string]*WatchedItem) error {
 	s.deleteSeasonPackIfExists(status)
-	
+
 	episodes, err := s.repo.GetEpisodesBySeason(status.ShowTMDBID, status.Season)
 	if err != nil {
 		return err
 	}
-	
+
 	s.deleteSeasonEpisodes(episodes, watchedItems)
-	
+
 	log.WithFields(log.Fields{
 		"show":     status.ShowTitle,
 		"season":   status.Season,
 		"episodes": status.WatchedEpisodes,
 	}).Info("Deleted complete season")
-	
+
 	return nil
 }
 
@@ -490,9 +489,9 @@ func (s *CleanupService) deleteSeasonPackIfExists(status *models.SeasonWatchStat
 	if err != nil || seasonPack == nil {
 		return
 	}
-	
+
 	s.deleteSeasonPackMagnet(seasonPack, status)
-	
+
 	if err := s.repo.RemoveSeasonPack(seasonPack.ID); err != nil {
 		log.WithError(err).Warn("Failed to delete season pack record")
 	}
@@ -502,12 +501,12 @@ func (s *CleanupService) deleteSeasonPackMagnet(seasonPack *models.SeasonPack, s
 	if seasonPack.MagnetID == "" {
 		return
 	}
-	
+
 	magnetID, err := strconv.ParseInt(seasonPack.MagnetID, 10, 64)
 	if err != nil {
 		return
 	}
-	
+
 	if err := s.allDebridClient.DeleteMagnet(s.apiKey, strconv.FormatInt(magnetID, 10)); err != nil {
 		log.WithError(err).Warn("Failed to delete season pack from AllDebrid")
 	} else {
@@ -522,11 +521,11 @@ func (s *CleanupService) deleteSeasonPackMagnet(seasonPack *models.SeasonPack, s
 func (s *CleanupService) deleteSeasonEpisodes(episodes []*models.Media, watchedItems map[string]*WatchedItem) {
 	for _, ep := range episodes {
 		s.deleteEpisodeMagnet(ep)
-		
+
 		if err := s.repo.RemoveMedia(ep.Trakt); err != nil {
 			log.WithError(err).Warn("Failed to remove episode from database")
 		}
-		
+
 		key := fmt.Sprintf("episode_%d", ep.Trakt)
 		delete(watchedItems, key)
 	}
@@ -536,12 +535,12 @@ func (s *CleanupService) deleteEpisodeMagnet(ep *models.Media) {
 	if ep.MagnetID == "" || ep.IsSeasonPack {
 		return
 	}
-	
+
 	magnetID, err := strconv.ParseInt(ep.MagnetID, 10, 64)
 	if err != nil {
 		return
 	}
-	
+
 	if err := s.allDebridClient.DeleteMagnet(s.apiKey, strconv.FormatInt(magnetID, 10)); err != nil {
 		log.WithError(err).Warn("Failed to delete episode from AllDebrid")
 	}

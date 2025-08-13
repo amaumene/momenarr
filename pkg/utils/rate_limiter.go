@@ -31,7 +31,7 @@ func (r *RateLimiter) Wait() {
 
 	now := r.enforceMinDelay()
 	r.cleanupOldRequests(now)
-	
+
 	if len(r.requestTimes) >= r.maxRequests {
 		now = r.waitForOldestToExpire(now)
 		r.cleanupOldRequests(now)

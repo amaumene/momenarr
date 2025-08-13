@@ -550,7 +550,7 @@ func (s *TraktService) updateExistingEpisode(existing *models.Media, show *trakt
 	existing.Season = ep.Season
 	existing.Title = show.Title
 	existing.Year = show.Year
-	
+
 	s.updateLanguageInfo(existing)
 	existing.UpdatedAt = time.Now()
 
@@ -572,7 +572,7 @@ func (s *TraktService) updateLanguageInfo(media *models.Media) {
 func (s *TraktService) createNewEpisode(show *trakt.Show, ep *trakt.Episode) error {
 	tmdbID := int64(show.MediaIDs.TMDB)
 	s.logNewEpisodeCreation(show, ep, tmdbID)
-	
+
 	originalLanguage := s.getOriginalLanguageFromTMDB("show", tmdbID)
 	frenchTitle := s.getFrenchTitleIfNeeded(originalLanguage, tmdbID, show.Title)
 
@@ -612,10 +612,10 @@ func (s *TraktService) getFrenchTitleIfNeeded(originalLanguage string, tmdbID in
 	if originalLanguage != "fr" || s.tmdbService == nil {
 		return ""
 	}
-	
+
 	log.WithField("tmdb_id", tmdbID).Info("Fetching French title for French show during sync")
 	frenchTitle := s.tmdbService.GetFrenchTitle("show", tmdbID, title)
-	
+
 	if frenchTitle != "" {
 		log.WithFields(log.Fields{
 			"tmdb_id": tmdbID,

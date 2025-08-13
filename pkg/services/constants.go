@@ -4,7 +4,7 @@ import "regexp"
 
 // Video file extensions
 var VideoExtensions = []string{
-	".mp4", ".mkv", ".avi", ".mov", ".wmv", 
+	".mp4", ".mkv", ".avi", ".mov", ".wmv",
 	".flv", ".webm", ".m4v", ".mpg", ".mpeg",
 }
 

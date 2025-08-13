@@ -31,7 +31,7 @@ func (t *TMDBService) GetFrenchTitle(mediaType string, tmdbID int64, fallbackTit
 	}
 
 	frenchTitle := t.fetchFrenchTitle(mediaType, tmdbID, fallbackTitle)
-	
+
 	if frenchTitle == "" {
 		frenchTitle = fallbackTitle
 	}
@@ -42,7 +42,7 @@ func (t *TMDBService) GetFrenchTitle(mediaType string, tmdbID int64, fallbackTit
 
 func (t *TMDBService) fetchFrenchTitle(mediaType string, tmdbID int64, fallbackTitle string) string {
 	options := map[string]string{"language": "fr-FR"}
-	
+
 	if mediaType == "episode" || mediaType == "show" || mediaType == "series" {
 		return t.fetchTVFrenchTitle(tmdbID, options, fallbackTitle)
 	}

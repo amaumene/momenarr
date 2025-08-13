@@ -25,12 +25,3 @@ func LogTorrentSearchResultOperation(operation string, result *models.TorrentSea
 		"operation": operation,
 	})
 }
-
-// LogDownloadOperation returns a log entry with download-related fields.
-func LogDownloadOperation(operation string, traktID int64, title string) *log.Entry {
-	return log.WithFields(log.Fields{
-		"trakt_id":  traktID,
-		"title":     title,
-		"operation": operation,
-	})
-}

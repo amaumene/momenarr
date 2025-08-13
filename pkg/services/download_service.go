@@ -12,19 +12,19 @@ import (
 )
 
 type DownloadService struct {
-	repo             repository.Repository
-	allDebridClient  *alldebrid.Client
-	apiKey           string
-	torrentService   *TorrentService
+	repo            repository.Repository
+	allDebridClient *alldebrid.Client
+	apiKey          string
+	torrentService  *TorrentService
 }
 
 // CreateDownloadService creates a download service
 func CreateDownloadService(repo repository.Repository, allDebridClient *alldebrid.Client, apiKey string, torrentService *TorrentService) *DownloadService {
 	return &DownloadService{
-		repo:             repo,
-		allDebridClient:  allDebridClient,
-		apiKey:           apiKey,
-		torrentService:   torrentService,
+		repo:            repo,
+		allDebridClient: allDebridClient,
+		apiKey:          apiKey,
+		torrentService:  torrentService,
 	}
 }
 
@@ -198,7 +198,7 @@ func (s *DownloadService) markMediaAsCompleted(media *models.Media, allDebridID 
 	media.OnDisk = true
 	media.File = fmt.Sprintf("AllDebrid magnet ID: %d", allDebridID)
 	media.MagnetID = fmt.Sprintf("%d", allDebridID)
-	
+
 	if result.IsSeasonPack() {
 		media.IsSeasonPack = true
 		media.SeasonPackID = allDebridID
@@ -322,7 +322,7 @@ func (s *DownloadService) saveTorrentAsDownloaded(media *models.Media, allDebrid
 	media.OnDisk = true
 	media.File = fmt.Sprintf("AllDebrid magnet ID: %d", allDebridID)
 	media.MagnetID = fmt.Sprintf("%d", allDebridID)
-	
+
 	if torrent.IsSeasonPack() {
 		media.IsSeasonPack = true
 		media.SeasonPackID = allDebridID
@@ -345,33 +345,33 @@ func (s *DownloadService) saveTorrentAsDownloaded(media *models.Media, allDebrid
 // isTorrentCached checks if a torrent is cached on AllDebrid
 func (s *DownloadService) isTorrentCached(hash string) (bool, int64, error) {
 	magnetURL := fmt.Sprintf("magnet:?xt=urn:btih:%s", hash)
-	
+
 	uploadResult, err := s.allDebridClient.UploadMagnet(s.apiKey, []string{magnetURL})
 	if err != nil {
 		return false, 0, fmt.Errorf("failed to upload magnet: %w", err)
 	}
-	
+
 	if uploadResult.Error != nil {
 		return false, 0, fmt.Errorf("upload error: %s", uploadResult.Error.Message)
 	}
-	
+
 	if len(uploadResult.Data.Magnets) == 0 {
 		return false, 0, nil
 	}
-	
+
 	magnet := &uploadResult.Data.Magnets[0]
 	if magnet.Error != nil {
 		return false, 0, fmt.Errorf("magnet error: %s", magnet.Error.Message)
 	}
-	
+
 	if magnet.Ready {
 		return true, int64(magnet.ID), nil
 	}
-	
+
 	// If not ready, delete it
 	if err := s.allDebridClient.DeleteMagnet(s.apiKey, strconv.FormatInt(magnet.ID, 10)); err != nil {
 		log.WithError(err).Error("Failed to delete non-cached magnet")
 	}
-	
+
 	return false, 0, nil
 }

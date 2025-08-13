@@ -2,7 +2,6 @@ package services
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -15,7 +14,6 @@ import (
 	"github.com/amaumene/gostremiofr/pkg/torrentsearch/providers"
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/repository"
-	"github.com/amaumene/momenarr/pkg/utils"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -30,31 +28,12 @@ type TorrentService struct {
 	blacklistMu    sync.RWMutex
 }
 
-// CreateTorrentService creates a TorrentService
-func CreateTorrentService(repo repository.Repository, blacklistFile string) *TorrentService {
-	searcher := torrentsearch.New(nil)
-	searcher.RegisterProvider(providers.ProviderApiBay, providers.NewApiBayProvider())
-	searcher.RegisterProvider(providers.ProviderYGG, providers.NewYGGProvider())
-	
-	return &TorrentService{
-		repo:           repo,
-		searcher:       searcher,
-		blacklistFile:  blacklistFile,
-		blacklistCache: make(map[string]struct{}),
-	}
-}
-
-// NewTorrentService is deprecated, use CreateTorrentService
-func NewTorrentService(repo repository.Repository, blacklistFile string) *TorrentService {
-	return CreateTorrentService(repo, blacklistFile)
-}
-
 // CreateTorrentServiceWithTrakt creates a TorrentService with Trakt support
 func CreateTorrentServiceWithTrakt(repo repository.Repository, blacklistFile string, traktService *TraktService) *TorrentService {
 	searcher := torrentsearch.New(nil)
 	searcher.RegisterProvider(providers.ProviderApiBay, providers.NewApiBayProvider())
 	searcher.RegisterProvider(providers.ProviderYGG, providers.NewYGGProvider())
-	
+
 	return &TorrentService{
 		repo:           repo,
 		searcher:       searcher,
@@ -64,26 +43,16 @@ func CreateTorrentServiceWithTrakt(repo repository.Repository, blacklistFile str
 	}
 }
 
-// NewTorrentServiceWithTrakt is deprecated, use CreateTorrentServiceWithTrakt
-func NewTorrentServiceWithTrakt(repo repository.Repository, blacklistFile string, traktService *TraktService) *TorrentService {
-	return CreateTorrentServiceWithTrakt(repo, blacklistFile, traktService)
-}
-
-// NewTorrentServiceWithTraktAndTMDB is deprecated, use CreateTorrentServiceWithTraktAndTMDB
-func NewTorrentServiceWithTraktAndTMDB(repo repository.Repository, blacklistFile string, traktService *TraktService, tmdbService *TMDBService) *TorrentService {
-	return CreateTorrentServiceWithTraktAndTMDB(repo, blacklistFile, traktService, tmdbService)
-}
-
 // CreateTorrentServiceWithTraktAndTMDB creates a TorrentService with Trakt and TMDB support
 func CreateTorrentServiceWithTraktAndTMDB(repo repository.Repository, blacklistFile string, traktService *TraktService, tmdbService *TMDBService) *TorrentService {
 	searcher := torrentsearch.New(nil)
 	searcher.RegisterProvider(providers.ProviderApiBay, providers.NewApiBayProvider())
 	searcher.RegisterProvider(providers.ProviderYGG, providers.NewYGGProvider())
-	
+
 	if tmdbService != nil && tmdbService.client != nil && tmdbService.apiKey != "" {
 		searcher.SetTMDBAPIKey(tmdbService.apiKey)
 	}
-	
+
 	return &TorrentService{
 		repo:           repo,
 		searcher:       searcher,
@@ -92,31 +61,6 @@ func CreateTorrentServiceWithTraktAndTMDB(repo repository.Repository, blacklistF
 		blacklistFile:  blacklistFile,
 		blacklistCache: make(map[string]struct{}),
 	}
-}
-
-// NewTorrentServiceWithTraktAndTMDBAndOrionoid is deprecated, kept for backward compatibility
-func NewTorrentServiceWithTraktAndTMDBAndOrionoid(repo repository.Repository, blacklistFile string, traktService *TraktService, tmdbService *TMDBService, _, _ string) *TorrentService {
-	return CreateTorrentServiceWithTraktAndTMDB(repo, blacklistFile, traktService, tmdbService)
-}
-
-// GetBestTorrent is no longer supported since torrents are not stored in database
-func (s *TorrentService) GetBestTorrent(traktID int64) (interface{}, error) {
-	return nil, fmt.Errorf("torrent database functionality has been removed")
-}
-
-// GetSortedTorrents is no longer supported since torrents are not stored in database
-func (s *TorrentService) GetSortedTorrents(traktID int64) ([]interface{}, error) {
-	return nil, fmt.Errorf("torrent database functionality has been removed")
-}
-
-// PopulateTorrents is deprecated - using real-time search
-func (s *TorrentService) PopulateTorrents() error {
-	return nil
-}
-
-// PopulateTorrentsWithContext is deprecated - using real-time search
-func (s *TorrentService) PopulateTorrentsWithContext(ctx context.Context) error {
-	return nil
 }
 
 // FindBestCachedTorrent searches for torrents in real-time and returns the best one cached on AllDebrid
@@ -354,35 +298,6 @@ func (s *TorrentService) filterBlacklistedTorrents(results []models.TorrentSearc
 	return filteredResults, nil
 }
 
-func (s *TorrentService) sortTorrentResults(results []models.TorrentSearchResult) {
-	utils.SortTorrentResultsByQuality(results)
-}
-
-// populateTorrentsForMedia populates torrent entries for a specific media item
-func (s *TorrentService) populateTorrentsForMedia(media *models.Media) error {
-	mediaType := s.getMediaType(media)
-	results, err := s.searchTorrents(media, mediaType)
-	if err != nil {
-		return fmt.Errorf("searching torrents for media %d: %w", media.Trakt, err)
-	}
-
-	if len(results) == 0 {
-		return nil
-	}
-
-	if err := s.insertTorrentResults(media, results); err != nil {
-		return fmt.Errorf("inserting torrent results: %w", err)
-	}
-
-	return nil
-}
-
-// insertTorrentResults is no longer needed since torrents are not stored in database
-func (s *TorrentService) insertTorrentResults(media *models.Media, results []models.TorrentSearchResult) error {
-	log.WithField("trakt_id", media.Trakt).Debug("insertTorrentResults called but no-op since torrents not stored in database")
-	return nil
-}
-
 // getBlacklist retrieves the blacklist with thread-safe caching
 func (s *TorrentService) getBlacklist() (map[string]struct{}, error) {
 	if cached := s.getCachedBlacklist(); cached != nil {
@@ -482,12 +397,6 @@ func (s *TorrentService) isBlacklisted(title string, blacklist map[string]struct
 	return false
 }
 
-// MarkTorrentFailed is no longer supported since torrents are not stored in database
-func (s *TorrentService) MarkTorrentFailed(traktID int64) error {
-	log.WithField("trakt_id", traktID).Info("MarkTorrentFailed called but no-op since torrents not stored in database")
-	return nil
-}
-
 // performSearch executes the search and converts results
 func (s *TorrentService) performSearch(title string, mediaType string, season, episode, year int, originalLanguage, frenchTitle string) ([]models.TorrentSearchResult, error) {
 	options := tsmodels.SearchOptions{
@@ -499,11 +408,11 @@ func (s *TorrentService) performSearch(title string, mediaType string, season, e
 		Language:        originalLanguage,
 		SpecificEpisode: episode > 0,
 	}
-	
+
 	if s.searcher == nil {
 		return nil, fmt.Errorf("searcher not initialized")
 	}
-	
+
 	// Try smart search if TMDB is configured
 	if s.tmdbService != nil && s.tmdbService.apiKey != "" {
 		combined, _, err := s.searcher.SearchSmart(title, mediaType, season, episode, episode > 0)
@@ -512,17 +421,17 @@ func (s *TorrentService) performSearch(title string, mediaType string, season, e
 		}
 		log.WithError(err).Error("Smart search failed, falling back to basic search")
 	}
-	
+
 	// Fallback to basic search
 	var allResults []models.TorrentSearchResult
-	
+
 	// Search APIBay
 	if apiBayResults, err := s.searcher.Search(providers.ProviderApiBay, options); err == nil {
 		allResults = append(allResults, s.convertSearchResults(apiBayResults)...)
 	} else {
 		log.WithError(err).Warn("APIBay search failed")
 	}
-	
+
 	// Search YGG if appropriate
 	if originalLanguage == "fr" || originalLanguage == "" {
 		if yggResults, err := s.searcher.Search(providers.ProviderYGG, options); err == nil {
@@ -531,18 +440,18 @@ func (s *TorrentService) performSearch(title string, mediaType string, season, e
 			log.WithError(err).Warn("YGG search failed")
 		}
 	}
-	
+
 	return allResults, nil
 }
 
 // convertCombinedResults converts CombinedSearchResults to TorrentSearchResult slice
 func (s *TorrentService) convertCombinedResults(combined *tsmodels.CombinedSearchResults) []models.TorrentSearchResult {
 	var results []models.TorrentSearchResult
-	
+
 	if combined == nil || combined.Results == nil {
 		return results
 	}
-	
+
 	for providerName, searchResults := range combined.Results {
 		if searchResults == nil {
 			continue
@@ -560,34 +469,34 @@ func (s *TorrentService) convertCombinedResults(combined *tsmodels.CombinedSearc
 			results = append(results, s.convertTorrentInfo(torrent, providerName))
 		}
 	}
-	
+
 	return results
 }
 
 // convertSearchResults converts SearchResults to TorrentSearchResult slice
 func (s *TorrentService) convertSearchResults(searchResults *tsmodels.SearchResults) []models.TorrentSearchResult {
 	var results []models.TorrentSearchResult
-	
+
 	if searchResults == nil {
 		return results
 	}
-	
+
 	for _, torrent := range searchResults.MovieTorrents {
 		results = append(results, s.convertTorrentInfo(torrent, torrent.Source))
 	}
-	
+
 	for _, torrent := range searchResults.CompleteSeriesTorrents {
 		results = append(results, s.convertTorrentInfo(torrent, torrent.Source))
 	}
-	
+
 	for _, torrent := range searchResults.CompleteSeasonTorrents {
 		results = append(results, s.convertTorrentInfo(torrent, torrent.Source))
 	}
-	
+
 	for _, torrent := range searchResults.EpisodeTorrents {
 		results = append(results, s.convertTorrentInfo(torrent, torrent.Source))
 	}
-	
+
 	return results
 }
 
@@ -597,12 +506,12 @@ func (s *TorrentService) convertTorrentInfo(torrent tsmodels.TorrentInfo, provid
 	if source == "" {
 		source = s.mapProviderName(providerName)
 	}
-	
+
 	magnetURL := ""
 	if torrent.Hash != "" {
 		magnetURL = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", torrent.Hash, torrent.Title)
 	}
-	
+
 	return models.TorrentSearchResult{
 		Title:     torrent.Title,
 		Hash:      torrent.Hash,
@@ -632,33 +541,33 @@ func (s *TorrentService) mapProviderName(providerName string) string {
 // isTorrentCached checks if a torrent is cached on AllDebrid
 func (s *TorrentService) isTorrentCached(client *alldebrid.Client, apiKey string, hash string) (bool, int64, error) {
 	magnetURL := fmt.Sprintf("magnet:?xt=urn:btih:%s", hash)
-	
+
 	uploadResult, err := client.UploadMagnet(apiKey, []string{magnetURL})
 	if err != nil {
 		return false, 0, fmt.Errorf("failed to upload magnet: %w", err)
 	}
-	
+
 	if uploadResult.Error != nil {
 		return false, 0, fmt.Errorf("upload error: %s", uploadResult.Error.Message)
 	}
-	
+
 	if len(uploadResult.Data.Magnets) == 0 {
 		return false, 0, nil
 	}
-	
+
 	magnet := &uploadResult.Data.Magnets[0]
 	if magnet.Error != nil {
 		return false, 0, fmt.Errorf("magnet error: %s", magnet.Error.Message)
 	}
-	
+
 	if magnet.Ready {
 		return true, int64(magnet.ID), nil
 	}
-	
+
 	// If not ready, delete it
 	if err := client.DeleteMagnet(apiKey, strconv.FormatInt(magnet.ID, 10)); err != nil {
 		log.WithError(err).Error("Failed to delete non-cached magnet")
 	}
-	
+
 	return false, 0, nil
 }

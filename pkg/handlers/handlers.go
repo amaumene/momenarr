@@ -40,9 +40,9 @@ func NewAppHandler(appService *services.AppService) http.Handler {
 // ServeHTTP implements the http.Handler interface.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer h.recoverPanic(w, r)
-	
+
 	log.WithFields(log.Fields{
-		"path": r.URL.Path,
+		"path":   r.URL.Path,
 		"method": r.Method,
 	}).Debug("Handling request")
 
@@ -51,8 +51,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleMedia(w, r)
 	case "/api/media/stats":
 		h.handleMediaStats(w, r)
-	case "/api/torrents/list":
-		h.handleTorrentList(w, r)
 	case "/api/download/retry":
 		h.handleRetryDownload(w, r)
 	case "/api/download/cancel":
@@ -73,7 +71,6 @@ func (h *Handler) SetupRoutes() {
 	routes := map[string]http.HandlerFunc{
 		"/api/media":           h.handleMedia,
 		"/api/media/stats":     h.handleMediaStats,
-		"/api/torrents/list":   h.handleTorrentList,
 		"/api/download/retry":  h.handleRetryDownload,
 		"/api/download/cancel": h.handleCancelDownload,
 		"/api/download/status": h.handleDownloadStatus,
@@ -121,7 +118,7 @@ func (h *Handler) writeSuccessResponse(w http.ResponseWriter, message string, da
 		h.writeJSONResponse(w, http.StatusOK, data)
 		return
 	}
-	
+
 	response := responseSuccess{
 		Message: message,
 		Data:    data,
@@ -181,7 +178,7 @@ func (h *Handler) fetchMediaList(w http.ResponseWriter) ([]*models.Media, error)
 	mediaList, err := h.appService.GetAllMedia()
 	if err != nil {
 		log.WithError(err).Error("Failed to get all media")
-		h.writeHTMLErrorResponse(w, http.StatusInternalServerError, 
+		h.writeHTMLErrorResponse(w, http.StatusInternalServerError,
 			"Failed to get media", "There was an error retrieving the media list")
 		return nil, err
 	}
@@ -193,7 +190,7 @@ func (h *Handler) fetchMediaStats(w http.ResponseWriter) (*services.MediaStats, 
 	stats, err := h.appService.GetMediaStats()
 	if err != nil {
 		log.WithError(err).Error("Failed to get media stats")
-		h.writeHTMLErrorResponse(w, http.StatusInternalServerError, 
+		h.writeHTMLErrorResponse(w, http.StatusInternalServerError,
 			"Failed to get stats", "There was an error retrieving media statistics")
 		return nil, err
 	}
@@ -218,32 +215,6 @@ func (h *Handler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		log.WithError(err).Error("Failed to encode stats response")
 	}
-}
-
-// handleTorrentList handles torrent listing requests for a specific Trakt ID
-func (h *Handler) handleTorrentList(w http.ResponseWriter, r *http.Request) {
-	if !h.validateMethod(w, r, http.MethodGet, false) {
-		return
-	}
-
-	traktID, err := h.getTraktIDFromQuery(w, r)
-	if err != nil {
-		return
-	}
-
-	torrents, err := h.appService.GetTorrentsByTraktID(traktID)
-	if err != nil {
-		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get torrents", err.Error())
-		return
-	}
-
-	data := map[string]interface{}{
-		"trakt_id": traktID,
-		"count":    len(torrents),
-		"torrents": torrents,
-	}
-
-	h.writeSuccessResponse(w, "Torrents retrieved successfully", data)
 }
 
 // handleRetryDownload handles download retry requests
@@ -349,15 +320,15 @@ func (h *Handler) recoverPanic(w http.ResponseWriter, r *http.Request) {
 		buf := make([]byte, 4096)
 		n := runtime.Stack(buf, false)
 		stackTrace := string(buf[:n])
-		
+
 		log.WithFields(log.Fields{
 			"panic":  fmt.Sprintf("%v", rec),
 			"path":   r.URL.Path,
 			"method": r.Method,
 		}).Error("panic recovered in http handler")
-		
+
 		log.Debugf("Stack trace:\n%s", stackTrace)
-		
+
 		h.writeErrorResponse(w, http.StatusInternalServerError, "internal server error", "an unexpected error occurred")
 	}
 }
@@ -452,7 +423,7 @@ func (h *Handler) renderMediaPage(w http.ResponseWriter, mediaList []*models.Med
 	}
 
 	data := h.prepareMediaPageData(mediaList, stats)
-	
+
 	w.Header().Set("Content-Type", "text/html")
 	return t.Execute(w, data)
 }
@@ -461,7 +432,7 @@ func (h *Handler) renderMediaPage(w http.ResponseWriter, mediaList []*models.Med
 func (h *Handler) parseTemplate(w http.ResponseWriter, tmpl string) (*template.Template, error) {
 	t, err := template.New("media").Parse(tmpl)
 	if err != nil {
-		h.writeHTMLErrorResponse(w, http.StatusInternalServerError, 
+		h.writeHTMLErrorResponse(w, http.StatusInternalServerError,
 			"Template error", "There was an error creating the page template")
 		return nil, err
 	}
@@ -477,7 +448,7 @@ type mediaPageData struct {
 // prepareMediaPageData prepares data for the media page template
 func (h *Handler) prepareMediaPageData(mediaList []*models.Media, stats *services.MediaStats) mediaPageData {
 	safeMediaList := h.convertMediaList(mediaList)
-	
+
 	return mediaPageData{
 		Media: safeMediaList,
 		Stats: convertStats(stats),

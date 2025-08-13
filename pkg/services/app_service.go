@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	mediaBatchSize         = 100
-	downloadCheckInterval  = 5 * time.Second
+	mediaBatchSize        = 100
+	downloadCheckInterval = 5 * time.Second
 )
 
 // AppService orchestrates the main application functionality
@@ -68,9 +68,6 @@ func (s *AppService) executeTasks(ctx context.Context) error {
 		return utils.WrapServiceError("sync from trakt", err)
 	}
 
-	if err := services.torrent.PopulateTorrentsWithContext(ctx); err != nil {
-		return utils.WrapServiceError("populate torrent entries", err)
-	}
 
 	if err := services.download.DownloadNotOnDiskWithContext(ctx); err != nil {
 		return utils.WrapServiceError("download media not on disk", err)
@@ -158,10 +155,6 @@ func (s *AppService) GetCleanupStats() (*CleanupStats, error) {
 	return s.cleanupService.GetCleanupStats()
 }
 
-// GetTorrentsByTraktID is deprecated
-func (s *AppService) GetTorrentsByTraktID(traktID int64) ([]interface{}, error) {
-	return nil, fmt.Errorf("torrent database functionality has been removed")
-}
 
 // GetAllMedia returns all media items
 func (s *AppService) GetAllMedia() ([]*models.Media, error) {
