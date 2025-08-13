@@ -16,6 +16,9 @@ type Media struct {
 	OnDisk           bool      `json:"on_disk"`
 	File             string    `json:"file,omitempty"`
 	DownloadID       int64     `json:"download_id,omitempty"`
+	IsSeasonPack     bool      `json:"is_season_pack,omitempty"`
+	SeasonPackID     int64     `json:"season_pack_id,omitempty"`
+	MagnetID         string    `json:"magnet_id,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }

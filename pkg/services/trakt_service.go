@@ -7,6 +7,7 @@ import (
 
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/repository"
+	"github.com/amaumene/momenarr/pkg/utils"
 	"github.com/amaumene/momenarr/trakt"
 	"github.com/amaumene/momenarr/trakt/episode"
 	"github.com/amaumene/momenarr/trakt/show"
@@ -24,13 +25,15 @@ type TraktService struct {
 	repo        repository.Repository
 	token       *trakt.Token
 	tmdbService *TMDBService
+	rateLimiter *utils.RateLimiter
 }
 
 // NewTraktService creates a new TraktService
 func NewTraktService(repo repository.Repository, token *trakt.Token) *TraktService {
 	return &TraktService{
-		repo:  repo,
-		token: token,
+		repo:        repo,
+		token:       token,
+		rateLimiter: utils.TraktRateLimiter(),
 	}
 }
 
@@ -40,6 +43,7 @@ func NewTraktServiceWithTMDB(repo repository.Repository, token *trakt.Token, tmd
 		repo:        repo,
 		token:       token,
 		tmdbService: tmdbService,
+		rateLimiter: utils.TraktRateLimiter(),
 	}
 }
 
@@ -416,6 +420,7 @@ func (s *TraktService) syncEpisodesFromWatchlist() ([]int64, error) {
 			Params: trakt.Params{OAuth: s.token.AccessToken},
 		}
 
+		// s.rateLimiter.Wait()
 		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
 		if err != nil {
 			log.WithError(err).WithField("show", item.Show.Title).Error("Failed to get show progress")
@@ -460,6 +465,7 @@ func (s *TraktService) syncEpisodesFromFavorites() ([]int64, error) {
 			Params: trakt.Params{OAuth: s.token.AccessToken},
 		}
 
+		// s.rateLimiter.Wait()
 		showProgress, err := show.WatchedProgress(item.Show.Trakt, progressParams)
 		if err != nil {
 			log.WithError(err).WithField("show", item.Show.Title).Error("Failed to get show progress")
@@ -488,6 +494,7 @@ func (s *TraktService) getNextEpisodes(show *trakt.Show, nextEpisode *trakt.Epis
 	var episodeIDs []int64
 
 	for i := 0; i < maxEpisodesPerShow; i++ {
+		// s.rateLimiter.Wait()
 		ep, err := episode.Get(show.Trakt, nextEpisode.Season, nextEpisode.Number+int64(i), nil)
 		if err != nil {
 			log.WithError(err).WithFields(log.Fields{
@@ -497,6 +504,7 @@ func (s *TraktService) getNextEpisodes(show *trakt.Show, nextEpisode *trakt.Epis
 			}).Debug("Failed to get episode, trying next season")
 
 			// Try next season
+			// s.rateLimiter.Wait()
 			ep, err = episode.Get(show.Trakt, nextEpisode.Season+1, 1, nil)
 			if err != nil {
 				log.WithError(err).WithField("show", show.Title).Debug("No more episodes available")
@@ -517,62 +525,56 @@ func (s *TraktService) getNextEpisodes(show *trakt.Show, nextEpisode *trakt.Epis
 
 // insertEpisodeToDB inserts an episode into the database
 func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
+	if err := s.validateEpisode(ep); err != nil {
+		return err
+	}
+
+	existing, err := s.repo.GetMedia(int64(ep.Trakt))
+	if err == nil && existing != nil {
+		return s.updateExistingEpisode(existing, show, ep)
+	}
+
+	return s.createNewEpisode(show, ep)
+}
+
+func (s *TraktService) validateEpisode(ep *trakt.Episode) error {
 	if int64(ep.Trakt) <= 0 || ep.Number <= 0 || ep.Season <= 0 {
 		return fmt.Errorf("invalid episode data: Trakt=%d, Season=%d, Number=%d",
 			ep.Trakt, ep.Season, ep.Number)
 	}
+	return nil
+}
 
-	// Check if media already exists to preserve OnDisk status
-	existing, err := s.repo.GetMedia(int64(ep.Trakt))
-	if err == nil && existing != nil {
-		// Update existing media but preserve OnDisk status and File path
-		existing.Number = ep.Number
-		existing.Season = ep.Season
-		existing.Title = show.Title // Use show title for torrent searches
-		existing.Year = show.Year
+func (s *TraktService) updateExistingEpisode(existing *models.Media, show *trakt.Show, ep *trakt.Episode) error {
+	existing.Number = ep.Number
+	existing.Season = ep.Season
+	existing.Title = show.Title
+	existing.Year = show.Year
+	
+	s.updateLanguageInfo(existing)
+	existing.UpdatedAt = time.Now()
 
-		// Update original language and French title if TMDB service is available
-		if existing.TMDBID > 0 && existing.OriginalLanguage == "" {
-			existing.OriginalLanguage = s.getOriginalLanguageFromTMDB("show", existing.TMDBID)
-			// If original language is French, get and store French title
-			if existing.OriginalLanguage == "fr" && s.tmdbService != nil {
-				existing.FrenchTitle = s.tmdbService.GetFrenchTitle("show", existing.TMDBID, existing.Title)
-			}
-		}
-
-		existing.UpdatedAt = time.Now()
-
-		if err := s.repo.SaveMedia(existing); err != nil {
-			return fmt.Errorf("updating episode %d: %w", ep.Trakt, err)
-		}
-		return nil
+	if err := s.repo.SaveMedia(existing); err != nil {
+		return fmt.Errorf("updating episode %d: %w", ep.Trakt, err)
 	}
+	return nil
+}
 
-	// Create new media entry
+func (s *TraktService) updateLanguageInfo(media *models.Media) {
+	if media.TMDBID > 0 && media.OriginalLanguage == "" {
+		media.OriginalLanguage = s.getOriginalLanguageFromTMDB("show", media.TMDBID)
+		if media.OriginalLanguage == "fr" && s.tmdbService != nil {
+			media.FrenchTitle = s.tmdbService.GetFrenchTitle("show", media.TMDBID, media.Title)
+		}
+	}
+}
+
+func (s *TraktService) createNewEpisode(show *trakt.Show, ep *trakt.Episode) error {
 	tmdbID := int64(show.MediaIDs.TMDB)
-	log.WithFields(log.Fields{
-		"trakt_id": ep.Trakt,
-		"show":     show.Title,
-		"tmdb_id":  tmdbID,
-		"season":   ep.Season,
-		"episode":  ep.Number,
-	}).Info("Creating new episode media during sync")
-
+	s.logNewEpisodeCreation(show, ep, tmdbID)
+	
 	originalLanguage := s.getOriginalLanguageFromTMDB("show", tmdbID)
-
-	// Get French title if original language is French
-	var frenchTitle string
-	if originalLanguage == "fr" && s.tmdbService != nil {
-		log.WithField("tmdb_id", tmdbID).Info("Fetching French title for French show during sync")
-		frenchTitle = s.tmdbService.GetFrenchTitle("show", tmdbID, show.Title)
-		if frenchTitle != "" {
-			log.WithFields(log.Fields{
-				"tmdb_id": tmdbID,
-				"english": show.Title,
-				"french":  frenchTitle,
-			}).Info("Successfully retrieved French title during sync")
-		}
-	}
+	frenchTitle := s.getFrenchTitleIfNeeded(originalLanguage, tmdbID, show.Title)
 
 	media := &models.Media{
 		Trakt:            int64(ep.Trakt),
@@ -581,7 +583,7 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 		FrenchTitle:      frenchTitle,
 		Number:           ep.Number,
 		Season:           ep.Season,
-		Title:            show.Title, // Use show title for torrent searches
+		Title:            show.Title,
 		Year:             show.Year,
 		OnDisk:           false,
 		CreatedAt:        time.Now(),
@@ -589,11 +591,37 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 	}
 
 	if err := s.repo.SaveMedia(media); err != nil {
-		// Handle duplicate key error gracefully
 		if err.Error() != duplicateKeyError {
 			return fmt.Errorf("saving episode to database: %w", err)
 		}
 	}
-
 	return nil
+}
+
+func (s *TraktService) logNewEpisodeCreation(show *trakt.Show, ep *trakt.Episode, tmdbID int64) {
+	log.WithFields(log.Fields{
+		"trakt_id": ep.Trakt,
+		"show":     show.Title,
+		"tmdb_id":  tmdbID,
+		"season":   ep.Season,
+		"episode":  ep.Number,
+	}).Info("Creating new episode media during sync")
+}
+
+func (s *TraktService) getFrenchTitleIfNeeded(originalLanguage string, tmdbID int64, title string) string {
+	if originalLanguage != "fr" || s.tmdbService == nil {
+		return ""
+	}
+	
+	log.WithField("tmdb_id", tmdbID).Info("Fetching French title for French show during sync")
+	frenchTitle := s.tmdbService.GetFrenchTitle("show", tmdbID, title)
+	
+	if frenchTitle != "" {
+		log.WithFields(log.Fields{
+			"tmdb_id": tmdbID,
+			"english": title,
+			"french":  frenchTitle,
+		}).Info("Successfully retrieved French title during sync")
+	}
+	return frenchTitle
 }

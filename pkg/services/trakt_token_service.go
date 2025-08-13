@@ -80,11 +80,35 @@ func (s *TraktTokenService) loadTokenFromFile() (*trakt.Token, error) {
 
 // generateNewToken generates a new token using device authorization
 func (s *TraktTokenService) generateNewToken() (*trakt.Token, error) {
+	deviceCode, err := s.requestDeviceCode()
+	if err != nil {
+		return nil, err
+	}
+
+	s.displayAuthorizationInfo(deviceCode)
+
+	token, err := s.pollForToken(deviceCode)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.saveTokenToFile(token); err != nil {
+		return nil, fmt.Errorf("saving new token: %w", err)
+	}
+
+	log.Info("Successfully generated and saved new Trakt token")
+	return token, nil
+}
+
+func (s *TraktTokenService) requestDeviceCode() (*trakt.DeviceCode, error) {
 	deviceCode, err := authorization.NewCode(nil)
 	if err != nil {
 		return nil, fmt.Errorf("generating device code: %w", err)
 	}
+	return deviceCode, nil
+}
 
+func (s *TraktTokenService) displayAuthorizationInfo(deviceCode *trakt.DeviceCode) {
 	log.WithFields(log.Fields{
 		"verification_url": deviceCode.VerificationURL,
 		"user_code":        deviceCode.UserCode,
@@ -92,7 +116,9 @@ func (s *TraktTokenService) generateNewToken() (*trakt.Token, error) {
 	}).Info("Please authorize the application")
 
 	fmt.Printf("Please go to %s and enter the code: %s\n", deviceCode.VerificationURL, deviceCode.UserCode)
+}
 
+func (s *TraktTokenService) pollForToken(deviceCode *trakt.DeviceCode) (*trakt.Token, error) {
 	pollParams := &trakt.PollCodeParams{
 		Code:         deviceCode.Code,
 		Interval:     deviceCode.Interval,
@@ -104,12 +130,6 @@ func (s *TraktTokenService) generateNewToken() (*trakt.Token, error) {
 	if err != nil {
 		return nil, fmt.Errorf("polling for token: %w", err)
 	}
-
-	if err := s.saveTokenToFile(token); err != nil {
-		return nil, fmt.Errorf("saving new token: %w", err)
-	}
-
-	log.Info("Successfully generated and saved new Trakt token")
 	return token, nil
 }
 

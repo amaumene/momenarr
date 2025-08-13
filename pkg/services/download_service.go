@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"fmt"
+	"strconv"
 
+	"github.com/amaumene/gostremiofr/pkg/alldebrid"
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/repository"
 	log "github.com/sirupsen/logrus"
@@ -11,15 +13,17 @@ import (
 
 type DownloadService struct {
 	repo             repository.Repository
-	allDebridService AllDebridInterface
+	allDebridClient  *alldebrid.Client
+	apiKey           string
 	torrentService   *TorrentService
 }
 
 // CreateDownloadService creates a download service
-func CreateDownloadService(repo repository.Repository, allDebrid AllDebridInterface, torrentService *TorrentService) *DownloadService {
+func CreateDownloadService(repo repository.Repository, allDebridClient *alldebrid.Client, apiKey string, torrentService *TorrentService) *DownloadService {
 	return &DownloadService{
 		repo:             repo,
-		allDebridService: allDebrid,
+		allDebridClient:  allDebridClient,
+		apiKey:           apiKey,
 		torrentService:   torrentService,
 	}
 }
@@ -101,7 +105,7 @@ func (s *DownloadService) isMediaAlreadyOnDisk(media *models.Media) bool {
 
 // findCachedTorrent searches for the best cached torrent
 func (s *DownloadService) findCachedTorrent(media *models.Media) (*models.TorrentSearchResult, error) {
-	bestTorrent, err := s.torrentService.FindBestCachedTorrent(media, s.allDebridService)
+	bestTorrent, err := s.torrentService.FindBestCachedTorrent(media, s.allDebridClient, s.apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("finding best cached torrent: %w", err)
 	}
@@ -160,7 +164,7 @@ func (s *DownloadService) tryTorrent(ctx context.Context, result *models.Torrent
 
 // checkTorrentCache checks if torrent is cached on AllDebrid
 func (s *DownloadService) checkTorrentCache(result *models.TorrentSearchResult) (bool, int64, error) {
-	isCached, allDebridID, err := s.allDebridService.IsTorrentCached(result.Hash)
+	isCached, allDebridID, err := s.isTorrentCached(result.Hash)
 	if err != nil {
 		log.WithError(err).WithField("hash", result.Hash).Debug("Failed to check if torrent is cached")
 		return false, 0, fmt.Errorf("checking if torrent is cached: %w", err)
@@ -193,6 +197,12 @@ func (s *DownloadService) logCachedTorrent(result *models.TorrentSearchResult, m
 func (s *DownloadService) markMediaAsCompleted(media *models.Media, allDebridID int64, result *models.TorrentSearchResult) (bool, error) {
 	media.OnDisk = true
 	media.File = fmt.Sprintf("AllDebrid magnet ID: %d", allDebridID)
+	media.MagnetID = fmt.Sprintf("%d", allDebridID)
+	
+	if result.IsSeasonPack() {
+		media.IsSeasonPack = true
+		media.SeasonPackID = allDebridID
+	}
 
 	if saveErr := s.repo.SaveMedia(media); saveErr != nil {
 		log.WithError(saveErr).Error("Failed to save media as completed")
@@ -277,7 +287,7 @@ func (s *DownloadService) downloadBestTorrent(ctx context.Context, media *models
 
 // verifyTorrentCached double-checks if torrent is cached
 func (s *DownloadService) verifyTorrentCached(torrent *models.TorrentSearchResult) (bool, int64, error) {
-	isCached, allDebridID, err := s.allDebridService.IsTorrentCached(torrent.Hash)
+	isCached, allDebridID, err := s.isTorrentCached(torrent.Hash)
 	if err != nil {
 		return false, 0, fmt.Errorf("checking if torrent is cached: %w", err)
 	}
@@ -311,6 +321,12 @@ func (s *DownloadService) logDownloadingTorrent(torrent *models.TorrentSearchRes
 func (s *DownloadService) saveTorrentAsDownloaded(media *models.Media, allDebridID int64, torrent *models.TorrentSearchResult) (bool, error) {
 	media.OnDisk = true
 	media.File = fmt.Sprintf("AllDebrid magnet ID: %d", allDebridID)
+	media.MagnetID = fmt.Sprintf("%d", allDebridID)
+	
+	if torrent.IsSeasonPack() {
+		media.IsSeasonPack = true
+		media.SeasonPackID = allDebridID
+	}
 
 	if saveErr := s.repo.SaveMedia(media); saveErr != nil {
 		log.WithError(saveErr).Error("Failed to save media as completed")
@@ -324,4 +340,38 @@ func (s *DownloadService) saveTorrentAsDownloaded(media *models.Media, allDebrid
 	}).Info("Successfully processed cached torrent")
 
 	return true, nil
+}
+
+// isTorrentCached checks if a torrent is cached on AllDebrid
+func (s *DownloadService) isTorrentCached(hash string) (bool, int64, error) {
+	magnetURL := fmt.Sprintf("magnet:?xt=urn:btih:%s", hash)
+	
+	uploadResult, err := s.allDebridClient.UploadMagnet(s.apiKey, []string{magnetURL})
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to upload magnet: %w", err)
+	}
+	
+	if uploadResult.Error != nil {
+		return false, 0, fmt.Errorf("upload error: %s", uploadResult.Error.Message)
+	}
+	
+	if len(uploadResult.Data.Magnets) == 0 {
+		return false, 0, nil
+	}
+	
+	magnet := &uploadResult.Data.Magnets[0]
+	if magnet.Error != nil {
+		return false, 0, fmt.Errorf("magnet error: %s", magnet.Error.Message)
+	}
+	
+	if magnet.Ready {
+		return true, int64(magnet.ID), nil
+	}
+	
+	// If not ready, delete it
+	if err := s.allDebridClient.DeleteMagnet(s.apiKey, strconv.FormatInt(magnet.ID, 10)); err != nil {
+		log.WithError(err).Error("Failed to delete non-cached magnet")
+	}
+	
+	return false, 0, nil
 }

@@ -9,6 +9,7 @@ import (
 
 type TMDBService struct {
 	client *tmdb.Client
+	apiKey string
 }
 
 func NewTMDBService(apiKey string) *TMDBService {
@@ -20,6 +21,7 @@ func NewTMDBService(apiKey string) *TMDBService {
 
 	return &TMDBService{
 		client: tmdbClient,
+		apiKey: apiKey,
 	}
 }
 
@@ -28,45 +30,50 @@ func (t *TMDBService) GetFrenchTitle(mediaType string, tmdbID int64, fallbackTit
 		return fallbackTitle
 	}
 
-	var frenchTitle string
-
-	if mediaType == "episode" || mediaType == "show" || mediaType == "series" {
-		// Get TV show details with French language
-		options := map[string]string{
-			"language": "fr-FR",
-		}
-		tvDetails, err := t.client.GetTVDetails(int(tmdbID), options)
-		if err != nil {
-			logrus.WithError(err).WithField("tmdb_id", tmdbID).Warn("Failed to fetch TMDB TV show details")
-			return fallbackTitle
-		}
-		frenchTitle = tvDetails.Name
-	} else {
-		// Get movie details with French language
-		options := map[string]string{
-			"language": "fr-FR",
-		}
-		movieDetails, err := t.client.GetMovieDetails(int(tmdbID), options)
-		if err != nil {
-			logrus.WithError(err).WithField("tmdb_id", tmdbID).Warn("Failed to fetch TMDB movie details")
-			return fallbackTitle
-		}
-		frenchTitle = movieDetails.Title
-	}
-
-	// Use fallback if no French title
+	frenchTitle := t.fetchFrenchTitle(mediaType, tmdbID, fallbackTitle)
+	
 	if frenchTitle == "" {
 		frenchTitle = fallbackTitle
 	}
 
+	t.logFrenchTitle(tmdbID, mediaType, fallbackTitle, frenchTitle)
+	return frenchTitle
+}
+
+func (t *TMDBService) fetchFrenchTitle(mediaType string, tmdbID int64, fallbackTitle string) string {
+	options := map[string]string{"language": "fr-FR"}
+	
+	if mediaType == "episode" || mediaType == "show" || mediaType == "series" {
+		return t.fetchTVFrenchTitle(tmdbID, options, fallbackTitle)
+	}
+	return t.fetchMovieFrenchTitle(tmdbID, options, fallbackTitle)
+}
+
+func (t *TMDBService) fetchTVFrenchTitle(tmdbID int64, options map[string]string, fallbackTitle string) string {
+	tvDetails, err := t.client.GetTVDetails(int(tmdbID), options)
+	if err != nil {
+		logrus.WithError(err).WithField("tmdb_id", tmdbID).Warn("Failed to fetch TMDB TV show details")
+		return fallbackTitle
+	}
+	return tvDetails.Name
+}
+
+func (t *TMDBService) fetchMovieFrenchTitle(tmdbID int64, options map[string]string, fallbackTitle string) string {
+	movieDetails, err := t.client.GetMovieDetails(int(tmdbID), options)
+	if err != nil {
+		logrus.WithError(err).WithField("tmdb_id", tmdbID).Warn("Failed to fetch TMDB movie details")
+		return fallbackTitle
+	}
+	return movieDetails.Title
+}
+
+func (t *TMDBService) logFrenchTitle(tmdbID int64, mediaType, fallbackTitle, frenchTitle string) {
 	logrus.WithFields(logrus.Fields{
 		"tmdb_id":    tmdbID,
 		"media_type": mediaType,
 		"english":    fallbackTitle,
 		"french":     frenchTitle,
 	}).Debug("Retrieved French title from TMDB")
-
-	return frenchTitle
 }
 
 func (t *TMDBService) GetOriginalLanguage(mediaType string, tmdbID int64) string {
@@ -74,33 +81,42 @@ func (t *TMDBService) GetOriginalLanguage(mediaType string, tmdbID int64) string
 		return ""
 	}
 
-	var originalLanguage string
+	originalLanguage := t.fetchOriginalLanguage(mediaType, tmdbID)
+	t.logOriginalLanguage(tmdbID, mediaType, originalLanguage)
+	return originalLanguage
+}
 
+func (t *TMDBService) fetchOriginalLanguage(mediaType string, tmdbID int64) string {
 	if mediaType == "episode" || mediaType == "show" || mediaType == "series" {
-		// Get TV show details (no language parameter to get original data)
-		tvDetails, err := t.client.GetTVDetails(int(tmdbID), nil)
-		if err != nil {
-			logrus.WithError(err).WithField("tmdb_id", tmdbID).Warn("Failed to fetch TMDB TV show details for language")
-			return ""
-		}
-		originalLanguage = tvDetails.OriginalLanguage
-	} else {
-		// Get movie details (no language parameter to get original data)
-		movieDetails, err := t.client.GetMovieDetails(int(tmdbID), nil)
-		if err != nil {
-			logrus.WithError(err).WithField("tmdb_id", tmdbID).Warn("Failed to fetch TMDB movie details for language")
-			return ""
-		}
-		originalLanguage = movieDetails.OriginalLanguage
+		return t.fetchTVOriginalLanguage(tmdbID)
 	}
+	return t.fetchMovieOriginalLanguage(tmdbID)
+}
 
+func (t *TMDBService) fetchTVOriginalLanguage(tmdbID int64) string {
+	tvDetails, err := t.client.GetTVDetails(int(tmdbID), nil)
+	if err != nil {
+		logrus.WithError(err).WithField("tmdb_id", tmdbID).Warn("Failed to fetch TMDB TV show details for language")
+		return ""
+	}
+	return tvDetails.OriginalLanguage
+}
+
+func (t *TMDBService) fetchMovieOriginalLanguage(tmdbID int64) string {
+	movieDetails, err := t.client.GetMovieDetails(int(tmdbID), nil)
+	if err != nil {
+		logrus.WithError(err).WithField("tmdb_id", tmdbID).Warn("Failed to fetch TMDB movie details for language")
+		return ""
+	}
+	return movieDetails.OriginalLanguage
+}
+
+func (t *TMDBService) logOriginalLanguage(tmdbID int64, mediaType, originalLanguage string) {
 	logrus.WithFields(logrus.Fields{
 		"tmdb_id":           tmdbID,
 		"media_type":        mediaType,
 		"original_language": originalLanguage,
 	}).Debug("Retrieved original language from TMDB")
-
-	return originalLanguage
 }
 
 // GetMovieByTitle searches for a movie by title and returns TMDB ID and original language

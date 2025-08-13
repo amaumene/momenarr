@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/amaumene/gostremiofr/pkg/alldebrid"
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/pkg/config"
 	"github.com/amaumene/momenarr/pkg/handlers"
@@ -38,7 +39,8 @@ type app struct {
 	appService       *services.AppService
 	server           *http.Server
 	tokenService     *services.TraktTokenService
-	allDebridService services.AllDebridInterface
+	allDebridClient  *alldebrid.Client
+	apiKey           string
 }
 
 func main() {
@@ -109,11 +111,12 @@ func createApp(cfg *config.Config, repo repository.Repository, services *service
 
 	return &app{
 		config:           cfg,
-		repo:             repo,
-		appService:       services.appService,
-		server:           server,
-		tokenService:     services.tokenService,
-		allDebridService: services.allDebridService,
+		repo:            repo,
+		appService:      services.appService,
+		server:          server,
+		tokenService:    services.tokenService,
+		allDebridClient: services.allDebridClient,
+		apiKey:          services.apiKey,
 	}, store, nil
 }
 
@@ -149,7 +152,8 @@ func openDatabase(dataDir string) (*bolthold.Store, error) {
 type servicesContainer struct {
 	appService       *services.AppService
 	tokenService     *services.TraktTokenService
-	allDebridService services.AllDebridInterface
+	allDebridClient  *alldebrid.Client
+	apiKey           string
 }
 
 // initializeServices creates and configures all application services
@@ -168,9 +172,10 @@ func initializeServices(cfg *config.Config, repo repository.Repository) (*servic
 	appService := createAppService(repo, coreServices, traktToken)
 
 	return &servicesContainer{
-		appService:       appService,
-		tokenService:     tokenService,
-		allDebridService: coreServices.allDebrid,
+		appService:      appService,
+		tokenService:    tokenService,
+		allDebridClient: coreServices.allDebrid,
+		apiKey:          coreServices.apiKey,
 	}, nil
 }
 
@@ -189,7 +194,8 @@ func setupTraktAuth(cfg *config.Config) (*services.TraktTokenService, *trakt.Tok
 // coreServices holds the core service dependencies
 type coreServices struct {
 	trakt     *services.TraktService
-	allDebrid services.AllDebridInterface
+	allDebrid *alldebrid.Client
+	apiKey    string
 	torrent   *services.TorrentService
 	download  *services.DownloadService
 	cleanup   *services.CleanupService
@@ -198,16 +204,17 @@ type coreServices struct {
 // createCoreServices creates the core services
 func createCoreServices(cfg *config.Config, repo repository.Repository, traktToken *trakt.Token, tmdbService *services.TMDBService) *coreServices {
 	traktService := createTraktService(repo, traktToken, tmdbService)
-	allDebridService := services.NewAllDebridService(repo, cfg.AllDebridAPIKey)
+	allDebridClient := alldebrid.NewClient()
 	torrentService := createTorrentService(repo, cfg, traktService, tmdbService)
-	downloadService := services.CreateDownloadService(repo, allDebridService, torrentService)
+	downloadService := services.CreateDownloadService(repo, allDebridClient, cfg.AllDebridAPIKey, torrentService)
 
-	cleanupService := services.CreateCleanupService(repo, allDebridService, traktToken)
+	cleanupService := services.CreateCleanupService(repo, allDebridClient, cfg.AllDebridAPIKey, traktToken)
 	cleanupService.SetWatchedDays(cfg.WatchedDays)
 
 	return &coreServices{
 		trakt:     traktService,
-		allDebrid: allDebridService,
+		allDebrid: allDebridClient,
+		apiKey:    cfg.AllDebridAPIKey,
 		torrent:   torrentService,
 		download:  downloadService,
 		cleanup:   cleanupService,
@@ -387,7 +394,7 @@ func startHTTPServer(wg *sync.WaitGroup, app *app) {
 // createHTTPServer creates configured HTTP server
 func createHTTPServer(cfg *config.Config, appService *services.AppService) *http.Server {
 	handler := handlers.CreateHandler(appService)
-	handler.SetupRoutes()
+	// Note: SetupRoutes() is not called because we're using the handler's ServeHTTP method directly
 
 	return &http.Server{
 		Addr:         cfg.GetServerAddress(),
@@ -421,7 +428,7 @@ func (a *app) refreshTraktToken() error {
 		return err
 	}
 
-	cleanupService := services.CreateCleanupService(a.repo, a.allDebridService, refreshedToken)
+	cleanupService := services.CreateCleanupService(a.repo, a.allDebridClient, a.apiKey, refreshedToken)
 	a.appService.UpdateTraktToken(refreshedToken, cleanupService)
 	log.Debug("Token refreshed successfully")
 	return nil

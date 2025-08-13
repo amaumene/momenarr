@@ -14,6 +14,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	mediaBatchSize         = 100
+	downloadCheckInterval  = 5 * time.Second
+)
+
 // AppService orchestrates the main application functionality
 type AppService struct {
 	mu              sync.RWMutex
@@ -98,7 +103,7 @@ func (s *AppService) cleanupRemovedMedia(ctx context.Context, currentTraktIDs []
 	currentIDs := createIDLookup(currentTraktIDs)
 	removedCount := 0
 
-	err := s.repo.ProcessMediaBatchesWithContext(ctx, 100,
+	err := s.repo.ProcessMediaBatchesWithContext(ctx, mediaBatchSize,
 		func(batch []*models.Media) error {
 			return s.processBatchForCleanup(ctx, batch, currentIDs, &removedCount)
 		})
@@ -248,7 +253,7 @@ func (s *AppService) Close() error {
 		if err != nil {
 			return fmt.Errorf("closing repository: %w", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(downloadCheckInterval):
 		log.Warn("database close timeout reached")
 		return fmt.Errorf("database close timeout")
 	}

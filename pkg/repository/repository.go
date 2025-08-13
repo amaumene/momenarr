@@ -7,6 +7,7 @@ import (
 
 	"github.com/amaumene/momenarr/bolthold"
 	"github.com/amaumene/momenarr/pkg/models"
+	bolt "go.etcd.io/bbolt"
 )
 
 // Repository defines the interface for data access operations.
@@ -24,6 +25,13 @@ type Repository interface {
 	UpdateMediaDownloadID(traktID, downloadID int64) error
 	RemoveMedia(traktID int64) error
 	FindAllMedia() ([]*models.Media, error)
+	GetMediaByTMDBAndSeason(tmdbID int64, season int64) ([]*models.Media, error)
+	GetEpisodesBySeason(showTMDBID int64, season int64) ([]*models.Media, error)
+
+	// Season pack operations
+	SaveSeasonPack(pack *models.SeasonPack) error
+	GetSeasonPack(showTMDBID int64, season int64) (*models.SeasonPack, error)
+	RemoveSeasonPack(id int64) error
 
 	// Utility operations
 	Close() error
@@ -76,23 +84,24 @@ func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 
-	committed := false
-	defer func() {
-		if !committed {
-			tx.Rollback()
-		}
-	}()
+	if err := r.executeBatchSave(tx, medias); err != nil {
+		tx.Rollback()
+		return err
+	}
 
+	if err := tx.Commit(); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to commit batch transaction: %w", err)
+	}
+	return nil
+}
+
+func (r *BoltRepository) executeBatchSave(tx *bolt.Tx, medias []*models.Media) error {
 	for _, media := range medias {
 		if err := r.store.TxUpsert(tx, media.Trakt, media); err != nil {
 			return fmt.Errorf("failed to save media in batch: %w", err)
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit batch transaction: %w", err)
-	}
-	committed = true
 	return nil
 }
 
@@ -155,14 +164,9 @@ func (r *BoltRepository) StreamMedia(processor func(*models.Media) error) error 
 
 // StreamMediaWithContext processes media items with context support.
 func (r *BoltRepository) StreamMediaWithContext(ctx context.Context, processor func(*models.Media) error) error {
-	return r.store.ForEach(nil, func(record interface{}) error {
+	return r.store.ForEach(nil, func(media *models.Media) error {
 		if err := ctx.Err(); err != nil {
 			return err
-		}
-
-		media, ok := record.(*models.Media)
-		if !ok {
-			return fmt.Errorf("unexpected type: %T", record)
 		}
 		return processor(media)
 	})
@@ -194,6 +198,55 @@ func (r *BoltRepository) FindAllMedia() ([]*models.Media, error) {
 		return nil, fmt.Errorf("failed to find all media: %w", err)
 	}
 	return medias, nil
+}
+
+// GetMediaByTMDBAndSeason gets media by TMDB ID and season
+func (r *BoltRepository) GetMediaByTMDBAndSeason(tmdbID int64, season int64) ([]*models.Media, error) {
+	var medias []*models.Media
+	query := bolthold.Where("TMDBID").Eq(tmdbID).And("Season").Eq(season)
+	if err := r.store.Find(&medias, query); err != nil {
+		return nil, fmt.Errorf("failed to find media by TMDB and season: %w", err)
+	}
+	return medias, nil
+}
+
+// GetEpisodesBySeason gets all episodes for a show's season
+func (r *BoltRepository) GetEpisodesBySeason(showTMDBID int64, season int64) ([]*models.Media, error) {
+	var medias []*models.Media
+	query := bolthold.Where("TMDBID").Eq(showTMDBID).And("Season").Eq(season).And("Number").Gt(int64(0))
+	if err := r.store.Find(&medias, query); err != nil {
+		return nil, fmt.Errorf("failed to find episodes by season: %w", err)
+	}
+	return medias, nil
+}
+
+// SaveSeasonPack saves a season pack record
+func (r *BoltRepository) SaveSeasonPack(pack *models.SeasonPack) error {
+	if err := r.store.Upsert(pack.ID, pack); err != nil {
+		return fmt.Errorf("failed to save season pack: %w", err)
+	}
+	return nil
+}
+
+// GetSeasonPack gets a season pack by show and season
+func (r *BoltRepository) GetSeasonPack(showTMDBID int64, season int64) (*models.SeasonPack, error) {
+	var packs []*models.SeasonPack
+	query := bolthold.Where("ShowTMDBID").Eq(showTMDBID).And("Season").Eq(season)
+	if err := r.store.Find(&packs, query); err != nil {
+		return nil, fmt.Errorf("failed to find season pack: %w", err)
+	}
+	if len(packs) == 0 {
+		return nil, fmt.Errorf("season pack not found")
+	}
+	return packs[0], nil
+}
+
+// RemoveSeasonPack removes a season pack by ID
+func (r *BoltRepository) RemoveSeasonPack(id int64) error {
+	if err := r.store.Delete(id, &models.SeasonPack{}); err != nil {
+		return fmt.Errorf("failed to remove season pack: %w", err)
+	}
+	return nil
 }
 
 // Close closes the database connection.

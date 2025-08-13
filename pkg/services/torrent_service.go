@@ -5,9 +5,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/amaumene/gostremiofr/pkg/alldebrid"
+	"github.com/amaumene/gostremiofr/pkg/torrentsearch"
+	tsmodels "github.com/amaumene/gostremiofr/pkg/torrentsearch/models"
+	"github.com/amaumene/gostremiofr/pkg/torrentsearch/providers"
 	"github.com/amaumene/momenarr/pkg/models"
 	"github.com/amaumene/momenarr/pkg/repository"
 	"github.com/amaumene/momenarr/pkg/utils"
@@ -17,7 +22,9 @@ import (
 // TorrentService handles torrent search and management operations
 type TorrentService struct {
 	repo           repository.Repository
-	searchService  *TorrentSearchService
+	searcher       *torrentsearch.TorrentSearch
+	tmdbService    *TMDBService
+	traktService   *TraktService
 	blacklistFile  string
 	blacklistCache map[string]struct{}
 	blacklistMu    sync.RWMutex
@@ -25,9 +32,13 @@ type TorrentService struct {
 
 // CreateTorrentService creates a TorrentService
 func CreateTorrentService(repo repository.Repository, blacklistFile string) *TorrentService {
+	searcher := torrentsearch.New(nil)
+	searcher.RegisterProvider(providers.ProviderApiBay, providers.NewApiBayProvider())
+	searcher.RegisterProvider(providers.ProviderYGG, providers.NewYGGProvider())
+	
 	return &TorrentService{
 		repo:           repo,
-		searchService:  CreateTorrentSearchService(),
+		searcher:       searcher,
 		blacklistFile:  blacklistFile,
 		blacklistCache: make(map[string]struct{}),
 	}
@@ -40,9 +51,14 @@ func NewTorrentService(repo repository.Repository, blacklistFile string) *Torren
 
 // CreateTorrentServiceWithTrakt creates a TorrentService with Trakt support
 func CreateTorrentServiceWithTrakt(repo repository.Repository, blacklistFile string, traktService *TraktService) *TorrentService {
+	searcher := torrentsearch.New(nil)
+	searcher.RegisterProvider(providers.ProviderApiBay, providers.NewApiBayProvider())
+	searcher.RegisterProvider(providers.ProviderYGG, providers.NewYGGProvider())
+	
 	return &TorrentService{
 		repo:           repo,
-		searchService:  CreateTorrentSearchServiceWithTrakt(traktService),
+		searcher:       searcher,
+		traktService:   traktService,
 		blacklistFile:  blacklistFile,
 		blacklistCache: make(map[string]struct{}),
 	}
@@ -60,9 +76,19 @@ func NewTorrentServiceWithTraktAndTMDB(repo repository.Repository, blacklistFile
 
 // CreateTorrentServiceWithTraktAndTMDB creates a TorrentService with Trakt and TMDB support
 func CreateTorrentServiceWithTraktAndTMDB(repo repository.Repository, blacklistFile string, traktService *TraktService, tmdbService *TMDBService) *TorrentService {
+	searcher := torrentsearch.New(nil)
+	searcher.RegisterProvider(providers.ProviderApiBay, providers.NewApiBayProvider())
+	searcher.RegisterProvider(providers.ProviderYGG, providers.NewYGGProvider())
+	
+	if tmdbService != nil && tmdbService.client != nil && tmdbService.apiKey != "" {
+		searcher.SetTMDBAPIKey(tmdbService.apiKey)
+	}
+	
 	return &TorrentService{
 		repo:           repo,
-		searchService:  CreateTorrentSearchServiceWithTraktAndTMDB(traktService, tmdbService),
+		searcher:       searcher,
+		tmdbService:    tmdbService,
+		traktService:   traktService,
 		blacklistFile:  blacklistFile,
 		blacklistCache: make(map[string]struct{}),
 	}
@@ -94,7 +120,7 @@ func (s *TorrentService) PopulateTorrentsWithContext(ctx context.Context) error 
 }
 
 // FindBestCachedTorrent searches for torrents in real-time and returns the best one cached on AllDebrid
-func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridService AllDebridInterface) (*models.TorrentSearchResult, error) {
+func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridClient *alldebrid.Client, apiKey string) (*models.TorrentSearchResult, error) {
 	mediaType := s.getMediaType(media)
 	s.logSearchStart(media, mediaType)
 
@@ -113,7 +139,7 @@ func (s *TorrentService) FindBestCachedTorrent(media *models.Media, allDebridSer
 		return nil, err
 	}
 
-	return s.findCachedFromResults(filteredResults, media, allDebridService)
+	return s.findCachedFromResults(filteredResults, media, allDebridClient, apiKey)
 }
 
 // getMediaType determines if media is movie or series
@@ -157,13 +183,12 @@ func (s *TorrentService) searchWithLanguage(media *models.Media, mediaType strin
 		yearParam = int(media.Year)
 	}
 
-	return s.searchService.SearchWithLanguageAndFrenchTitle(
+	return s.performSearch(
 		media.Title,
 		mediaType,
 		int(media.Season),
 		int(media.Number),
 		yearParam,
-		media.TMDBID,
 		media.OriginalLanguage,
 		media.FrenchTitle,
 	)
@@ -171,21 +196,19 @@ func (s *TorrentService) searchWithLanguage(media *models.Media, mediaType strin
 
 // searchBasic performs basic search without language data
 func (s *TorrentService) searchBasic(media *models.Media, mediaType string) ([]models.TorrentSearchResult, error) {
+	yearParam := 0
 	if media.IsMovie() && media.Year > 0 {
-		return s.searchService.SearchWithYear(
-			media.Title,
-			mediaType,
-			int(media.Season),
-			int(media.Number),
-			int(media.Year),
-		)
+		yearParam = int(media.Year)
 	}
 
-	return s.searchService.Search(
+	return s.performSearch(
 		media.Title,
 		mediaType,
 		int(media.Season),
 		int(media.Number),
+		yearParam,
+		"",
+		"",
 	)
 }
 
@@ -205,18 +228,18 @@ func (s *TorrentService) applyBlacklistFilter(results []models.TorrentSearchResu
 }
 
 // findCachedFromResults finds cached torrent from results
-func (s *TorrentService) findCachedFromResults(results []models.TorrentSearchResult, media *models.Media, allDebridService AllDebridInterface) (*models.TorrentSearchResult, error) {
+func (s *TorrentService) findCachedFromResults(results []models.TorrentSearchResult, media *models.Media, allDebridClient *alldebrid.Client, apiKey string) (*models.TorrentSearchResult, error) {
 	yggResults, apiBayResults := s.groupResultsByProvider(results)
 	s.sortYGGBySize(yggResults)
 	s.logCacheCheck(media, len(yggResults), len(apiBayResults), len(results))
 
 	// Try YGG results first
-	if cached := s.findCachedInProvider(yggResults, "YGG", media, allDebridService); cached != nil {
+	if cached := s.findCachedInProvider(yggResults, "YGG", media, allDebridClient, apiKey); cached != nil {
 		return cached, nil
 	}
 
 	// Try APIBay results
-	if cached := s.findCachedInProvider(apiBayResults, "APIBay", media, allDebridService); cached != nil {
+	if cached := s.findCachedInProvider(apiBayResults, "APIBay", media, allDebridClient, apiKey); cached != nil {
 		return cached, nil
 	}
 
@@ -266,7 +289,7 @@ func (s *TorrentService) logCacheCheck(media *models.Media, yggCount, apiBayCoun
 }
 
 // findCachedInProvider checks for cached torrents in a provider
-func (s *TorrentService) findCachedInProvider(results []models.TorrentSearchResult, provider string, media *models.Media, allDebridService AllDebridInterface) *models.TorrentSearchResult {
+func (s *TorrentService) findCachedInProvider(results []models.TorrentSearchResult, provider string, media *models.Media, allDebridClient *alldebrid.Client, apiKey string) *models.TorrentSearchResult {
 	for i, result := range results {
 		if result.Hash == "" {
 			continue
@@ -274,7 +297,7 @@ func (s *TorrentService) findCachedInProvider(results []models.TorrentSearchResu
 
 		s.logCheckingTorrent(provider, i+1, result)
 
-		cached, _, err := allDebridService.IsTorrentCached(result.Hash)
+		cached, _, err := s.isTorrentCached(allDebridClient, apiKey, result.Hash)
 		if err != nil {
 			log.WithError(err).WithField("hash", result.Hash).Error("Failed to check AllDebrid cache")
 			continue
@@ -463,4 +486,179 @@ func (s *TorrentService) isBlacklisted(title string, blacklist map[string]struct
 func (s *TorrentService) MarkTorrentFailed(traktID int64) error {
 	log.WithField("trakt_id", traktID).Info("MarkTorrentFailed called but no-op since torrents not stored in database")
 	return nil
+}
+
+// performSearch executes the search and converts results
+func (s *TorrentService) performSearch(title string, mediaType string, season, episode, year int, originalLanguage, frenchTitle string) ([]models.TorrentSearchResult, error) {
+	options := tsmodels.SearchOptions{
+		Query:           title,
+		MediaType:       mediaType,
+		Season:          season,
+		Episode:         episode,
+		Year:            year,
+		Language:        originalLanguage,
+		SpecificEpisode: episode > 0,
+	}
+	
+	if s.searcher == nil {
+		return nil, fmt.Errorf("searcher not initialized")
+	}
+	
+	// Try smart search if TMDB is configured
+	if s.tmdbService != nil && s.tmdbService.apiKey != "" {
+		combined, _, err := s.searcher.SearchSmart(title, mediaType, season, episode, episode > 0)
+		if err == nil {
+			return s.convertCombinedResults(combined), nil
+		}
+		log.WithError(err).Error("Smart search failed, falling back to basic search")
+	}
+	
+	// Fallback to basic search
+	var allResults []models.TorrentSearchResult
+	
+	// Search APIBay
+	if apiBayResults, err := s.searcher.Search(providers.ProviderApiBay, options); err == nil {
+		allResults = append(allResults, s.convertSearchResults(apiBayResults)...)
+	} else {
+		log.WithError(err).Warn("APIBay search failed")
+	}
+	
+	// Search YGG if appropriate
+	if originalLanguage == "fr" || originalLanguage == "" {
+		if yggResults, err := s.searcher.Search(providers.ProviderYGG, options); err == nil {
+			allResults = append(allResults, s.convertSearchResults(yggResults)...)
+		} else {
+			log.WithError(err).Warn("YGG search failed")
+		}
+	}
+	
+	return allResults, nil
+}
+
+// convertCombinedResults converts CombinedSearchResults to TorrentSearchResult slice
+func (s *TorrentService) convertCombinedResults(combined *tsmodels.CombinedSearchResults) []models.TorrentSearchResult {
+	var results []models.TorrentSearchResult
+	
+	if combined == nil || combined.Results == nil {
+		return results
+	}
+	
+	for providerName, searchResults := range combined.Results {
+		if searchResults == nil {
+			continue
+		}
+		for _, torrent := range searchResults.MovieTorrents {
+			results = append(results, s.convertTorrentInfo(torrent, providerName))
+		}
+		for _, torrent := range searchResults.CompleteSeriesTorrents {
+			results = append(results, s.convertTorrentInfo(torrent, providerName))
+		}
+		for _, torrent := range searchResults.CompleteSeasonTorrents {
+			results = append(results, s.convertTorrentInfo(torrent, providerName))
+		}
+		for _, torrent := range searchResults.EpisodeTorrents {
+			results = append(results, s.convertTorrentInfo(torrent, providerName))
+		}
+	}
+	
+	return results
+}
+
+// convertSearchResults converts SearchResults to TorrentSearchResult slice
+func (s *TorrentService) convertSearchResults(searchResults *tsmodels.SearchResults) []models.TorrentSearchResult {
+	var results []models.TorrentSearchResult
+	
+	if searchResults == nil {
+		return results
+	}
+	
+	for _, torrent := range searchResults.MovieTorrents {
+		results = append(results, s.convertTorrentInfo(torrent, torrent.Source))
+	}
+	
+	for _, torrent := range searchResults.CompleteSeriesTorrents {
+		results = append(results, s.convertTorrentInfo(torrent, torrent.Source))
+	}
+	
+	for _, torrent := range searchResults.CompleteSeasonTorrents {
+		results = append(results, s.convertTorrentInfo(torrent, torrent.Source))
+	}
+	
+	for _, torrent := range searchResults.EpisodeTorrents {
+		results = append(results, s.convertTorrentInfo(torrent, torrent.Source))
+	}
+	
+	return results
+}
+
+// convertTorrentInfo converts TorrentInfo to TorrentSearchResult
+func (s *TorrentService) convertTorrentInfo(torrent tsmodels.TorrentInfo, providerName string) models.TorrentSearchResult {
+	source := torrent.Source
+	if source == "" {
+		source = s.mapProviderName(providerName)
+	}
+	
+	magnetURL := ""
+	if torrent.Hash != "" {
+		magnetURL = fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s", torrent.Hash, torrent.Title)
+	}
+	
+	return models.TorrentSearchResult{
+		Title:     torrent.Title,
+		Hash:      torrent.Hash,
+		Size:      torrent.Size,
+		Seeders:   torrent.Seeders,
+		Leechers:  torrent.Leechers,
+		Source:    source,
+		MagnetURL: magnetURL,
+		ID:        torrent.ID,
+	}
+}
+
+// mapProviderName maps provider constants to legacy source names
+func (s *TorrentService) mapProviderName(providerName string) string {
+	switch providerName {
+	case providers.ProviderApiBay:
+		return "APIBay"
+	case providers.ProviderYGG:
+		return "YGG"
+	case providers.ProviderTorrentsCSV:
+		return "TorrentsCSV"
+	default:
+		return providerName
+	}
+}
+
+// isTorrentCached checks if a torrent is cached on AllDebrid
+func (s *TorrentService) isTorrentCached(client *alldebrid.Client, apiKey string, hash string) (bool, int64, error) {
+	magnetURL := fmt.Sprintf("magnet:?xt=urn:btih:%s", hash)
+	
+	uploadResult, err := client.UploadMagnet(apiKey, []string{magnetURL})
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to upload magnet: %w", err)
+	}
+	
+	if uploadResult.Error != nil {
+		return false, 0, fmt.Errorf("upload error: %s", uploadResult.Error.Message)
+	}
+	
+	if len(uploadResult.Data.Magnets) == 0 {
+		return false, 0, nil
+	}
+	
+	magnet := &uploadResult.Data.Magnets[0]
+	if magnet.Error != nil {
+		return false, 0, fmt.Errorf("magnet error: %s", magnet.Error.Message)
+	}
+	
+	if magnet.Ready {
+		return true, int64(magnet.ID), nil
+	}
+	
+	// If not ready, delete it
+	if err := client.DeleteMagnet(apiKey, strconv.FormatInt(magnet.ID, 10)); err != nil {
+		log.WithError(err).Error("Failed to delete non-cached magnet")
+	}
+	
+	return false, 0, nil
 }
