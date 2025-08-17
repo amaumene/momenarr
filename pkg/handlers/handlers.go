@@ -1,4 +1,3 @@
-// Package handlers provides HTTP request handlers for the momenarr application.
 package handlers
 
 import (
@@ -20,32 +19,35 @@ const (
 	refreshTimeout = 20 * time.Minute
 )
 
-// Handler contains all HTTP handlers for the application.
 type Handler struct {
 	appService *services.AppService
 }
 
-// CreateHandler creates a new handler instance with the given app service.
 func CreateHandler(appService *services.AppService) *Handler {
 	return &Handler{
 		appService: appService,
 	}
 }
 
-// NewAppHandler creates a new HTTP handler for the application.
 func NewAppHandler(appService *services.AppService) http.Handler {
 	return CreateHandler(appService)
 }
 
-// ServeHTTP implements the http.Handler interface.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer h.recoverPanic(w, r)
 
+	h.logRequest(r)
+	h.routeRequest(w, r)
+}
+
+func (h *Handler) logRequest(r *http.Request) {
 	log.WithFields(log.Fields{
 		"path":   r.URL.Path,
 		"method": r.Method,
 	}).Debug("Handling request")
+}
 
+func (h *Handler) routeRequest(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/media":
 		h.handleMedia(w, r)
@@ -66,9 +68,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// SetupRoutes registers all HTTP routes for the application.
 func (h *Handler) SetupRoutes() {
-	routes := map[string]http.HandlerFunc{
+	routes := h.getRouteMap()
+	h.registerRoutes(routes)
+}
+
+func (h *Handler) getRouteMap() map[string]http.HandlerFunc {
+	return map[string]http.HandlerFunc{
 		"/api/media":           h.handleMedia,
 		"/api/media/stats":     h.handleMediaStats,
 		"/api/download/retry":  h.handleRetryDownload,
@@ -77,19 +83,19 @@ func (h *Handler) SetupRoutes() {
 		"/api/refresh":         h.handleRefresh,
 		"/api/cleanup/stats":   h.handleCleanupStats,
 	}
+}
 
+func (h *Handler) registerRoutes(routes map[string]http.HandlerFunc) {
 	for path, handler := range routes {
 		http.HandleFunc(path, handler)
 	}
 }
 
-// responseError represents an error response.
 type responseError struct {
 	Error   string `json:"error"`
 	Message string `json:"message,omitempty"`
 }
 
-// responseSuccess represents a success response.
 type responseSuccess struct {
 	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
@@ -113,7 +119,7 @@ func (h *Handler) writeErrorResponse(w http.ResponseWriter, status int, message,
 }
 
 func (h *Handler) writeSuccessResponse(w http.ResponseWriter, message string, data interface{}) {
-	// For MediaStats, encode directly without wrapping
+
 	if _, ok := data.(*services.MediaStats); ok {
 		h.writeJSONResponse(w, http.StatusOK, data)
 		return
@@ -126,7 +132,7 @@ func (h *Handler) writeSuccessResponse(w http.ResponseWriter, message string, da
 	h.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// writeHTMLErrorResponse writes an HTML error response instead of JSON
+
 func (h *Handler) writeHTMLErrorResponse(w http.ResponseWriter, status int, message, details string) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(status)
@@ -152,7 +158,7 @@ func (h *Handler) writeHTMLErrorResponse(w http.ResponseWriter, status int, mess
 	fmt.Fprint(w, errorHTML)
 }
 
-// handleMedia handles media listing requests and returns an HTML page
+
 func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 	if !h.validateMethod(w, r, http.MethodGet, true) {
 		return
@@ -173,7 +179,7 @@ func (h *Handler) handleMedia(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// fetchMediaList retrieves the media list and handles errors
+
 func (h *Handler) fetchMediaList(w http.ResponseWriter) ([]*models.Media, error) {
 	mediaList, err := h.appService.GetAllMedia()
 	if err != nil {
@@ -185,7 +191,7 @@ func (h *Handler) fetchMediaList(w http.ResponseWriter) ([]*models.Media, error)
 	return mediaList, nil
 }
 
-// fetchMediaStats retrieves media statistics and handles errors
+
 func (h *Handler) fetchMediaStats(w http.ResponseWriter) (*services.MediaStats, error) {
 	stats, err := h.appService.GetMediaStats()
 	if err != nil {
@@ -197,7 +203,7 @@ func (h *Handler) fetchMediaStats(w http.ResponseWriter) (*services.MediaStats, 
 	return stats, nil
 }
 
-// handleMediaStats returns JSON media statistics
+
 func (h *Handler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
 	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
@@ -209,7 +215,7 @@ func (h *Handler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Write JSON response directly without wrapping
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
@@ -217,7 +223,7 @@ func (h *Handler) handleMediaStats(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleRetryDownload handles download retry requests
+
 func (h *Handler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
 	if !h.validateMethod(w, r, http.MethodPost, false) {
 		return
@@ -236,7 +242,7 @@ func (h *Handler) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
 	h.writeSuccessResponse(w, "Download retry initiated", nil)
 }
 
-// handleCancelDownload handles download cancellation requests
+
 func (h *Handler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
 	if !h.validateMethod(w, r, http.MethodPost, false) {
 		return
@@ -255,7 +261,7 @@ func (h *Handler) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
 	h.writeSuccessResponse(w, "Download cancelled successfully", nil)
 }
 
-// handleDownloadStatus gets the status of a download
+
 func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
@@ -280,9 +286,9 @@ func (h *Handler) handleDownloadStatus(w http.ResponseWriter, r *http.Request) {
 	h.writeSuccessResponse(w, "Download status retrieved", data)
 }
 
-// handleRefresh handles manual refresh requests - syncs with Trakt and searches for torrents
-// GET /api/refresh - Syncs media from Trakt and searches for torrents for media not marked as downloaded
-// This will sync the latest media from Trakt, then search multiple torrent providers and check AllDebrid cache
+
+
+
 func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
@@ -297,7 +303,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCleanupStats returns cleanup statistics
+
 func (h *Handler) handleCleanupStats(w http.ResponseWriter, r *http.Request) {
 	if !h.validateMethod(w, r, http.MethodGet, false) {
 		return
@@ -312,9 +318,9 @@ func (h *Handler) handleCleanupStats(w http.ResponseWriter, r *http.Request) {
 	h.writeSuccessResponse(w, "Cleanup statistics retrieved", stats)
 }
 
-// Helper functions
 
-// recoverPanic recovers from panics in HTTP handlers
+
+
 func (h *Handler) recoverPanic(w http.ResponseWriter, r *http.Request) {
 	if rec := recover(); rec != nil {
 		buf := make([]byte, 4096)
@@ -333,7 +339,7 @@ func (h *Handler) recoverPanic(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validateMethod validates HTTP method
+
 func (h *Handler) validateMethod(w http.ResponseWriter, r *http.Request, expected string, isHTML bool) bool {
 	if r.Method != expected {
 		msg := fmt.Sprintf("Only %s requests are allowed", expected)
@@ -347,7 +353,7 @@ func (h *Handler) validateMethod(w http.ResponseWriter, r *http.Request, expecte
 	return true
 }
 
-// getTraktIDFromQuery extracts Trakt ID from query parameters
+
 func (h *Handler) getTraktIDFromQuery(w http.ResponseWriter, r *http.Request) (int64, error) {
 	traktIDStr := r.URL.Query().Get("trakt_id")
 	if traktIDStr == "" {
@@ -364,7 +370,7 @@ func (h *Handler) getTraktIDFromQuery(w http.ResponseWriter, r *http.Request) (i
 	return traktID, nil
 }
 
-// getTraktIDFromBody extracts Trakt ID from request body
+
 func (h *Handler) getTraktIDFromBody(w http.ResponseWriter, r *http.Request) (int64, error) {
 	var req struct {
 		TraktID int64 `json:"trakt_id"`
@@ -383,7 +389,7 @@ func (h *Handler) getTraktIDFromBody(w http.ResponseWriter, r *http.Request) (in
 	return req.TraktID, nil
 }
 
-// startAsyncRefresh starts refresh operation asynchronously
+
 func (h *Handler) startAsyncRefresh() {
 	go func() {
 		defer func() {
@@ -403,19 +409,19 @@ func (h *Handler) startAsyncRefresh() {
 	}()
 }
 
-// getRefreshSteps returns the refresh operation steps
+
 func getRefreshSteps() []string {
 	return []string{
 		"1. Sync movies and episodes from Trakt watchlist and favorites",
 		"2. Clean up media no longer in Trakt lists",
 		"3. Find media not marked as downloaded",
-		"4. Search torrent providers (YGG, APIBay) for each media item",
+		"4. Search for torrents for each media item",
 		"5. Check AllDebrid cache for available torrents",
 		"6. Mark cached torrents as downloaded",
 	}
 }
 
-// renderMediaPage renders the media HTML page
+
 func (h *Handler) renderMediaPage(w http.ResponseWriter, mediaList []*models.Media, stats *services.MediaStats, tmpl string) error {
 	t, err := h.parseTemplate(w, tmpl)
 	if err != nil {
@@ -428,7 +434,7 @@ func (h *Handler) renderMediaPage(w http.ResponseWriter, mediaList []*models.Med
 	return t.Execute(w, data)
 }
 
-// parseTemplate parses the HTML template
+
 func (h *Handler) parseTemplate(w http.ResponseWriter, tmpl string) (*template.Template, error) {
 	t, err := template.New("media").Parse(tmpl)
 	if err != nil {
@@ -439,13 +445,13 @@ func (h *Handler) parseTemplate(w http.ResponseWriter, tmpl string) (*template.T
 	return t, nil
 }
 
-// mediaPageData represents the data structure for media page template
+
 type mediaPageData struct {
 	Media []mediaData
 	Stats statsData
 }
 
-// prepareMediaPageData prepares data for the media page template
+
 func (h *Handler) prepareMediaPageData(mediaList []*models.Media, stats *services.MediaStats) mediaPageData {
 	safeMediaList := h.convertMediaList(mediaList)
 
@@ -455,7 +461,7 @@ func (h *Handler) prepareMediaPageData(mediaList []*models.Media, stats *service
 	}
 }
 
-// mediaData represents media item for template rendering
+
 type mediaData struct {
 	Trakt         int64
 	Title         string
@@ -470,7 +476,7 @@ type mediaData struct {
 	UpdatedAt     time.Time
 }
 
-// statsData represents statistics for template rendering
+
 type statsData struct {
 	Total       int
 	OnDisk      int
@@ -480,7 +486,7 @@ type statsData struct {
 	Downloading int
 }
 
-// convertMediaList converts media models to template data
+
 func (h *Handler) convertMediaList(mediaList []*models.Media) []mediaData {
 	safeMediaList := make([]mediaData, 0, len(mediaList))
 	for _, media := range mediaList {
@@ -489,7 +495,7 @@ func (h *Handler) convertMediaList(mediaList []*models.Media) []mediaData {
 	return safeMediaList
 }
 
-// convertMediaItem converts a single media item to template data
+
 func convertMediaItem(media *models.Media) mediaData {
 	return mediaData{
 		Trakt:         media.Trakt,
@@ -506,7 +512,7 @@ func convertMediaItem(media *models.Media) mediaData {
 	}
 }
 
-// convertStats converts statistics to template data
+
 func convertStats(stats *services.MediaStats) statsData {
 	return statsData{
 		Total:       stats.Total,

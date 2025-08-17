@@ -1,8 +1,6 @@
 package services
 
 import (
-	"strconv"
-
 	"github.com/cyruzin/golang-tmdb"
 	"github.com/sirupsen/logrus"
 )
@@ -117,54 +115,4 @@ func (t *TMDBService) logOriginalLanguage(tmdbID int64, mediaType, originalLangu
 		"media_type":        mediaType,
 		"original_language": originalLanguage,
 	}).Debug("Retrieved original language from TMDB")
-}
-
-// GetMovieByTitle searches for a movie by title and returns TMDB ID and original language
-func (t *TMDBService) GetMovieByTitle(title string, year int) (int64, string, error) {
-	if t.client == nil {
-		return 0, "", nil
-	}
-
-	options := map[string]string{}
-	if year > 0 {
-		options["year"] = strconv.Itoa(year)
-	}
-
-	searchResults, err := t.client.GetSearchMovies(title, options)
-	if err != nil {
-		return 0, "", err
-	}
-
-	if len(searchResults.Results) == 0 {
-		return 0, "", nil
-	}
-
-	// Return the first result
-	movie := searchResults.Results[0]
-	return int64(movie.ID), movie.OriginalLanguage, nil
-}
-
-// GetTVShowByTitle searches for a TV show by title and returns TMDB ID and original language
-func (t *TMDBService) GetTVShowByTitle(title string, year int) (int64, string, error) {
-	if t.client == nil {
-		return 0, "", nil
-	}
-
-	options := map[string]string{}
-	if year > 0 {
-		options["first_air_date_year"] = strconv.Itoa(year)
-	}
-
-	searchResults, err := t.client.GetSearchTVShow(title, options)
-	if err != nil {
-		return 0, "", err
-	}
-
-	if len(searchResults.Results) == 0 {
-		return 0, "", nil
-	}
-
-	// Return the first result
-	show := searchResults.Results[0]
-	return int64(show.ID), show.OriginalLanguage, nil
 }

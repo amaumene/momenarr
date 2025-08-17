@@ -11,13 +11,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// TraktTokenService handles Trakt token management
+
 type TraktTokenService struct {
 	tokenFile    string
 	clientSecret string
 }
 
-// NewTraktTokenService creates a new TraktTokenService
+
 func NewTraktTokenService(dataDir, clientSecret string) *TraktTokenService {
 	return &TraktTokenService{
 		tokenFile:    filepath.Join(dataDir, "token.json"),
@@ -25,7 +25,7 @@ func NewTraktTokenService(dataDir, clientSecret string) *TraktTokenService {
 	}
 }
 
-// GetToken gets a valid Trakt token, creating one if necessary
+
 func (s *TraktTokenService) GetToken() (*trakt.Token, error) {
 	if s.tokenExists() {
 		return s.loadTokenFromFile()
@@ -33,7 +33,7 @@ func (s *TraktTokenService) GetToken() (*trakt.Token, error) {
 	return s.generateNewToken()
 }
 
-// RefreshToken refreshes an existing Trakt token
+
 func (s *TraktTokenService) RefreshToken(currentToken *trakt.Token) (*trakt.Token, error) {
 	refreshedToken, err := authorization.RefreshToken(&trakt.RefreshTokenParams{
 		RefreshToken: currentToken.RefreshToken,
@@ -51,13 +51,13 @@ func (s *TraktTokenService) RefreshToken(currentToken *trakt.Token) (*trakt.Toke
 	return refreshedToken, nil
 }
 
-// tokenExists checks if the token file exists
+
 func (s *TraktTokenService) tokenExists() bool {
 	_, err := os.Stat(s.tokenFile)
 	return err == nil
 }
 
-// loadTokenFromFile loads a token from the token file
+
 func (s *TraktTokenService) loadTokenFromFile() (*trakt.Token, error) {
 	file, err := os.Open(s.tokenFile)
 	if err != nil {
@@ -78,7 +78,7 @@ func (s *TraktTokenService) loadTokenFromFile() (*trakt.Token, error) {
 	return &token, nil
 }
 
-// generateNewToken generates a new token using device authorization
+
 func (s *TraktTokenService) generateNewToken() (*trakt.Token, error) {
 	deviceCode, err := s.requestDeviceCode()
 	if err != nil {
@@ -133,9 +133,9 @@ func (s *TraktTokenService) pollForToken(deviceCode *trakt.DeviceCode) (*trakt.T
 	return token, nil
 }
 
-// saveTokenToFile saves a token to the token file
+
 func (s *TraktTokenService) saveTokenToFile(token *trakt.Token) error {
-	// Ensure directory exists
+
 	dir := filepath.Dir(s.tokenFile)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating token directory %s: %w", dir, err)
@@ -159,19 +159,3 @@ func (s *TraktTokenService) saveTokenToFile(token *trakt.Token) error {
 	return nil
 }
 
-// ValidateToken validates that a token is still valid
-func (s *TraktTokenService) ValidateToken(token *trakt.Token) bool {
-	if token == nil {
-		return false
-	}
-
-	if token.AccessToken == "" || token.RefreshToken == "" {
-		return false
-	}
-
-	// Additional validation could be added here, such as:
-	// - Checking token expiration
-	// - Making a test API call
-
-	return true
-}

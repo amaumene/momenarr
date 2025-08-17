@@ -1,9 +1,7 @@
-// Package models defines data structures used throughout the momenarr application.
 package models
 
 import "time"
 
-// Media represents a media item (movie or TV episode) in the system.
 type Media struct {
 	Trakt            int64     `json:"trakt" boltholdIndex:"Trakt" validate:"required"`
 	TMDBID           int64     `json:"tmdb_id,omitempty"`
@@ -23,17 +21,14 @@ type Media struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// IsEpisode checks if the media is a TV episode.
 func (m *Media) IsEpisode() bool {
 	return m.Season > 0 && m.Number > 0
 }
 
-// IsMovie checks if the media is a movie.
 func (m *Media) IsMovie() bool {
 	return !m.IsEpisode()
 }
 
-// MediaType represents the type of media.
 type MediaType string
 
 const (
@@ -41,7 +36,6 @@ const (
 	MediaTypeEpisode MediaType = "episode"
 )
 
-// GetType returns the media type (movie or episode).
 func (m *Media) GetType() MediaType {
 	if m.IsEpisode() {
 		return MediaTypeEpisode

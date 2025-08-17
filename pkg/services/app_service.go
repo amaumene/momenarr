@@ -1,4 +1,3 @@
-// Package services contains business logic and service layer components for momenarr.
 package services
 
 import (
@@ -19,7 +18,6 @@ const (
 	downloadCheckInterval = 5 * time.Second
 )
 
-// AppService orchestrates the main application functionality
 type AppService struct {
 	mu              sync.RWMutex
 	repo            repository.Repository
@@ -29,7 +27,6 @@ type AppService struct {
 	cleanupService  *CleanupService
 }
 
-// CreateAppService creates a new application service instance.
 func CreateAppService(
 	repo repository.Repository,
 	traktService *TraktService,
@@ -46,7 +43,6 @@ func CreateAppService(
 	}
 }
 
-// RunTasks executes all main application tasks.
 func (s *AppService) RunTasks(ctx context.Context) error {
 	log.Info("starting application tasks")
 	startTime := time.Now()
@@ -60,14 +56,12 @@ func (s *AppService) RunTasks(ctx context.Context) error {
 	return nil
 }
 
-// executeTasks runs all application tasks in sequence
 func (s *AppService) executeTasks(ctx context.Context) error {
 	services := s.getServices()
 
 	if _, err := s.syncFromTrakt(ctx); err != nil {
 		return utils.WrapServiceError("sync from trakt", err)
 	}
-
 
 	if err := services.download.DownloadNotOnDiskWithContext(ctx); err != nil {
 		return utils.WrapServiceError("download media not on disk", err)
@@ -77,7 +71,6 @@ func (s *AppService) executeTasks(ctx context.Context) error {
 		services.cleanup.CleanWatchedWithContext(ctx))
 }
 
-// syncFromTrakt handles the Trakt synchronization and cleanup
 func (s *AppService) syncFromTrakt(ctx context.Context) ([]int64, error) {
 	services := s.getServices()
 
@@ -95,7 +88,6 @@ func (s *AppService) syncFromTrakt(ctx context.Context) ([]int64, error) {
 	return merged, nil
 }
 
-// cleanupRemovedMedia removes media no longer in the current list
 func (s *AppService) cleanupRemovedMedia(ctx context.Context, currentTraktIDs []int64) error {
 	currentIDs := createIDLookup(currentTraktIDs)
 	removedCount := 0
@@ -116,7 +108,6 @@ func (s *AppService) cleanupRemovedMedia(ctx context.Context, currentTraktIDs []
 	return nil
 }
 
-// processBatchForCleanup processes a batch of media for cleanup
 func (s *AppService) processBatchForCleanup(ctx context.Context, batch []*models.Media,
 	currentIDs map[int64]bool, removedCount *int) error {
 	if err := utils.CheckContextCancellation(ctx); err != nil {
@@ -134,7 +125,6 @@ func (s *AppService) processBatchForCleanup(ctx context.Context, batch []*models
 	return nil
 }
 
-// GetMediaStats returns media statistics
 func (s *AppService) GetMediaStats() (*MediaStats, error) {
 	stats := &MediaStats{}
 
@@ -150,13 +140,10 @@ func (s *AppService) GetMediaStats() (*MediaStats, error) {
 	return stats, nil
 }
 
-// GetCleanupStats returns cleanup statistics
 func (s *AppService) GetCleanupStats() (*CleanupStats, error) {
 	return s.cleanupService.GetCleanupStats()
 }
 
-
-// GetAllMedia returns all media items
 func (s *AppService) GetAllMedia() ([]*models.Media, error) {
 	var mediaList []*models.Media
 
@@ -172,7 +159,6 @@ func (s *AppService) GetAllMedia() ([]*models.Media, error) {
 	return mediaList, nil
 }
 
-// UpdateTraktServices updates Trakt-related services
 func (s *AppService) UpdateTraktServices(traktService *TraktService, cleanupService *CleanupService) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -180,7 +166,6 @@ func (s *AppService) UpdateTraktServices(traktService *TraktService, cleanupServ
 	s.cleanupService = cleanupService
 }
 
-// UpdateTraktToken updates the Trakt token
 func (s *AppService) UpdateTraktToken(token *trakt.Token, cleanupService *CleanupService) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -188,27 +173,22 @@ func (s *AppService) UpdateTraktToken(token *trakt.Token, cleanupService *Cleanu
 	s.cleanupService = cleanupService
 }
 
-// RetryDownload retries a failed download
 func (s *AppService) RetryDownload(traktID int64) error {
 	return s.downloadService.RetryFailedDownload(traktID)
 }
 
-// CancelDownload cancels a download
 func (s *AppService) CancelDownload(traktID int64) error {
 	return s.downloadService.CancelDownload(traktID)
 }
 
-// GetDownloadStatus gets the status of a download
 func (s *AppService) GetDownloadStatus(traktID int64) (string, error) {
 	return s.downloadService.GetDownloadStatus(traktID)
 }
 
-// RefreshAll manually triggers a full refresh
 func (s *AppService) RefreshAll(ctx context.Context) error {
 	return s.RunTasks(ctx)
 }
 
-// SearchTorrentsForNotDownloaded syncs and searches torrents
 func (s *AppService) SearchTorrentsForNotDownloaded(ctx context.Context) error {
 	log.Info("starting trakt sync and torrent search")
 	startTime := time.Now()
@@ -232,7 +212,6 @@ func (s *AppService) SearchTorrentsForNotDownloaded(ctx context.Context) error {
 	return nil
 }
 
-// Close gracefully shuts down the service
 func (s *AppService) Close() error {
 	log.Info("shutting down application service")
 
@@ -254,7 +233,6 @@ func (s *AppService) Close() error {
 	return nil
 }
 
-// MediaStats represents media statistics
 type MediaStats struct {
 	Total       int `json:"total"`
 	OnDisk      int `json:"on_disk"`
@@ -264,8 +242,6 @@ type MediaStats struct {
 	Downloading int `json:"downloading"`
 }
 
-// Helper types and functions
-
 type serviceRefs struct {
 	trakt    *TraktService
 	torrent  *TorrentService
@@ -273,7 +249,6 @@ type serviceRefs struct {
 	cleanup  *CleanupService
 }
 
-// getServices returns all service references (thread-safe)
 func (s *AppService) getServices() serviceRefs {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -285,7 +260,6 @@ func (s *AppService) getServices() serviceRefs {
 	}
 }
 
-// createIDLookup creates a map for fast ID lookups
 func createIDLookup(ids []int64) map[int64]bool {
 	lookup := make(map[int64]bool, len(ids))
 	for _, id := range ids {
@@ -294,7 +268,6 @@ func createIDLookup(ids []int64) map[int64]bool {
 	return lookup
 }
 
-// updateMediaStats updates statistics for a media item
 func updateMediaStats(stats *MediaStats, media *models.Media) {
 	stats.Total++
 	if media.OnDisk {
@@ -310,7 +283,6 @@ func updateMediaStats(stats *MediaStats, media *models.Media) {
 	}
 }
 
-// removeMedia removes a media item with proper logging
 func (s *AppService) removeMedia(ctx context.Context, media *models.Media) error {
 	services := s.getServices()
 	reason := "not in current Trakt lists"
@@ -324,7 +296,6 @@ func (s *AppService) removeMedia(ctx context.Context, media *models.Media) error
 	return nil
 }
 
-// syncAndCleanup performs sync and cleanup operations
 func (s *AppService) syncAndCleanup(ctx context.Context) ([]int64, error) {
 	log.Info("syncing media from trakt")
 	merged, err := s.syncFromTrakt(ctx)
@@ -344,7 +315,6 @@ func (s *AppService) syncAndCleanup(ctx context.Context) ([]int64, error) {
 	return merged, nil
 }
 
-// searchTorrentsForMissing searches torrents for missing media
 func (s *AppService) searchTorrentsForMissing(ctx context.Context) error {
 	mediaNotOnDisk, err := s.repo.FindMediaNotOnDisk()
 	if err != nil {

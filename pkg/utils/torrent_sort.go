@@ -6,17 +6,10 @@ import (
 	"github.com/amaumene/momenarr/pkg/models"
 )
 
-// SortTorrentResultsByQuality sorts torrents by quality priority.
+
 func SortTorrentResultsByQuality(results []models.TorrentSearchResult) {
 	sort.Slice(results, func(i, j int) bool {
 		return isHigherQuality(results[j], results[i])
-	})
-}
-
-// SortTorrentResultsBySize sorts torrents by size only (largest first).
-func SortTorrentResultsBySize(results []models.TorrentSearchResult) {
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Size > results[j].Size
 	})
 }
 

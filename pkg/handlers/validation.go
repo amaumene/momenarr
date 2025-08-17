@@ -9,7 +9,7 @@ const maxTraktID = 999999999
 
 var errInvalidTraktID = errors.New("invalid trakt ID")
 
-// validateTraktID validates and parses a Trakt ID.
+
 func validateTraktID(traktIDStr string) (int64, error) {
 	if traktIDStr == "" {
 		return 0, errInvalidTraktID

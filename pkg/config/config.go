@@ -1,4 +1,3 @@
-// Package config handles application configuration management for momenarr.
 package config
 
 import (
@@ -8,22 +7,17 @@ import (
 	"strconv"
 )
 
-// Config holds all application configuration
 type Config struct {
-	// Server
 	HTTPAddr string `json:"http_addr"`
 
-	// Storage
 	DataDir       string `json:"data_dir" validate:"required"`
 	BlacklistFile string `json:"blacklist_file"`
 
-	// Services
 	AllDebridAPIKey   string `json:"alldebrid_api_key" validate:"required"`
 	TraktAPIKey       string `json:"trakt_api_key" validate:"required"`
 	TraktClientSecret string `json:"trakt_client_secret" validate:"required"`
 	TMDBAPIKey        string `json:"tmdb_api_key"`
 
-	// Settings
 	SyncInterval   string `json:"sync_interval"`
 	WatchedDays    int    `json:"watched_days"`
 	MaxRetries     int    `json:"max_retries"`
@@ -39,17 +33,8 @@ const (
 	defaultRequestTimeout = 30
 )
 
-// LoadConfig loads configuration from environment variables.
 func LoadConfig() (*Config, error) {
-	cfg := &Config{
-		HTTPAddr:       getEnv("HTTP_ADDR", defaultHTTPAddr),
-		SyncInterval:   getEnv("SYNC_INTERVAL", defaultSyncInterval),
-		BlacklistFile:  getEnv("BLACKLIST_FILE", defaultBlacklistFile),
-		TMDBAPIKey:     getEnv("TMDB_API_KEY", ""),
-		WatchedDays:    getEnvInt("WATCHED_DAYS", defaultWatchedDays),
-		MaxRetries:     getEnvInt("MAX_RETRIES", defaultMaxRetries),
-		RequestTimeout: getEnvInt("REQUEST_TIMEOUT", defaultRequestTimeout),
-	}
+	cfg := createConfigWithDefaults()
 
 	if err := loadRequiredFields(cfg); err != nil {
 		return nil, err
@@ -60,12 +45,22 @@ func LoadConfig() (*Config, error) {
 	return cfg, nil
 }
 
-// GetServerAddress returns the HTTP server address.
+func createConfigWithDefaults() *Config {
+	return &Config{
+		HTTPAddr:       getEnv("HTTP_ADDR", defaultHTTPAddr),
+		SyncInterval:   getEnv("SYNC_INTERVAL", defaultSyncInterval),
+		BlacklistFile:  getEnv("BLACKLIST_FILE", defaultBlacklistFile),
+		TMDBAPIKey:     getEnv("TMDB_API_KEY", ""),
+		WatchedDays:    getEnvInt("WATCHED_DAYS", defaultWatchedDays),
+		MaxRetries:     getEnvInt("MAX_RETRIES", defaultMaxRetries),
+		RequestTimeout: getEnvInt("REQUEST_TIMEOUT", defaultRequestTimeout),
+	}
+}
+
 func (c *Config) GetServerAddress() string {
 	return c.HTTPAddr
 }
 
-// Validate checks if all required fields are set.
 func (c *Config) Validate() error {
 	if c.DataDir == "" {
 		return fmt.Errorf("data directory required")

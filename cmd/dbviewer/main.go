@@ -1,4 +1,4 @@
-// Package main provides a database viewer for the momenarr application.
+
 package main
 
 import (
@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	// ANSI color codes
+
 	colorReset  = "\033[0m"
 	colorRed    = "\033[31m"
 	colorGreen  = "\033[32m"
@@ -26,10 +26,10 @@ const (
 	colorWhite  = "\033[37m"
 	colorBold   = "\033[1m"
 
-	// Database settings
+
 	dbFileMode = 0600
 
-	// Display constants
+
 	maxLineWidth    = 80
 	separatorChar   = "─"
 	headerBoxChar   = "═"
@@ -43,7 +43,7 @@ const (
 	statsIcon       = "📊"
 )
 
-// MediaStats holds statistics about the media collection
+
 type MediaStats struct {
 	TotalItems  int
 	Movies      int
@@ -54,7 +54,7 @@ type MediaStats struct {
 	UniqueShows int
 }
 
-// flags holds command line flags
+
 type flags struct {
 	dbPath     *string
 	showStats  *bool
@@ -79,7 +79,7 @@ func main() {
 	processAndDisplay(flags, store, mediaItems)
 }
 
-// parseFlags parses command line flags
+
 func parseFlags() *flags {
 	return &flags{
 		dbPath:     flag.String("db", "", "Path to the database file (required)"),
@@ -93,7 +93,7 @@ func parseFlags() *flags {
 	}
 }
 
-// validateFlags validates command line flags
+
 func validateFlags(f *flags) {
 	flag.Parse()
 
@@ -107,7 +107,7 @@ func validateFlags(f *flags) {
 	}
 }
 
-// printUsage prints usage information
+
 func printUsage() {
 	fmt.Fprintf(os.Stderr, "Usage: %s -db <database-path> [options]\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "\nOptions:\n")
@@ -118,7 +118,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  %s -db /path/to/data.db -detailed\n", os.Args[0])
 }
 
-// openDatabaseStore opens the database store
+
 func openDatabaseStore(dbPath *string) *bolthold.Store {
 	store, err := bolthold.Open(*dbPath, dbFileMode, &bolthold.Options{})
 	if err != nil {
@@ -127,7 +127,7 @@ func openDatabaseStore(dbPath *string) *bolthold.Store {
 	return store
 }
 
-// fetchAllMedia fetches all media from the database
+
 func fetchAllMedia(store *bolthold.Store) []*models.Media {
 	var mediaItems []*models.Media
 	if err := store.Find(&mediaItems, nil); err != nil {
@@ -136,7 +136,7 @@ func fetchAllMedia(store *bolthold.Store) []*models.Media {
 	return mediaItems
 }
 
-// processAndDisplay processes and displays media based on flags
+
 func processAndDisplay(f *flags, store *bolthold.Store, mediaItems []*models.Media) {
 	filteredMedia := filterMedia(mediaItems, *f.showMovies, *f.showShows, *f.onDiskOnly)
 	sortMedia(filteredMedia, *f.sortBy)
@@ -159,7 +159,7 @@ func filterMedia(media []*models.Media, moviesOnly, showsOnly, onDiskOnly bool) 
 	var filtered []*models.Media
 
 	for _, item := range media {
-		// Filter by type
+
 		if moviesOnly && !item.IsMovie() {
 			continue
 		}
@@ -167,7 +167,7 @@ func filterMedia(media []*models.Media, moviesOnly, showsOnly, onDiskOnly bool) 
 			continue
 		}
 
-		// Filter by on-disk status
+
 		if onDiskOnly && !item.OnDisk {
 			continue
 		}
@@ -228,7 +228,7 @@ func calculateStats(media []*models.Media) MediaStats {
 	return stats
 }
 
-// updateMediaTypeStats updates movie/episode counts
+
 func updateMediaTypeStats(stats *MediaStats, item *models.Media, shows map[string]bool) {
 	if item.IsMovie() {
 		stats.Movies++
@@ -239,7 +239,7 @@ func updateMediaTypeStats(stats *MediaStats, item *models.Media, shows map[strin
 	}
 }
 
-// extractShowTitle extracts show title from episode title
+
 func extractShowTitle(title string) string {
 	if strings.Contains(title, " - ") {
 		parts := strings.Split(title, " - ")
@@ -250,7 +250,7 @@ func extractShowTitle(title string) string {
 	return title
 }
 
-// updateDiskStats updates on-disk/not-on-disk counts
+
 func updateDiskStats(stats *MediaStats, item *models.Media) {
 	if item.OnDisk {
 		stats.OnDisk++
@@ -259,7 +259,7 @@ func updateDiskStats(stats *MediaStats, item *models.Media) {
 	}
 }
 
-// updateDownloadStats updates downloading count
+
 func updateDownloadStats(stats *MediaStats, item *models.Media) {
 	if item.DownloadID > 0 {
 		stats.Downloading++
@@ -345,21 +345,21 @@ func printMediaItem(colorize func(string, string) string, item *models.Media, in
 	fmt.Println()
 }
 
-// mediaStatus holds status information
+
 type mediaStatus struct {
 	color string
 	text  string
 	icon  string
 }
 
-// mediaType holds type information
+
 type mediaType struct {
 	icon  string
 	color string
 	text  string
 }
 
-// getMediaStatus determines the media status
+
 func getMediaStatus(item *models.Media) mediaStatus {
 	if item.OnDisk {
 		return mediaStatus{"green", "AVAILABLE", completedIcon}
@@ -370,7 +370,7 @@ func getMediaStatus(item *models.Media) mediaStatus {
 	return mediaStatus{"yellow", "WANTED", wantedIcon}
 }
 
-// getMediaType determines the media type
+
 func getMediaType(item *models.Media) mediaType {
 	if item.IsEpisode() {
 		return mediaType{
@@ -382,7 +382,7 @@ func getMediaType(item *models.Media) mediaType {
 	return mediaType{movieIcon, "blue", "MOVIE"}
 }
 
-// printMainInfo prints the main media information line
+
 func printMainInfo(colorize func(string, string) string, item *models.Media, index int, status mediaStatus, mediaType mediaType) {
 	fmt.Printf("%s %s %s %s\n",
 		colorize("white", fmt.Sprintf("[%03d]", index)),
@@ -391,7 +391,7 @@ func printMainInfo(colorize func(string, string) string, item *models.Media, ind
 		colorize(status.color, fmt.Sprintf("[%s %s]", status.icon, status.text)))
 }
 
-// printDetailsLine prints the details line
+
 func printDetailsLine(colorize func(string, string) string, item *models.Media, mediaType mediaType, detailed bool) {
 	details := buildDetails(colorize, item, mediaType, detailed)
 	if len(details) > 0 {
@@ -399,27 +399,12 @@ func printDetailsLine(colorize func(string, string) string, item *models.Media, 
 	}
 }
 
-// buildDetails builds the details array
+
 func buildDetails(colorize func(string, string) string, item *models.Media, mediaType mediaType, detailed bool) []string {
 	var details []string
 
-	if item.Year > 0 {
-		details = append(details, colorize("yellow", fmt.Sprintf("Year: %d", item.Year)))
-	}
-
-	details = append(details, colorize(mediaType.color, mediaType.text))
-
-	if item.TMDBID > 0 {
-		details = append(details, colorize("white", fmt.Sprintf("TMDB: %d", item.TMDBID)))
-	}
-
-	if item.OriginalLanguage != "" {
-		details = append(details, colorize("blue", fmt.Sprintf("Lang: %s", item.OriginalLanguage)))
-	}
-
-	if item.FrenchTitle != "" && item.FrenchTitle != item.Title {
-		details = append(details, colorize("green", fmt.Sprintf("FR: %s", item.FrenchTitle)))
-	}
+	addBasicDetails(&details, colorize, item, mediaType)
+	addLanguageDetails(&details, colorize, item)
 
 	if detailed && item.Trakt > 0 {
 		details = append(details, colorize("purple", fmt.Sprintf("Trakt: %d", item.Trakt)))
@@ -432,7 +417,29 @@ func buildDetails(colorize func(string, string) string, item *models.Media, medi
 	return details
 }
 
-// printAdditionalInfo prints additional information
+func addBasicDetails(details *[]string, colorize func(string, string) string, item *models.Media, mediaType mediaType) {
+	if item.Year > 0 {
+		*details = append(*details, colorize("yellow", fmt.Sprintf("Year: %d", item.Year)))
+	}
+
+	*details = append(*details, colorize(mediaType.color, mediaType.text))
+
+	if item.TMDBID > 0 {
+		*details = append(*details, colorize("white", fmt.Sprintf("TMDB: %d", item.TMDBID)))
+	}
+}
+
+func addLanguageDetails(details *[]string, colorize func(string, string) string, item *models.Media) {
+	if item.OriginalLanguage != "" {
+		*details = append(*details, colorize("blue", fmt.Sprintf("Lang: %s", item.OriginalLanguage)))
+	}
+
+	if item.FrenchTitle != "" && item.FrenchTitle != item.Title {
+		*details = append(*details, colorize("green", fmt.Sprintf("FR: %s", item.FrenchTitle)))
+	}
+}
+
+
 func printAdditionalInfo(colorize func(string, string) string, item *models.Media) {
 	if item.FrenchTitle != "" && item.FrenchTitle != item.Title {
 		fmt.Printf("    %s %s\n", colorize("green", frenchFlagIcon), colorize("green", item.FrenchTitle))
@@ -447,7 +454,7 @@ func printAdditionalInfo(colorize func(string, string) string, item *models.Medi
 		colorize("white", "Updated:"), item.UpdatedAt.Format("2006-01-02 15:04"))
 }
 
-// exitWithError prints an error message and exits with status 1.
+
 func exitWithError(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)

@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// SeasonPack represents a season pack download
+
 type SeasonPack struct {
 	ID            int64     `json:"id" boltholdKey:"ID"`
 	ShowTMDBID    int64     `json:"show_tmdb_id" boltholdIndex:"ShowTMDBID"`
@@ -16,7 +16,7 @@ type SeasonPack struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// SeasonWatchStatus tracks the watch status of a season
+
 type SeasonWatchStatus struct {
 	ShowTMDBID      int64     `json:"show_tmdb_id"`
 	ShowTitle       string    `json:"show_title"`

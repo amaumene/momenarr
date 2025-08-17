@@ -24,7 +24,7 @@ const (
 	maxWatchedItems      = 30
 )
 
-// CleanupService handles cleanup of watched media with AllDebrid support
+
 type CleanupService struct {
 	repo            repository.Repository
 	allDebridClient *alldebrid.Client
@@ -34,7 +34,7 @@ type CleanupService struct {
 	rateLimiter     *utils.RateLimiter
 }
 
-// CreateCleanupService creates a cleanup service
+
 func CreateCleanupService(repo repository.Repository, allDebridClient *alldebrid.Client, apiKey string, token *trakt.Token) *CleanupService {
 	return &CleanupService{
 		repo:            repo,
@@ -46,32 +46,32 @@ func CreateCleanupService(repo repository.Repository, allDebridClient *alldebrid
 	}
 }
 
-// SetWatchedDays sets the number of days to look back for watched items
+
 func (s *CleanupService) SetWatchedDays(days int) {
 	s.watchedDays = days
 }
 
-// CleanWatched removes media that has been watched recently
+
 func (s *CleanupService) CleanWatched() error {
 	return s.CleanWatchedWithContext(context.Background())
 }
 
-// CleanWatchedWithContext removes media that has been watched recently with context support
+
 func (s *CleanupService) CleanWatchedWithContext(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, cleanupTimeout)
 	defer cancel()
 
-	// Use enhanced cleanup logic
+
 	return s.ProcessWatchedMediaEnhanced(ctx)
 }
 
-// ProcessWatchedMediaEnhanced processes watched media with season pack awareness
+
 func (s *CleanupService) ProcessWatchedMediaEnhanced(ctx context.Context) error {
-	// Get watched history
+
 	iterator := s.createHistoryIterator()
 	s.logCleanupStart()
 
-	// Collect all watched items first
+
 	watchedItems := make(map[string]*WatchedItem)
 	seasonWatchStatus := make(map[string]*models.SeasonWatchStatus)
 
@@ -87,11 +87,11 @@ func (s *CleanupService) ProcessWatchedMediaEnhanced(ctx context.Context) error 
 		}
 	}
 
-	// Process deletions based on type
+
 	return s.processAllDeletions(ctx, watchedItems, seasonWatchStatus)
 }
 
-// WatchedItem represents a watched media item
+
 type WatchedItem struct {
 	TraktID    int64
 	TMDBID     int64
@@ -104,7 +104,7 @@ type WatchedItem struct {
 	ShowTMDBID int64
 }
 
-// collectWatchedItem collects watched item information
+
 func (s *CleanupService) collectWatchedItem(item *trakt.History, watchedItems map[string]*WatchedItem, seasonWatchStatus map[string]*models.SeasonWatchStatus) error {
 	switch string(item.Type) {
 	case "movie":
@@ -162,7 +162,7 @@ func (s *CleanupService) updateSeasonWatchStatus(item *trakt.History, seasonWatc
 	}
 }
 
-// processAllDeletions processes all types of deletions
+
 func (s *CleanupService) processAllDeletions(ctx context.Context, watchedItems map[string]*WatchedItem, seasonStatus map[string]*models.SeasonWatchStatus) error {
 	s.checkAllSeasons(ctx, seasonStatus)
 
@@ -233,7 +233,7 @@ func (s *CleanupService) deleteRemainingEpisodes(watchedItems map[string]*Watche
 	return deletedCount
 }
 
-// createHistoryIterator creates the history iterator
+
 func (s *CleanupService) createHistoryIterator() *trakt.HistoryIterator {
 	limit := int64(maxWatchedItems)
 	params := trakt.ListParams{
@@ -253,7 +253,7 @@ func (s *CleanupService) createHistoryIterator() *trakt.HistoryIterator {
 	return iterator
 }
 
-// logCleanupStart logs the cleanup start
+
 func (s *CleanupService) logCleanupStart() {
 	log.WithFields(log.Fields{
 		"days_back": s.watchedDays,
@@ -263,12 +263,12 @@ func (s *CleanupService) logCleanupStart() {
 	}).Info("starting cleanup of watched media")
 }
 
-// RemoveMediaManually allows manual removal of media
+
 func (s *CleanupService) RemoveMediaManually(traktID int64, reason string) error {
 	return s.RemoveMediaManuallyWithContext(context.Background(), traktID, reason)
 }
 
-// RemoveMediaManuallyWithContext allows manual removal of media with context support
+
 func (s *CleanupService) RemoveMediaManuallyWithContext(ctx context.Context, traktID int64, reason string) error {
 	if err := utils.CheckContextCancellation(ctx); err != nil {
 		return err
@@ -279,26 +279,32 @@ func (s *CleanupService) RemoveMediaManuallyWithContext(ctx context.Context, tra
 		return fmt.Errorf("finding media %d: %w", traktID, err)
 	}
 
-	watchedItem := &WatchedItem{
-		TraktID:   media.Trakt,
-		Title:     media.Title,
-		MediaType: media.GetType(),
-	}
-
+	watchedItem := s.createWatchedItem(media)
 	if err := s.deleteWatchedMedia(watchedItem); err != nil {
 		return fmt.Errorf("removing media: %w", err)
 	}
 
-	log.WithFields(log.Fields{
-		"trakt_id": traktID,
-		"title":    media.Title,
-		"reason":   reason,
-	}).Info("manually removed media")
-
+	s.logManualRemoval(traktID, media.Title, reason)
 	return nil
 }
 
-// GetCleanupStats returns statistics about potential cleanup candidates
+func (s *CleanupService) createWatchedItem(media *models.Media) *WatchedItem {
+	return &WatchedItem{
+		TraktID:   media.Trakt,
+		Title:     media.Title,
+		MediaType: media.GetType(),
+	}
+}
+
+func (s *CleanupService) logManualRemoval(traktID int64, title, reason string) {
+	log.WithFields(log.Fields{
+		"trakt_id": traktID,
+		"title":    title,
+		"reason":   reason,
+	}).Info("manually removed media")
+}
+
+
 func (s *CleanupService) GetCleanupStats() (*CleanupStats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), deleteRequestTimeout)
 	defer cancel()
@@ -314,14 +320,14 @@ func (s *CleanupService) GetCleanupStats() (*CleanupStats, error) {
 	return stats, iterator.Err()
 }
 
-// initializeStats creates initial stats structure
+
 func (s *CleanupService) initializeStats() *CleanupStats {
 	return &CleanupStats{
 		WatchedDays: s.watchedDays,
 	}
 }
 
-// collectStats collects statistics from history
+
 func (s *CleanupService) collectStats(ctx context.Context, iterator *trakt.HistoryIterator,
 	stats *CleanupStats, uniqueItems map[string]bool) error {
 	for iterator.Next() {
@@ -336,7 +342,7 @@ func (s *CleanupService) collectStats(ctx context.Context, iterator *trakt.Histo
 	return nil
 }
 
-// processStatsItem processes a single item for statistics
+
 func (s *CleanupService) processStatsItem(iterator *trakt.HistoryIterator,
 	stats *CleanupStats, uniqueItems map[string]bool) error {
 	item, err := iterator.History()
@@ -363,7 +369,7 @@ func (s *CleanupService) processStatsItem(iterator *trakt.HistoryIterator,
 	return nil
 }
 
-// updateStatsForItem updates statistics based on item type
+
 func (s *CleanupService) updateStatsForItem(item *trakt.History, stats *CleanupStats) {
 	switch string(item.Type) {
 	case "movie":
@@ -375,7 +381,7 @@ func (s *CleanupService) updateStatsForItem(item *trakt.History, stats *CleanupS
 	}
 }
 
-// CleanupStats represents cleanup statistics
+
 type CleanupStats struct {
 	WatchedDays int `json:"watched_days"`
 	Movies      int `json:"movies"`
@@ -383,7 +389,7 @@ type CleanupStats struct {
 	Total       int `json:"total"`
 }
 
-// checkSeasonCompletion checks if a season is fully watched
+
 func (s *CleanupService) checkSeasonCompletion(ctx context.Context, status *models.SeasonWatchStatus) error {
 	showTraktID, err := s.getShowTraktID(status.ShowTMDBID)
 	if err != nil {
@@ -409,7 +415,7 @@ func (s *CleanupService) checkSeasonCompletion(ctx context.Context, status *mode
 	return nil
 }
 
-// getShowTraktID gets Trakt ID from TMDB ID (cached in DB)
+
 func (s *CleanupService) getShowTraktID(tmdbID int64) (int64, error) {
 	media, err := s.repo.GetMediaByTMDBAndSeason(tmdbID, 1)
 	if err == nil && len(media) > 0 {
@@ -418,7 +424,7 @@ func (s *CleanupService) getShowTraktID(tmdbID int64) (int64, error) {
 	return 0, fmt.Errorf("show not found in database")
 }
 
-// getSeasonInfo gets season episode information (cached)
+
 func (s *CleanupService) getSeasonInfo(showTraktID int64, season int64) ([]interface{}, error) {
 	episodes, err := s.repo.GetEpisodesBySeason(showTraktID, season)
 	if err == nil && len(episodes) > 0 {
@@ -431,27 +437,38 @@ func (s *CleanupService) getSeasonInfo(showTraktID int64, season int64) ([]inter
 	return nil, fmt.Errorf("season info not found")
 }
 
-// deleteWatchedMedia deletes a single watched media item
+
 func (s *CleanupService) deleteWatchedMedia(item *WatchedItem) error {
 	media, err := s.repo.GetMedia(item.TraktID)
 	if err != nil {
 		return nil
 	}
 
-	if media.MagnetID != "" {
-		magnetID, err := strconv.ParseInt(media.MagnetID, 10, 64)
-		if err == nil {
-			if err := s.allDebridClient.DeleteMagnet(s.apiKey, strconv.FormatInt(magnetID, 10)); err != nil {
-				log.WithError(err).WithField("magnet_id", media.MagnetID).Warn("Failed to delete from AllDebrid")
-			} else {
-				log.WithFields(log.Fields{
-					"title":     item.Title,
-					"magnet_id": media.MagnetID,
-				}).Info("Deleted from AllDebrid")
-			}
-		}
+	s.deleteMediaMagnet(media, item.Title)
+	return s.removeMediaFromDB(item)
+}
+
+func (s *CleanupService) deleteMediaMagnet(media *models.Media, title string) {
+	if media.MagnetID == "" {
+		return
 	}
 
+	magnetID, err := strconv.ParseInt(media.MagnetID, 10, 64)
+	if err != nil {
+		return
+	}
+
+	if err := s.allDebridClient.DeleteMagnet(s.apiKey, strconv.FormatInt(magnetID, 10)); err != nil {
+		log.WithError(err).WithField("magnet_id", media.MagnetID).Warn("Failed to delete from AllDebrid")
+	} else {
+		log.WithFields(log.Fields{
+			"title":     title,
+			"magnet_id": media.MagnetID,
+		}).Info("Deleted from AllDebrid")
+	}
+}
+
+func (s *CleanupService) removeMediaFromDB(item *WatchedItem) error {
 	if err := s.repo.RemoveMedia(item.TraktID); err != nil {
 		return fmt.Errorf("removing from database: %w", err)
 	}
@@ -464,7 +481,7 @@ func (s *CleanupService) deleteWatchedMedia(item *WatchedItem) error {
 	return nil
 }
 
-// deleteCompleteSeason deletes all episodes in a complete season
+
 func (s *CleanupService) deleteCompleteSeason(status *models.SeasonWatchStatus, watchedItems map[string]*WatchedItem) error {
 	s.deleteSeasonPackIfExists(status)
 
