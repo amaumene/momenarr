@@ -2,35 +2,33 @@ package services
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/amaumene/momenarr/nzbget"
 	"github.com/amaumene/momenarr/pkg/models"
+	"github.com/amaumene/momenarr/pkg/premiumize"
 	"github.com/amaumene/momenarr/pkg/repository"
 	log "github.com/sirupsen/logrus"
 )
 
-// DownloadService handles download operations
 type DownloadService struct {
-	repo       repository.Repository
-	nzbGet     *nzbget.NZBGet
-	nzbService *NZBService
-	httpClient *http.Client
-	category   string
-	dupeMode   string
+	repo             repository.Repository
+	premiumizeClient *premiumize.Client
+	nzbService       *NZBService
+	httpClient       *http.Client
+	folderID         string
 }
 
-// NewDownloadService creates a new DownloadService
-func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbService *NZBService) *DownloadService {
+func NewDownloadService(repo repository.Repository, premiumizeClient *premiumize.Client, nzbService *NZBService) *DownloadService {
 	return &DownloadService{
-		repo:       repo,
-		nzbGet:     nzbGet,
-		nzbService: nzbService,
+		repo:             repo,
+		premiumizeClient: premiumizeClient,
+		nzbService:       nzbService,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -42,17 +40,14 @@ func NewDownloadService(repo repository.Repository, nzbGet *nzbget.NZBGet, nzbSe
 				TLSHandshakeTimeout: 10 * time.Second,
 			},
 		},
-		category: "momenarr",
-		dupeMode: "score",
+		folderID: "",
 	}
 }
 
-// DownloadNotOnDisk downloads all media that is not on disk
 func (s *DownloadService) DownloadNotOnDisk() error {
 	return s.DownloadNotOnDiskWithContext(context.Background())
 }
 
-// DownloadNotOnDiskWithContext downloads all media that is not on disk with context support
 func (s *DownloadService) DownloadNotOnDiskWithContext(ctx context.Context) error {
 	medias, err := s.repo.FindMediaNotOnDisk()
 	if err != nil {
@@ -62,7 +57,6 @@ func (s *DownloadService) DownloadNotOnDiskWithContext(ctx context.Context) erro
 	log.WithField("count", len(medias)).Info("Processing downloads for media not on disk")
 
 	for _, media := range medias {
-		// Check context cancellation
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -82,12 +76,10 @@ func (s *DownloadService) DownloadNotOnDiskWithContext(ctx context.Context) erro
 	return nil
 }
 
-// processMediaDownload processes download for a single media item
 func (s *DownloadService) processMediaDownload(media *models.Media) error {
 	return s.processMediaDownloadWithContext(context.Background(), media)
 }
 
-// processMediaDownloadWithContext processes download for a single media item with context
 func (s *DownloadService) processMediaDownloadWithContext(ctx context.Context, media *models.Media) error {
 	nzb, err := s.nzbService.GetNZBFromDB(media.Trakt)
 	if err != nil {
@@ -108,78 +100,111 @@ func (s *DownloadService) processMediaDownloadWithContext(ctx context.Context, m
 	return nil
 }
 
-// CreateDownload creates a download in NZBGet
 func (s *DownloadService) CreateDownload(traktID int64, nzb *models.NZB) error {
 	return s.CreateDownloadWithContext(context.Background(), traktID, nzb)
 }
 
-// CreateDownloadWithContext creates a download in NZBGet with context support
 func (s *DownloadService) CreateDownloadWithContext(ctx context.Context, traktID int64, nzb *models.NZB) error {
-	// Check context before starting
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 
-	// Check if already in queue
-	if exists, err := s.isAlreadyInQueue(nzb.Title); err != nil {
+	if err := s.checkQueueStatus(traktID, nzb); err != nil {
+		return err
+	}
+
+	transfer, err := s.createPremiumizeTransfer(ctx, nzb)
+	if err != nil {
+		return err
+	}
+
+	return s.updateMediaWithTransfer(ctx, traktID, nzb, transfer)
+}
+
+func (s *DownloadService) checkQueueStatus(traktID int64, nzb *models.NZB) error {
+	exists, err := s.isAlreadyInQueue(nzb.Title)
+	if err != nil {
 		return fmt.Errorf("checking if NZB is already in queue: %w", err)
-	} else if exists {
+	}
+	if exists {
 		log.WithFields(log.Fields{
 			"trakt": traktID,
 			"title": nzb.Title,
 		}).Info("NZB already in queue, skipping")
-		return nil
+		return fmt.Errorf("already in queue")
 	}
+	return nil
+}
 
-	// Create NZBGet input with context
-	input, err := s.createNZBGetInputWithContext(ctx, nzb, traktID)
+func (s *DownloadService) createPremiumizeTransfer(ctx context.Context, nzb *models.NZB) (*premiumize.Transfer, error) {
+	nzbData, err := s.downloadNZBContent(ctx, nzb.Link)
 	if err != nil {
-		return fmt.Errorf("creating NZBGet input: %w", err)
+		return nil, fmt.Errorf("downloading NZB content: %w", err)
 	}
 
-	// Add to NZBGet
-	downloadID, err := s.nzbGet.Append(input)
-	if err != nil || downloadID <= 0 {
-		return fmt.Errorf("adding to NZBGet queue: %w", err)
+	transfer, err := s.premiumizeClient.CreateTransfer(ctx, nzbData, s.folderID)
+	if err != nil {
+		return nil, fmt.Errorf("creating Premiumize transfer: %w", err)
 	}
 
-	// Update media with download ID
-	if err := s.repo.UpdateMediaDownloadID(traktID, downloadID); err != nil {
-		log.WithError(err).WithFields(log.Fields{
-			"trakt":       traktID,
-			"download_id": downloadID,
-		}).Error("Failed to update media with download ID")
-		return fmt.Errorf("updating media with download ID: %w", err)
-	}
+	return transfer, nil
+}
 
-	// Verify the update worked
+func (s *DownloadService) updateMediaWithTransfer(ctx context.Context, traktID int64, nzb *models.NZB, transfer *premiumize.Transfer) error {
 	media, err := s.repo.GetMedia(traktID)
 	if err != nil {
-		log.WithError(err).WithField("trakt", traktID).Error("Failed to verify media after download ID update")
-	} else {
-		log.WithFields(log.Fields{
-			"trakt":       traktID,
-			"title":       nzb.Title,
-			"download_id": downloadID,
-			"media_dlid":  media.DownloadID,
-			"on_disk":     media.OnDisk,
-		}).Info("Download started successfully and media updated")
+		return fmt.Errorf("getting media: %w", err)
 	}
+
+	downloadID := s.convertTransferID(transfer.ID)
+	media.TransferID = transfer.ID
+	media.DownloadID = downloadID
+	media.UpdatedAt = time.Now()
+
+	if isSeasonPack(nzb.Title) {
+		media.IsSeasonPack = true
+		if err := s.createSeasonPackRecord(media, transfer.ID); err != nil {
+			log.WithError(err).WithField("trakt", traktID).Error("Failed to create season pack record")
+		}
+	}
+
+	if err := s.repo.SaveMedia(media); err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"trakt":       traktID,
+			"transfer_id": transfer.ID,
+		}).Error("Failed to update media with transfer ID")
+		return fmt.Errorf("updating media: %w", err)
+	}
+
+	log.WithFields(log.Fields{
+		"trakt":         traktID,
+		"title":         nzb.Title,
+		"transfer_id":   transfer.ID,
+		"download_id":   downloadID,
+		"is_season_pack": media.IsSeasonPack,
+	}).Info("Download started successfully and media updated")
 
 	return nil
 }
 
-// isAlreadyInQueue checks if the NZB is already in the download queue
-func (s *DownloadService) isAlreadyInQueue(title string) (bool, error) {
-	queue, err := s.nzbGet.ListGroups()
+func (s *DownloadService) convertTransferID(transferID string) int64 {
+	downloadID, err := strconv.ParseInt(transferID, 10, 64)
 	if err != nil {
-		return false, fmt.Errorf("getting NZBGet queue: %w", err)
+		downloadID = int64(hashString(transferID))
+	}
+	return downloadID
+}
+
+func (s *DownloadService) isAlreadyInQueue(title string) (bool, error) {
+	transfers, err := s.premiumizeClient.GetTransfers(context.Background())
+	if err != nil {
+		return false, fmt.Errorf("getting Premiumize transfers: %w", err)
 	}
 
-	for _, item := range queue {
-		if item.NZBName == title {
+	for _, transfer := range transfers {
+		if transfer.Name == title && transfer.Status.IsActive() {
 			return true, nil
 		}
 	}
@@ -187,20 +212,12 @@ func (s *DownloadService) isAlreadyInQueue(title string) (bool, error) {
 	return false, nil
 }
 
-// createNZBGetInput creates the input for NZBGet
-func (s *DownloadService) createNZBGetInput(nzb *models.NZB, traktID int64) (*nzbget.AppendInput, error) {
-	return s.createNZBGetInputWithContext(context.Background(), nzb, traktID)
-}
-
-// createNZBGetInputWithContext creates the input for NZBGet with context support
-func (s *DownloadService) createNZBGetInputWithContext(ctx context.Context, nzb *models.NZB, traktID int64) (*nzbget.AppendInput, error) {
-	// Create request with context
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, nzb.Link, nil)
+func (s *DownloadService) downloadNZBContent(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	// Download NZB content
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("downloading NZB file: %w", err)
@@ -211,7 +228,6 @@ func (s *DownloadService) createNZBGetInputWithContext(ctx context.Context, nzb 
 		return nil, fmt.Errorf("failed to download NZB file, status: %s", resp.Status)
 	}
 
-	// Limit the size of NZB files we'll download (50MB max)
 	const maxNZBSize = 50 * 1024 * 1024
 	limitedReader := io.LimitReader(resp.Body, maxNZBSize)
 
@@ -220,72 +236,108 @@ func (s *DownloadService) createNZBGetInputWithContext(ctx context.Context, nzb 
 		return nil, fmt.Errorf("reading NZB file content: %w", err)
 	}
 
-	encodedContent := base64.StdEncoding.EncodeToString(content)
-
-	return &nzbget.AppendInput{
-		Filename: nzb.Title + ".nzb",
-		Content:  encodedContent,
-		Category: s.category,
-		DupeMode: s.dupeMode,
-		Parameters: []*nzbget.Parameter{
-			{
-				Name:  "Trakt",
-				Value: strconv.FormatInt(traktID, 10),
-			},
-		},
-	}, nil
+	return content, nil
 }
 
-// GetDownloadStatus gets the status of a download
+func hashString(s string) uint32 {
+	var h uint32
+	for _, c := range s {
+		h = h*31 + uint32(c)
+	}
+	return h
+}
+
+func isSeasonPack(title string) bool {
+	lowerTitle := strings.ToLower(title)
+	seasonPackIndicators := []string{
+		"season",
+		"complete",
+		"s01-", "s02-", "s03-", "s04-", "s05-",
+		"s06-", "s07-", "s08-", "s09-", "s10-",
+		"1080p.web", "2160p.web",
+	}
+	
+	for _, indicator := range seasonPackIndicators {
+		if strings.Contains(lowerTitle, indicator) {
+			return true
+		}
+	}
+	
+	if regexp.MustCompile(`s\d{2}e\d{2}-e\d{2}`).MatchString(lowerTitle) {
+		return true
+	}
+	
+	return false
+}
+
+func (s *DownloadService) createSeasonPackRecord(media *models.Media, transferID string) error {
+	if !media.IsEpisode() {
+		return nil
+	}
+	
+	pack := s.buildSeasonPack(media, transferID)
+	s.linkEpisodesToPack(pack, media.ShowTMDBID, media.Season)
+	
+	return s.repo.SaveSeasonPack(pack)
+}
+
+func (s *DownloadService) buildSeasonPack(media *models.Media, transferID string) *models.SeasonPack {
+	return &models.SeasonPack{
+		ID:         time.Now().UnixNano(),
+		ShowTMDBID: media.ShowTMDBID,
+		ShowTitle:  media.ShowTitle,
+		Season:     media.Season,
+		TransferID: transferID,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+}
+
+func (s *DownloadService) linkEpisodesToPack(pack *models.SeasonPack, showTMDBID, season int64) {
+	episodes, err := s.repo.GetEpisodesBySeason(showTMDBID, season)
+	if err != nil {
+		return
+	}
+	
+	pack.TotalEpisodes = len(episodes)
+	for _, ep := range episodes {
+		pack.Episodes = append(pack.Episodes, ep.Number)
+		ep.IsSeasonPack = true
+		ep.SeasonPackID = pack.ID
+		s.repo.SaveMedia(ep)
+	}
+}
+
 func (s *DownloadService) GetDownloadStatus(downloadID int64) (string, error) {
-	queue, err := s.nzbGet.ListGroups()
+	transferID := strconv.FormatInt(downloadID, 10)
+	
+	transfer, err := s.premiumizeClient.GetTransfer(context.Background(), transferID)
 	if err != nil {
-		return "", fmt.Errorf("getting NZBGet queue: %w", err)
-	}
-
-	for _, item := range queue {
-		if int64(item.NZBID) == downloadID {
-			return string(item.Status), nil
+		if err == premiumize.ErrTransferNotFound {
+			return "NOT_FOUND", nil
 		}
+		return "", fmt.Errorf("getting transfer status: %w", err)
 	}
 
-	// Check history if not in queue
-	history, err := s.nzbGet.History(false)
-	if err != nil {
-		return "", fmt.Errorf("getting NZBGet history: %w", err)
-	}
-
-	for _, item := range history {
-		if int64(item.NZBID) == downloadID {
-			return string(item.Status), nil
-		}
-	}
-
-	return "NOT_FOUND", nil
+	return string(transfer.Status), nil
 }
 
-// CancelDownload cancels a download
 func (s *DownloadService) CancelDownload(downloadID int64) error {
-	success, err := s.nzbGet.EditQueue("GroupDelete", "", []int64{downloadID})
-	if err != nil {
+	transferID := strconv.FormatInt(downloadID, 10)
+	
+	if err := s.premiumizeClient.DeleteTransfer(context.Background(), transferID); err != nil {
 		return fmt.Errorf("canceling download: %w", err)
-	}
-	if !success {
-		return fmt.Errorf("failed to cancel download %d", downloadID)
 	}
 
 	log.WithField("download_id", downloadID).Info("Download canceled")
 	return nil
 }
 
-// RetryFailedDownload retries a failed download
 func (s *DownloadService) RetryFailedDownload(traktID int64) error {
-	// Mark current NZB as failed
 	if err := s.nzbService.MarkNZBFailed(traktID); err != nil {
 		log.WithError(err).WithField("trakt", traktID).Error("Failed to mark NZB as failed")
 	}
 
-	// Get media and try to download again
 	media, err := s.repo.GetMedia(traktID)
 	if err != nil {
 		return fmt.Errorf("getting media for retry: %w", err)

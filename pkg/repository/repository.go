@@ -28,6 +28,7 @@ type Repository interface {
 	StreamMedia(processor func(*models.Media) error) error
 	StreamMediaWithContext(ctx context.Context, processor func(*models.Media) error) error
 	UpdateMediaDownloadID(traktID, downloadID int64) error
+	GetMediaByDownloadID(downloadID int64) (*models.Media, error)
 	RemoveMedia(traktID int64) error
 	FindAllMedia() ([]*models.Media, error)
 
@@ -38,6 +39,12 @@ type Repository interface {
 	FindAllNZBsByTraktID(traktID int64) ([]*models.NZB, error)
 	FindNZBsByTraktIDs(traktIDs []int64) ([]*models.NZB, error)
 	RemoveNZBsByTraktID(traktID int64) error
+
+	// Season Pack operations
+	SaveSeasonPack(pack *models.SeasonPack) error
+	GetSeasonPack(showTMDBID, season int64) (*models.SeasonPack, error)
+	RemoveSeasonPack(packID int64) error
+	GetEpisodesBySeason(showTMDBID, season int64) ([]*models.Media, error)
 
 	// Utility operations
 	Close() error
@@ -82,26 +89,21 @@ func (r *BoltRepository) SaveMediaBatch(medias []*models.Media) error {
 	if len(medias) == 0 {
 		return nil
 	}
-
 	tx, err := r.store.Bolt().Begin(true)
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
-
-	// Track whether we've committed successfully
 	committed := false
 	defer func() {
 		if !committed {
 			tx.Rollback()
 		}
 	}()
-
 	for _, media := range medias {
 		if err := r.store.TxUpsert(tx, media.Trakt, media); err != nil {
 			return fmt.Errorf("failed to save media in batch: %w", err)
 		}
 	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}
@@ -135,38 +137,40 @@ func (r *BoltRepository) ProcessMediaBatchesWithContext(ctx context.Context, bat
 	var lastID int64 = -1
 
 	for {
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		batch, hasMore, err := r.fetchMediaBatch(ctx, lastID, batchSize)
+		if err != nil {
+			return err
 		}
-
-		var batch []*models.Media
-
-		// Use cursor-based pagination for better performance
-		if err := r.store.Find(&batch, bolthold.Where("Trakt").Gt(lastID).SortBy("Trakt").Limit(batchSize)); err != nil {
-			return fmt.Errorf("failed to find media batch: %w", err)
-		}
-
 		if len(batch) == 0 {
-			break // No more records
+			break
 		}
 
 		if err := processor(batch); err != nil {
 			return fmt.Errorf("failed to process media batch: %w", err)
 		}
 
-		// Update lastID for next iteration
 		lastID = batch[len(batch)-1].Trakt
-
-		// If we got fewer records than batch size, we're done
-		if len(batch) < batchSize {
+		if !hasMore {
 			break
 		}
 	}
-
 	return nil
+}
+
+func (r *BoltRepository) fetchMediaBatch(ctx context.Context, lastID int64, batchSize int) ([]*models.Media, bool, error) {
+	select {
+	case <-ctx.Done():
+		return nil, false, ctx.Err()
+	default:
+	}
+
+	var batch []*models.Media
+	if err := r.store.Find(&batch, bolthold.Where("Trakt").Gt(lastID).SortBy("Trakt").Limit(batchSize)); err != nil {
+		return nil, false, fmt.Errorf("failed to find media batch: %w", err)
+	}
+
+	hasMore := len(batch) == batchSize
+	return batch, hasMore, nil
 }
 
 // StreamMedia processes media one by one without loading all into memory
@@ -202,6 +206,14 @@ func (r *BoltRepository) UpdateMediaDownloadID(traktID, downloadID int64) error 
 		})
 }
 
+func (r *BoltRepository) GetMediaByDownloadID(downloadID int64) (*models.Media, error) {
+	var media models.Media
+	if err := r.store.FindOne(&media, bolthold.Where("DownloadID").Eq(downloadID)); err != nil {
+		return nil, fmt.Errorf("failed to get media by download ID: %w", err)
+	}
+	return &media, nil
+}
+
 func (r *BoltRepository) RemoveMedia(traktID int64) error {
 	if err := r.store.Delete(traktID, &models.Media{}); err != nil {
 		return fmt.Errorf("failed to remove media: %w", err)
@@ -229,48 +241,61 @@ func (r *BoltRepository) SaveNZB(nzb *models.NZB) error {
 }
 
 func (r *BoltRepository) GetNZB(traktID int64) (*models.NZB, error) {
-	// Get all non-failed NZBs for this Trakt ID in a single query
+	nzbs, err := r.findNonFailedNZBs(traktID)
+	if err != nil {
+		return nil, err
+	}
+	if len(nzbs) == 0 {
+		return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
+	}
+	return r.selectBestNZB(nzbs), nil
+}
+
+func (r *BoltRepository) findNonFailedNZBs(traktID int64) ([]*models.NZB, error) {
 	var nzbs []*models.NZB
 	err := r.store.Find(&nzbs, bolthold.Where("Trakt").Eq(traktID).
 		And("Failed").Eq(false))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get NZBs: %w", err)
 	}
+	return nzbs, nil
+}
 
-	if len(nzbs) == 0 {
-		return nil, fmt.Errorf("no NZB found for Trakt ID %d", traktID)
-	}
-
-	// Sort and select best NZB in memory (more efficient than multiple queries)
+func (r *BoltRepository) selectBestNZB(nzbs []*models.NZB) *models.NZB {
 	var bestNZB *models.NZB
 	var bestScore int
 
 	for _, nzb := range nzbs {
-		score := 0
-
-		// Prioritize by quality
-		if remuxRegex.MatchString(nzb.Title) {
-			score = 3000000000 // 3 billion base score for remux
-		} else if webDLRegex.MatchString(nzb.Title) {
-			score = 2000000000 // 2 billion base score for web-dl
-		} else {
-			score = 1000000000 // 1 billion base score for others
-		}
-
-		// Add size to score (up to 1 billion for size)
-		if nzb.Length < 1000000000 {
-			score += int(nzb.Length)
-		} else {
-			score += 999999999
-		}
-
+		score := r.scoreNZB(nzb)
 		if score > bestScore {
 			bestScore = score
 			bestNZB = nzb
 		}
 	}
+	return bestNZB
+}
 
-	return bestNZB, nil
+func (r *BoltRepository) scoreNZB(nzb *models.NZB) int {
+	score := r.getQualityScore(nzb.Title)
+	score += r.getSizeScore(nzb.Length)
+	return score
+}
+
+func (r *BoltRepository) getQualityScore(title string) int {
+	if remuxRegex.MatchString(title) {
+		return 3000000000
+	}
+	if webDLRegex.MatchString(title) {
+		return 2000000000
+	}
+	return 1000000000
+}
+
+func (r *BoltRepository) getSizeScore(length int64) int {
+	if length < 1000000000 {
+		return int(length)
+	}
+	return 999999999
 }
 
 func (r *BoltRepository) FindAllNZBsByTraktID(traktID int64) ([]*models.NZB, error) {
@@ -301,20 +326,16 @@ func (r *BoltRepository) SaveNZBBatch(nzbs []*models.NZB) error {
 	if len(nzbs) == 0 {
 		return nil
 	}
-
 	tx, err := r.store.Bolt().Begin(true)
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
-
-	// Track whether we've committed successfully
 	committed := false
 	defer func() {
 		if !committed {
 			tx.Rollback()
 		}
 	}()
-
 	for _, nzb := range nzbs {
 		if nzb.ID == "" {
 			nzb.GenerateID()
@@ -323,7 +344,6 @@ func (r *BoltRepository) SaveNZBBatch(nzbs []*models.NZB) error {
 			return fmt.Errorf("failed to save NZB in batch: %w", err)
 		}
 	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit NZB batch transaction: %w", err)
 	}
@@ -336,6 +356,42 @@ func (r *BoltRepository) RemoveNZBsByTraktID(traktID int64) error {
 		return fmt.Errorf("failed to remove NZBs for Trakt ID %d: %w", traktID, err)
 	}
 	return nil
+}
+
+// Season Pack operations
+func (r *BoltRepository) SaveSeasonPack(pack *models.SeasonPack) error {
+	if err := r.store.Upsert(pack.ID, pack); err != nil {
+		return fmt.Errorf("failed to save season pack: %w", err)
+	}
+	return nil
+}
+
+func (r *BoltRepository) GetSeasonPack(showTMDBID, season int64) (*models.SeasonPack, error) {
+	var pack models.SeasonPack
+	err := r.store.FindOne(&pack, bolthold.Where("ShowTMDBID").Eq(showTMDBID).And("Season").Eq(season))
+	if err != nil {
+		if err == bolthold.ErrNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get season pack: %w", err)
+	}
+	return &pack, nil
+}
+
+func (r *BoltRepository) RemoveSeasonPack(packID int64) error {
+	if err := r.store.Delete(packID, &models.SeasonPack{}); err != nil {
+		return fmt.Errorf("failed to remove season pack: %w", err)
+	}
+	return nil
+}
+
+func (r *BoltRepository) GetEpisodesBySeason(showTMDBID, season int64) ([]*models.Media, error) {
+	var episodes []*models.Media
+	err := r.store.Find(&episodes, bolthold.Where("ShowTMDBID").Eq(showTMDBID).And("Season").Eq(season))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get episodes for season: %w", err)
+	}
+	return episodes, nil
 }
 
 // Utility operations
