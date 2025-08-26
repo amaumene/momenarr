@@ -42,9 +42,9 @@ type Repository interface {
 
 	// Season Pack operations
 	SaveSeasonPack(pack *models.SeasonPack) error
-	GetSeasonPack(showTMDBID, season int64) (*models.SeasonPack, error)
+	GetSeasonPack(showIMDBID string, season int64) (*models.SeasonPack, error)
 	RemoveSeasonPack(packID int64) error
-	GetEpisodesBySeason(showTMDBID, season int64) ([]*models.Media, error)
+	GetEpisodesBySeason(showIMDBID string, season int64) ([]*models.Media, error)
 
 	// Utility operations
 	Close() error
@@ -366,9 +366,9 @@ func (r *BoltRepository) SaveSeasonPack(pack *models.SeasonPack) error {
 	return nil
 }
 
-func (r *BoltRepository) GetSeasonPack(showTMDBID, season int64) (*models.SeasonPack, error) {
+func (r *BoltRepository) GetSeasonPack(showIMDBID string, season int64) (*models.SeasonPack, error) {
 	var pack models.SeasonPack
-	err := r.store.FindOne(&pack, bolthold.Where("ShowTMDBID").Eq(showTMDBID).And("Season").Eq(season))
+	err := r.store.FindOne(&pack, bolthold.Where("ShowIMDBID").Eq(showIMDBID).And("Season").Eq(season))
 	if err != nil {
 		if err == bolthold.ErrNotFound {
 			return nil, nil
@@ -385,9 +385,9 @@ func (r *BoltRepository) RemoveSeasonPack(packID int64) error {
 	return nil
 }
 
-func (r *BoltRepository) GetEpisodesBySeason(showTMDBID, season int64) ([]*models.Media, error) {
+func (r *BoltRepository) GetEpisodesBySeason(showIMDBID string, season int64) ([]*models.Media, error) {
 	var episodes []*models.Media
-	err := r.store.Find(&episodes, bolthold.Where("ShowTMDBID").Eq(showTMDBID).And("Season").Eq(season))
+	err := r.store.Find(&episodes, bolthold.Where("ShowIMDBID").Eq(showIMDBID).And("Season").Eq(season))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get episodes for season: %w", err)
 	}

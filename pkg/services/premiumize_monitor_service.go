@@ -16,15 +16,13 @@ type PremiumizeMonitorService struct {
 	repo             repository.Repository
 	premiumizeClient *premiumize.Client
 	downloadManager  *premiumize.DownloadManager
-	downloadDir      string
 }
 
-func NewPremiumizeMonitorService(repo repository.Repository, premiumizeClient *premiumize.Client, downloadDir string) *PremiumizeMonitorService {
+func NewPremiumizeMonitorService(repo repository.Repository, premiumizeClient *premiumize.Client) *PremiumizeMonitorService {
 	return &PremiumizeMonitorService{
 		repo:             repo,
 		premiumizeClient: premiumizeClient,
 		downloadManager:  premiumize.NewDownloadManager(premiumizeClient),
-		downloadDir:      downloadDir,
 	}
 }
 
@@ -186,7 +184,7 @@ func (s *PremiumizeMonitorService) markSeasonEpisodesAvailable(ctx context.Conte
 		return nil
 	}
 
-	episodes, err := s.repo.GetEpisodesBySeason(seasonPackMedia.ShowTMDBID, seasonPackMedia.Season)
+	episodes, err := s.repo.GetEpisodesBySeason(seasonPackMedia.ShowIMDBID, seasonPackMedia.Season)
 	if err != nil {
 		return fmt.Errorf("getting episodes for season: %w", err)
 	}

@@ -22,16 +22,14 @@ type NotificationService struct {
 	repo             repository.Repository
 	premiumizeClient *premiumize.Client
 	downloadService  *DownloadService
-	downloadDir      string
 }
 
 // NewNotificationService creates a new NotificationService
-func NewNotificationService(repo repository.Repository, premiumizeClient *premiumize.Client, downloadService *DownloadService, downloadDir string) *NotificationService {
+func NewNotificationService(repo repository.Repository, premiumizeClient *premiumize.Client, downloadService *DownloadService) *NotificationService {
 	return &NotificationService{
 		repo:             repo,
 		premiumizeClient: premiumizeClient,
 		downloadService:  downloadService,
-		downloadDir:      downloadDir,
 	}
 }
 

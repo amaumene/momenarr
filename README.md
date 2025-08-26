@@ -1,22 +1,30 @@
 # Momenarr
 
-Media automation tool that syncs with Trakt watchlists and downloads via Premiumize.
+Media automation tool that syncs with Trakt watchlists and manages cloud storage via Premiumize.
 
 ## What it does
 
-Monitors your Trakt lists, finds NZBs from indexers, sends them to Premiumize for cloud downloading. Cleans up watched stuff automatically.
+Monitors your Trakt lists, finds NZBs from Usenet indexers, sends them to Premiumize for cloud storage. Files remain in Premiumize cloud for streaming - no local downloads. Automatically cleans up watched content.
 
 ## Setup
 
 Set these environment variables:
 ```
-DOWNLOAD_DIR=/path/to/downloads
-DATA_DIR=/path/to/data
-NEWSNAB_HOST=your-indexer.com
-NEWSNAB_API_KEY=your-api-key
-PREMIUMIZE_API_KEY=your-premiumize-key
-TRAKT_API_KEY=your-trakt-key
-TRAKT_CLIENT_SECRET=your-trakt-secret
+# Required
+DATA_DIR=/path/to/data              # Database and config storage
+NEWSNAB_HOST=your-indexer.com       # Usenet indexer URL
+NEWSNAB_API_KEY=your-api-key        # Usenet indexer API key
+PREMIUMIZE_API_KEY=your-key         # Premiumize API key
+TRAKT_API_KEY=your-trakt-key        # Trakt API key
+TRAKT_CLIENT_SECRET=your-secret     # Trakt client secret
+
+# Optional (with defaults)
+PORT=3000                            # Web server port
+HOST=0.0.0.0                        # Web server host
+SYNC_INTERVAL=6h                    # How often to sync
+BLACKLIST_FILE=blacklist.txt        # Path to blacklist file
+MAX_RETRIES=3                        # Max retry attempts
+REQUEST_TIMEOUT=30                   # Request timeout in seconds
 ```
 
 Run it:
@@ -28,9 +36,13 @@ go build -o momenarr ./cmd/momenarr
 Or use Docker:
 ```bash
 docker run -d --name momenarr -p 8080:8080 \
-  -v /data:/data -v /config:/config \
-  -e DOWNLOAD_DIR=/data -e DATA_DIR=/config \
-  # ... other env vars
+  -v /config:/config \
+  -e DATA_DIR=/config \
+  -e NEWSNAB_HOST=your-indexer.com \
+  -e NEWSNAB_API_KEY=your-api-key \
+  -e PREMIUMIZE_API_KEY=your-key \
+  -e TRAKT_API_KEY=your-trakt-key \
+  -e TRAKT_CLIENT_SECRET=your-secret \
   ghcr.io/amaumene/momenarr:latest
 ```
 
@@ -49,7 +61,16 @@ docker run -d --name momenarr -p 8080:8080 \
 
 ## How it works
 
-Every 6 hours (configurable) it checks Trakt, searches for NZBs, picks best quality (prefers remux > web-dl > biggest file), sends to Premiumize. Files stay in cloud for streaming. Removes stuff you watched in last 5 days.
+Every 6 hours (configurable via SYNC_INTERVAL) it:
+1. Syncs with Trakt watchlist and favorites
+2. Searches Usenet indexers for NZBs
+3. Picks best quality (prefers remux > web-dl > biggest file)
+4. Sends NZB to Premiumize for cloud storage
+5. Monitors transfer status
+6. Marks media as available when ready in Premiumize cloud
+7. Auto-removes watched content from Premiumize after 5 days
+
+**Note:** Files remain in Premiumize cloud for streaming. No local downloads are performed.
 
 ## License
 

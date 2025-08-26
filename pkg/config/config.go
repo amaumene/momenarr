@@ -10,8 +10,7 @@ type Config struct {
 	Port string `json:"port" validate:"required"`
 	Host string `json:"host"`
 
-	DownloadDir string `json:"download_dir" validate:"required"`
-	DataDir     string `json:"data_dir" validate:"required"`
+	DataDir string `json:"data_dir" validate:"required"`
 
 	NewsNabHost   string `json:"newsnab_host" validate:"required,url"`
 	NewsNabAPIKey string `json:"newsnab_api_key" validate:"required"`
@@ -42,9 +41,6 @@ func LoadConfig() (*Config, error) {
 
 func loadRequiredConfig(config *Config) (*Config, error) {
 	var err error
-	if config.DownloadDir, err = getRequiredEnv("DOWNLOAD_DIR"); err != nil {
-		return nil, err
-	}
 	if config.DataDir, err = getRequiredEnv("DATA_DIR"); err != nil {
 		return nil, err
 	}
@@ -72,9 +68,6 @@ func (c *Config) GetServerAddress() string {
 }
 
 func (c *Config) Validate() error {
-	if c.DownloadDir == "" {
-		return fmt.Errorf("download directory is required")
-	}
 	if c.DataDir == "" {
 		return fmt.Errorf("data directory is required")
 	}

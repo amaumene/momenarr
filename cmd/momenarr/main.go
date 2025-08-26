@@ -133,8 +133,8 @@ func createServices(cfg *config.Config, repo repository.Repository, premiumizeCl
 		filepath.Join(cfg.DataDir, cfg.BlacklistFile),
 	)
 	downloadService := services.NewDownloadService(repo, premiumizeClient, nzbService)
-	notificationService := services.NewNotificationService(repo, premiumizeClient, downloadService, cfg.DownloadDir)
-	premiumizeMonitor := services.NewPremiumizeMonitorService(repo, premiumizeClient, cfg.DownloadDir)
+	notificationService := services.NewNotificationService(repo, premiumizeClient, downloadService)
+	premiumizeMonitor := services.NewPremiumizeMonitorService(repo, premiumizeClient)
 
 	return &appServices{
 		nzbService:          nzbService,

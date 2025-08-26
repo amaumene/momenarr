@@ -4,7 +4,7 @@ import "time"
 
 type SeasonPack struct {
 	ID            int64     `json:"id" boltholdKey:"ID"`
-	ShowTMDBID    int64     `json:"show_tmdb_id" boltholdIndex:"ShowTMDBID"`
+	ShowIMDBID    string    `json:"show_imdb_id" boltholdIndex:"ShowIMDBID"`
 	ShowTitle     string    `json:"show_title"`
 	Season        int64     `json:"season"`
 	TotalEpisodes int       `json:"total_episodes"`
@@ -15,7 +15,7 @@ type SeasonPack struct {
 }
 
 type SeasonWatchStatus struct {
-	ShowTMDBID      int64     `json:"show_tmdb_id"`
+	ShowIMDBID      string    `json:"show_imdb_id"`
 	ShowTitle       string    `json:"show_title"`
 	Season          int64     `json:"season"`
 	TotalEpisodes   int       `json:"total_episodes"`

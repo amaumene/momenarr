@@ -6,8 +6,7 @@ import "time"
 type Media struct {
 	Trakt        int64     `json:"trakt" boltholdIndex:"Trakt" validate:"required"`
 	IMDB         string    `json:"imdb,omitempty"`
-	TMDBID       int64     `json:"tmdb_id,omitempty"`
-	ShowTMDBID   int64     `json:"show_tmdb_id,omitempty"`
+	ShowIMDBID   string    `json:"show_imdb_id,omitempty"`
 	ShowTitle    string    `json:"show_title,omitempty"`
 	Number       int64     `json:"number,omitempty"`
 	Season       int64     `json:"season,omitempty"`

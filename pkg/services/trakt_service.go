@@ -401,9 +401,9 @@ func (s *TraktService) getNextEpisodes(show *trakt.Show, nextEpisode *trakt.Epis
 
 // insertEpisodeToDB inserts an episode into the database
 func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) error {
-	if int64(ep.Trakt) <= 0 || len(show.IMDB) == 0 || ep.Number <= 0 || ep.Season <= 0 {
-		return fmt.Errorf("invalid episode data: Trakt=%d, IMDB=%s, Season=%d, Number=%d",
-			ep.Trakt, show.IMDB, ep.Season, ep.Number)
+	if int64(ep.Trakt) <= 0 || ep.Number <= 0 || ep.Season <= 0 {
+		return fmt.Errorf("invalid episode data: Trakt=%d, Season=%d, Number=%d",
+			ep.Trakt, ep.Season, ep.Number)
 	}
 
 	// Check if media already exists to preserve OnDisk status
@@ -412,7 +412,9 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 		// Update existing media but preserve OnDisk status and File path
 		existing.Number = ep.Number
 		existing.Season = ep.Season
-		existing.IMDB = string(show.IMDB)
+		existing.IMDB = string(ep.IMDB)
+		existing.ShowIMDBID = string(show.IMDB)
+		existing.ShowTitle = show.Title
 		existing.Title = ep.Title
 		existing.Year = show.Year
 		existing.UpdatedAt = time.Now()
@@ -425,15 +427,17 @@ func (s *TraktService) insertEpisodeToDB(show *trakt.Show, ep *trakt.Episode) er
 
 	// Create new media entry
 	media := &models.Media{
-		Trakt:     int64(ep.Trakt),
-		Number:    ep.Number,
-		Season:    ep.Season,
-		IMDB:      string(show.IMDB),
-		Title:     ep.Title,
-		Year:      show.Year,
-		OnDisk:    false,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Trakt:      int64(ep.Trakt),
+		Number:     ep.Number,
+		Season:     ep.Season,
+		IMDB:       string(ep.IMDB),
+		ShowIMDBID: string(show.IMDB),
+		ShowTitle:  show.Title,
+		Title:      ep.Title,
+		Year:       show.Year,
+		OnDisk:     false,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 
 	if err := s.repo.SaveMedia(media); err != nil {

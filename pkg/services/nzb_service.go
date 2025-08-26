@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -161,7 +163,33 @@ func (s *NZBService) searchNZB(media *models.Media) (newsnab.Feed, error) {
 	var err error
 
 	if media.IsEpisode() {
-		xmlResponse, err = newsnab.SearchTVShow(media.IMDB, media.Season, media.Number, s.newsNabHost, s.newsNabAPIKey)
+		imdbID := media.ShowIMDBID
+		if imdbID == "" {
+			imdbID = media.IMDB
+		}
+		
+		seasonPackResponse, seasonErr := s.searchSeasonPack(imdbID, media.Season)
+		if seasonErr == nil {
+			var seasonFeed newsnab.Feed
+			if unmarshalErr := xml.Unmarshal([]byte(seasonPackResponse), &seasonFeed); unmarshalErr == nil {
+				if len(seasonFeed.Channel.Items) > 0 {
+					log.WithFields(log.Fields{
+						"show":   media.ShowTitle,
+						"season": media.Season,
+						"count":  len(seasonFeed.Channel.Items),
+					}).Info("Found season pack results")
+					return seasonFeed, nil
+				}
+			}
+		}
+		
+		log.WithFields(log.Fields{
+			"show":    media.ShowTitle,
+			"season":  media.Season,
+			"episode": media.Number,
+		}).Debug("No season pack found, searching for individual episode")
+		
+		xmlResponse, err = newsnab.SearchTVShow(imdbID, media.Season, media.Number, s.newsNabHost, s.newsNabAPIKey)
 		if err != nil {
 			return feed, fmt.Errorf("searching NZB for episode: %w", err)
 		}
@@ -306,6 +334,52 @@ func (s *NZBService) readBlacklist() ([]string, error) {
 	}).Debug("Loaded blacklist")
 
 	return blacklist, nil
+}
+
+// searchSeasonPack searches for season packs for a TV show
+func (s *NZBService) searchSeasonPack(imdbID string, season int64) (string, error) {
+	url := fmt.Sprintf("https://%s/api?apikey=%s&t=tvsearch&imdbid=%s&season=%d", 
+		s.newsNabHost, s.newsNabAPIKey, imdbID, season)
+	
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("searching season pack: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("season pack search returned status %d", resp.StatusCode)
+	}
+	
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading season pack response: %w", err)
+	}
+	
+	responseStr := string(body)
+	if s.containsSeasonPackIndicators(responseStr) {
+		return responseStr, nil
+	}
+	
+	return "", fmt.Errorf("no season packs found")
+}
+
+// containsSeasonPackIndicators checks if the response contains season pack results
+func (s *NZBService) containsSeasonPackIndicators(xmlResponse string) bool {
+	lowerResponse := strings.ToLower(xmlResponse)
+	indicators := []string{
+		"complete",
+		"season",
+		fmt.Sprintf("s%02d", 1),
+	}
+	
+	for _, indicator := range indicators {
+		if strings.Contains(lowerResponse, indicator) {
+			return true
+		}
+	}
+	return false
 }
 
 // isBlacklisted checks if a title is blacklisted using optimized map lookup

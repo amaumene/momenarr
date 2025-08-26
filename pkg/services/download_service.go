@@ -81,6 +81,14 @@ func (s *DownloadService) processMediaDownload(media *models.Media) error {
 }
 
 func (s *DownloadService) processMediaDownloadWithContext(ctx context.Context, media *models.Media) error {
+	if media.TransferID != "" {
+		if err := s.checkAndUpdateTransferStatus(media); err != nil {
+			log.WithError(err).WithField("trakt", media.Trakt).Warn("Failed to check transfer status")
+		} else {
+			return nil
+		}
+	}
+
 	nzb, err := s.nzbService.GetNZBFromDB(media.Trakt)
 	if err != nil {
 		return fmt.Errorf("getting NZB from database: %w", err)
@@ -94,6 +102,13 @@ func (s *DownloadService) processMediaDownloadWithContext(ctx context.Context, m
 	}).Info("Selected NZB for download")
 
 	if err := s.CreateDownloadWithContext(ctx, media.Trakt, nzb); err != nil {
+		if strings.Contains(err.Error(), "already added this nzb file") {
+			log.WithFields(log.Fields{
+				"trakt": media.Trakt,
+				"title": media.Title,
+			}).Info("NZB already added to Premiumize, skipping")
+			return nil
+		}
 		return fmt.Errorf("creating download: %w", err)
 	}
 
@@ -144,7 +159,8 @@ func (s *DownloadService) createPremiumizeTransfer(ctx context.Context, nzb *mod
 		return nil, fmt.Errorf("downloading NZB content: %w", err)
 	}
 
-	transfer, err := s.premiumizeClient.CreateTransfer(ctx, nzbData, s.folderID)
+	filename := s.extractNZBFilename(nzb)
+	transfer, err := s.premiumizeClient.CreateTransferWithFilename(ctx, nzbData, filename, s.folderID)
 	if err != nil {
 		return nil, fmt.Errorf("creating Premiumize transfer: %w", err)
 	}
@@ -197,6 +213,57 @@ func (s *DownloadService) convertTransferID(transferID string) int64 {
 	return downloadID
 }
 
+func (s *DownloadService) checkAndUpdateTransferStatus(media *models.Media) error {
+	transfer, err := s.premiumizeClient.GetTransfer(context.Background(), media.TransferID)
+	if err != nil {
+		if err == premiumize.ErrTransferNotFound {
+			media.TransferID = ""
+			media.DownloadID = 0
+			return s.repo.SaveMedia(media)
+		}
+		return fmt.Errorf("checking transfer status: %w", err)
+	}
+
+	if transfer.Status.IsComplete() {
+		if !media.OnDisk {
+			media.OnDisk = true
+			media.File = transfer.FileID
+			media.UpdatedAt = time.Now()
+			if err := s.repo.SaveMedia(media); err != nil {
+				return fmt.Errorf("updating media as on disk: %w", err)
+			}
+			log.WithFields(log.Fields{
+				"trakt":       media.Trakt,
+				"title":       media.Title,
+				"transfer_id": media.TransferID,
+			}).Info("Transfer complete, marked as on disk")
+		}
+		return nil
+	}
+	
+	if transfer.Status.IsActive() {
+		log.WithFields(log.Fields{
+			"trakt":       media.Trakt,
+			"title":       media.Title,
+			"transfer_id": media.TransferID,
+			"status":      transfer.Status,
+			"progress":    transfer.Progress,
+		}).Info("Transfer still in progress")
+		return nil
+	}
+	
+	if transfer.Status.IsFailed() {
+		media.TransferID = ""
+		media.DownloadID = 0
+		if err := s.repo.SaveMedia(media); err != nil {
+			return fmt.Errorf("clearing failed transfer: %w", err)
+		}
+		return fmt.Errorf("transfer failed, will retry")
+	}
+	
+	return nil
+}
+
 func (s *DownloadService) isAlreadyInQueue(title string) (bool, error) {
 	transfers, err := s.premiumizeClient.GetTransfers(context.Background())
 	if err != nil {
@@ -239,6 +306,17 @@ func (s *DownloadService) downloadNZBContent(ctx context.Context, url string) ([
 	return content, nil
 }
 
+func (s *DownloadService) extractNZBFilename(nzb *models.NZB) string {
+	sanitizedTitle := strings.ReplaceAll(nzb.Title, " ", ".")
+	sanitizedTitle = regexp.MustCompile(`[^a-zA-Z0-9._-]`).ReplaceAllString(sanitizedTitle, "")
+	
+	if !strings.HasSuffix(strings.ToLower(sanitizedTitle), ".nzb") {
+		sanitizedTitle += ".nzb"
+	}
+	
+	return sanitizedTitle
+}
+
 func hashString(s string) uint32 {
 	var h uint32
 	for _, c := range s {
@@ -276,7 +354,7 @@ func (s *DownloadService) createSeasonPackRecord(media *models.Media, transferID
 	}
 	
 	pack := s.buildSeasonPack(media, transferID)
-	s.linkEpisodesToPack(pack, media.ShowTMDBID, media.Season)
+	s.linkEpisodesToPack(pack, media.ShowIMDBID, media.Season)
 	
 	return s.repo.SaveSeasonPack(pack)
 }
@@ -284,7 +362,7 @@ func (s *DownloadService) createSeasonPackRecord(media *models.Media, transferID
 func (s *DownloadService) buildSeasonPack(media *models.Media, transferID string) *models.SeasonPack {
 	return &models.SeasonPack{
 		ID:         time.Now().UnixNano(),
-		ShowTMDBID: media.ShowTMDBID,
+		ShowIMDBID: media.ShowIMDBID,
 		ShowTitle:  media.ShowTitle,
 		Season:     media.Season,
 		TransferID: transferID,
@@ -293,8 +371,8 @@ func (s *DownloadService) buildSeasonPack(media *models.Media, transferID string
 	}
 }
 
-func (s *DownloadService) linkEpisodesToPack(pack *models.SeasonPack, showTMDBID, season int64) {
-	episodes, err := s.repo.GetEpisodesBySeason(showTMDBID, season)
+func (s *DownloadService) linkEpisodesToPack(pack *models.SeasonPack, showIMDBID string, season int64) {
+	episodes, err := s.repo.GetEpisodesBySeason(showIMDBID, season)
 	if err != nil {
 		return
 	}

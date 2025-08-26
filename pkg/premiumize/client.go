@@ -90,7 +90,11 @@ func (c *Client) doJSONRequest(ctx context.Context, method, endpoint string, bod
 }
 
 func (c *Client) CreateTransfer(ctx context.Context, nzbData []byte, folderID string) (*Transfer, error) {
-	body, contentType, err := c.prepareTransferRequest(nzbData, folderID)
+	return c.CreateTransferWithFilename(ctx, nzbData, "download.nzb", folderID)
+}
+
+func (c *Client) CreateTransferWithFilename(ctx context.Context, nzbData []byte, filename string, folderID string) (*Transfer, error) {
+	body, contentType, err := c.prepareTransferRequest(nzbData, filename, folderID)
 	if err != nil {
 		return nil, err
 	}
@@ -103,11 +107,11 @@ func (c *Client) CreateTransfer(ctx context.Context, nzbData []byte, folderID st
 	return c.parseTransferResponse(result)
 }
 
-func (c *Client) prepareTransferRequest(nzbData []byte, folderID string) (*bytes.Buffer, string, error) {
+func (c *Client) prepareTransferRequest(nzbData []byte, filename string, folderID string) (*bytes.Buffer, string, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	part, err := writer.CreateFormFile("src", "download.nzb")
+	part, err := writer.CreateFormFile("src", filename)
 	if err != nil {
 		return nil, "", fmt.Errorf("creating form file: %w", err)
 	}

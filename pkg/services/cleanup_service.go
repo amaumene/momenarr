@@ -75,14 +75,14 @@ func (s *CleanupService) ProcessWatchedMediaEnhanced(ctx context.Context) error 
 
 type WatchedItem struct {
 	TraktID    int64
-	TMDBID     int64
+	IMDBID     string
 	Title      string
 	MediaType  models.MediaType
 	Season     int64
 	Episode    int64
 	WatchedAt  time.Time
 	ShowTitle  string
-	ShowTMDBID int64
+	ShowIMDBID string
 }
 
 func (s *CleanupService) collectWatchedItem(item *trakt.History, watchedItems map[string]*WatchedItem, seasonWatchStatus map[string]*models.SeasonWatchStatus) error {
@@ -99,7 +99,7 @@ func (s *CleanupService) collectWatchedMovie(item *trakt.History, watchedItems m
 	key := fmt.Sprintf("movie_%d", item.Movie.Trakt)
 	watchedItems[key] = &WatchedItem{
 		TraktID:   int64(item.Movie.Trakt),
-		TMDBID:    int64(item.Movie.MediaIDs.TMDB),
+		IMDBID:    string(item.Movie.MediaIDs.IMDB),
 		Title:     item.Movie.Title,
 		MediaType: models.MediaTypeMovie,
 		WatchedAt: item.WatchedAt,
@@ -116,18 +116,18 @@ func (s *CleanupService) collectWatchedEpisode(item *trakt.History, watchedItems
 		Episode:    item.Episode.Number,
 		WatchedAt:  item.WatchedAt,
 		ShowTitle:  item.Show.Title,
-		ShowTMDBID: int64(item.Show.MediaIDs.TMDB),
+		ShowIMDBID: string(item.Show.MediaIDs.IMDB),
 	}
 
 	s.updateSeasonWatchStatus(item, seasonWatchStatus)
 }
 
 func (s *CleanupService) updateSeasonWatchStatus(item *trakt.History, seasonWatchStatus map[string]*models.SeasonWatchStatus) {
-	seasonKey := fmt.Sprintf("%d_S%d", item.Show.MediaIDs.TMDB, item.Episode.Season)
+	seasonKey := fmt.Sprintf("%s_S%d", item.Show.MediaIDs.IMDB, item.Episode.Season)
 
 	if _, exists := seasonWatchStatus[seasonKey]; !exists {
 		seasonWatchStatus[seasonKey] = &models.SeasonWatchStatus{
-			ShowTMDBID:  int64(item.Show.MediaIDs.TMDB),
+			ShowIMDBID:  string(item.Show.MediaIDs.IMDB),
 			ShowTitle:   item.Show.Title,
 			Season:      item.Episode.Season,
 			WatchedList: []int64{},
@@ -164,7 +164,7 @@ func (s *CleanupService) checkAllSeasons(ctx context.Context, seasonStatus map[s
 
 func (s *CleanupService) checkSeasonCompletion(ctx context.Context, status *models.SeasonWatchStatus) error {
 	// Get all episodes for this season
-	episodes, err := s.repo.GetEpisodesBySeason(status.ShowTMDBID, status.Season)
+	episodes, err := s.repo.GetEpisodesBySeason(status.ShowIMDBID, status.Season)
 	if err != nil {
 		return fmt.Errorf("getting episodes for season: %w", err)
 	}
@@ -176,7 +176,7 @@ func (s *CleanupService) checkSeasonCompletion(ctx context.Context, status *mode
 		status.IsComplete = true
 		
 		// Check for season pack
-		if pack, err := s.repo.GetSeasonPack(status.ShowTMDBID, status.Season); err == nil && pack != nil {
+		if pack, err := s.repo.GetSeasonPack(status.ShowIMDBID, status.Season); err == nil && pack != nil {
 			status.SeasonPackID = pack.ID
 		}
 	}
@@ -220,7 +220,7 @@ func (s *CleanupService) deleteRemainingEpisodes(ctx context.Context, watchedIte
 			continue
 		}
 
-		seasonKey := fmt.Sprintf("%d_S%d", item.ShowTMDBID, item.Season)
+		seasonKey := fmt.Sprintf("%s_S%d", item.ShowIMDBID, item.Season)
 		if status, exists := seasonStatus[seasonKey]; exists && status.IsComplete {
 			continue
 		}
@@ -279,7 +279,7 @@ func (s *CleanupService) removeMediaFromDB(item *WatchedItem) error {
 func (s *CleanupService) deleteCompleteSeason(ctx context.Context, status *models.SeasonWatchStatus, watchedItems map[string]*WatchedItem) error {
 	s.deleteSeasonPackIfExists(ctx, status)
 
-	episodes, err := s.repo.GetEpisodesBySeason(status.ShowTMDBID, status.Season)
+	episodes, err := s.repo.GetEpisodesBySeason(status.ShowIMDBID, status.Season)
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func (s *CleanupService) deleteCompleteSeason(ctx context.Context, status *model
 }
 
 func (s *CleanupService) deleteSeasonPackIfExists(ctx context.Context, status *models.SeasonWatchStatus) {
-	seasonPack, err := s.repo.GetSeasonPack(status.ShowTMDBID, status.Season)
+	seasonPack, err := s.repo.GetSeasonPack(status.ShowIMDBID, status.Season)
 	if err != nil || seasonPack == nil {
 		return
 	}
