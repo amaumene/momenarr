@@ -6,83 +6,69 @@ import (
 	"os"
 )
 
+const (
+	dirPermissions          = 0755
+	envNewsnabAPIKey        = "NEWSNAB_API_KEY"
+	envNewsnabHost          = "NEWSNAB_HOST"
+	envDownloadDir          = "DOWNLOAD_DIR"
+	envDataDir              = "DATA_DIR"
+	envTraktAPIKey          = "TRAKT_API_KEY"
+	envTraktClientSecret    = "TRAKT_CLIENT_SECRET"
+	envNZBGetURL            = "NZBGET_URL"
+	envNZBGetUser           = "NZBGET_USER"
+	envNZBGetPass           = "NZBGET_PASS"
+	msgEnvVarMissing        = "Environment variable missing"
+	defaultDataDir          = "."
+)
+
 func createDir(dir string) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, dirPermissions); err != nil {
 		log.Fatalf("Failed to create directory %s: %v", dir, err)
 	}
 }
 
 func setConfig() *Config {
 	config := new(Config)
-	config.NewsNabApiKey = os.Getenv("NEWSNAB_API_KEY")
-	if config.NewsNabApiKey == "" {
-		log.WithFields(log.Fields{
-			"NEWSNAB_API_KEY": config.NewsNabApiKey,
-		}).Fatal("Environment variable missing")
-	}
-
-	config.NewsNabHost = os.Getenv("NEWSNAB_HOST")
-	if config.NewsNabHost == "" {
-		log.WithFields(log.Fields{
-			"NEWSNAB_HOST": config.NewsNabHost,
-		}).Fatal("Environment variable missing")
-	}
-
-	config.DownloadDir = os.Getenv("DOWNLOAD_DIR")
-	if config.DownloadDir == "" {
-		log.WithFields(log.Fields{
-			"DOWNLOAD_DIR": config.DownloadDir,
-		}).Fatal("Environment variable missing")
-	}
-	// Create if it doesn't exist
+	config.NewsNabApiKey = getRequiredEnv(envNewsnabAPIKey)
+	config.NewsNabHost = getRequiredEnv(envNewsnabHost)
+	config.DownloadDir = getRequiredEnv(envDownloadDir)
 	createDir(config.DownloadDir)
-
-	config.DataDir = os.Getenv("DATA_DIR")
-	if config.DataDir == "" {
-		log.WithFields(log.Fields{
-			"DATA_DIR": config.DataDir,
-		}).Warning("DATA_DIR not set, using current directory")
-		config.DataDir = "."
-	}
+	config.DataDir = getDataDir()
 	return config
 }
 
-func getEnvTrakt() (string, string) {
-	traktApiKey := os.Getenv("TRAKT_API_KEY")
-	traktClientSecret := os.Getenv("TRAKT_CLIENT_SECRET")
-
-	if traktApiKey == "" || traktClientSecret == "" {
-		log.WithFields(log.Fields{
-			"TRAKT_API_KEY":       traktApiKey,
-			"TRAKT_CLIENT_SECRET": traktClientSecret,
-		}).Fatal("Environment variable missing")
+func getRequiredEnv(key string) string {
+	value := os.Getenv(key)
+	if value == emptyString {
+		log.WithFields(log.Fields{key: value}).Fatal(msgEnvVarMissing)
 	}
+	return value
+}
+
+func getDataDir() string {
+	dataDir := os.Getenv(envDataDir)
+	if dataDir == emptyString {
+		log.WithFields(log.Fields{envDataDir: dataDir}).Warning("DATA_DIR not set, using current directory")
+		return defaultDataDir
+	}
+	return dataDir
+}
+
+func getEnvTrakt() (string, string) {
+	traktApiKey := getRequiredEnv(envTraktAPIKey)
+	traktClientSecret := getRequiredEnv(envTraktClientSecret)
 	return traktApiKey, traktClientSecret
 }
 
 func setNZBGet() *nzbget.NZBGet {
-	nzbgetURL := os.Getenv("NZBGET_URL")
-	if nzbgetURL == "" {
-		log.WithFields(log.Fields{
-			"NZBGET_URL": nzbgetURL,
-		}).Fatal("Environment variable missing")
+	config := buildNZBGetConfig()
+	return nzbget.New(config)
+}
+
+func buildNZBGetConfig() *nzbget.Config {
+	return &nzbget.Config{
+		URL:  getRequiredEnv(envNZBGetURL),
+		User: getRequiredEnv(envNZBGetUser),
+		Pass: getRequiredEnv(envNZBGetPass),
 	}
-	nzbgetUser := os.Getenv("NZBGET_USER")
-	if nzbgetUser == "" {
-		log.WithFields(log.Fields{
-			"NZBGET_USER": nzbgetUser,
-		}).Fatal("Environment variable missing")
-	}
-	nzbgetPass := os.Getenv("NZBGET_PASS")
-	if nzbgetPass == "" {
-		log.WithFields(log.Fields{
-			"NZBGET_PASS": nzbgetPass,
-		}).Fatal("Environment variable missing")
-	}
-	nzbget := nzbget.New(&nzbget.Config{
-		URL:  nzbgetURL,
-		User: nzbgetUser,
-		Pass: nzbgetPass,
-	})
-	return nzbget
 }
