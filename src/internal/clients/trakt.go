@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/amaumene/momenarr/trakt"
 	"github.com/amaumene/momenarr/trakt/authorization"
+	log "github.com/sirupsen/logrus"
 )
 
 type TraktClient struct {
@@ -20,6 +23,8 @@ type TraktClient struct {
 func NewTraktClient(apiKey, clientSecret, tokenPath string) (*TraktClient, error) {
 	trakt.Key = apiKey
 
+	configureRetryLogic()
+
 	token, err := loadOrGenerateToken(clientSecret, tokenPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading trakt token: %w", err)
@@ -30,6 +35,13 @@ func NewTraktClient(apiKey, clientSecret, tokenPath string) (*TraktClient, error
 		clientSecret: clientSecret,
 		tokenPath:    tokenPath,
 	}, nil
+}
+
+func configureRetryLogic() {
+	trakt.WithConfig(&trakt.BackendConfig{
+		MaxNetworkRetries: 3,
+		HTTPClient:        &http.Client{Timeout: 80 * time.Second},
+	})
 }
 
 func (c *TraktClient) Token() *trakt.Token {
@@ -142,8 +154,23 @@ func (c *TraktClient) RefreshPeriodically(ctx context.Context, interval time.Dur
 			return
 		case <-ticker.C:
 			if err := c.RefreshToken(ctx); err != nil {
-				fmt.Printf("Error refreshing token: %v\n", err)
+				c.logRefreshError(err)
 			}
 		}
 	}
+}
+
+func (c *TraktClient) logRefreshError(err error) {
+	if isTransientError(err) {
+		log.WithField("error", err).Warn("transient error refreshing trakt token, will retry next cycle")
+	} else {
+		log.WithField("error", err).Error("failed to refresh trakt token")
+	}
+}
+
+func isTransientError(err error) bool {
+	errStr := err.Error()
+	return strings.Contains(errStr, "502") || strings.Contains(errStr, "503") ||
+		strings.Contains(errStr, "504") || strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "connection")
 }
