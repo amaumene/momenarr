@@ -67,11 +67,12 @@ func (h *HTTPHandler) handleNotify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPHandler) parseNotification(r *http.Request) (*domain.Notification, error) {
+	defer r.Body.Close()
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading body: %w", err)
 	}
-	defer r.Body.Close()
 
 	var notification domain.Notification
 	if err := json.Unmarshal(body, &notification); err != nil {
@@ -97,7 +98,9 @@ func (h *HTTPHandler) handleList(w http.ResponseWriter, r *http.Request) {
 
 	response := h.formatMediaList(medias)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(response))
+	if _, err := w.Write([]byte(response)); err != nil {
+		log.WithField("error", err).Error("failed to write media list response")
+	}
 }
 
 func (h *HTTPHandler) formatMediaList(medias []domain.Media) string {
@@ -119,7 +122,9 @@ func (h *HTTPHandler) handleNZBs(w http.ResponseWriter, r *http.Request) {
 
 	response := h.formatNZBList(nzbs)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(response))
+	if _, err := w.Write([]byte(response)); err != nil {
+		log.WithField("error", err).Error("failed to write nzb list response")
+	}
 }
 
 func (h *HTTPHandler) formatNZBList(nzbs []domain.NZB) string {

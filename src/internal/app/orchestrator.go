@@ -178,7 +178,10 @@ func markSeasonAsProcessed(media *domain.Media, processedSeasons map[string]bool
 }
 
 func isSeasonPackNZB(title string) bool {
-	matched, _ := regexp.MatchString(`(?i)(S\d{2}[^E]|Season\s*\d+)`, title)
+	matched, err := regexp.MatchString(`(?i)(S\d{2}[^E]|Season\s*\d+)`, title)
+	if err != nil {
+		return false
+	}
 	return matched
 }
 

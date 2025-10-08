@@ -302,12 +302,22 @@ func (s *MediaService) fetchNextEpisodes(ctx context.Context, sh *trakt.Show) []
 }
 
 func (s *MediaService) fetchEpisodeWithFallback(showID trakt.SearchID, season, number int64) *trakt.Episode {
+	if ep := s.fetchEpisode(showID, season, number); ep != nil {
+		return ep
+	}
+	return s.fetchNextSeasonFirstEpisode(showID, season)
+}
+
+func (s *MediaService) fetchEpisode(showID trakt.SearchID, season, number int64) *trakt.Episode {
 	ep, err := episode.Get(showID, season, number, nil)
 	if err == nil {
 		return ep
 	}
+	return nil
+}
 
-	ep, err = episode.Get(showID, season+1, 1, nil)
+func (s *MediaService) fetchNextSeasonFirstEpisode(showID trakt.SearchID, season int64) *trakt.Episode {
+	ep, err := episode.Get(showID, season+1, 1, nil)
 	if err != nil {
 		log.WithField("error", err).Info("no more episodes available for show")
 		return nil

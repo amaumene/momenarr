@@ -19,8 +19,6 @@ const (
 	regexSeasonNotation = `(?i)S\d{1,2}|Season[.\s]+\d+`
 	regexEpisodeMarker  = `(?i)E\d{1,2}`
 	guidPrefix          = "https://v2.nzbs.in/releases/"
-	minResultsCount     = 0
-	firstIndex          = 0
 )
 
 type NZBService struct {
@@ -57,10 +55,10 @@ func (s *NZBService) GetNZB(ctx context.Context, traktID int64) (*domain.NZB, er
 
 func (s *NZBService) findNZBByPattern(ctx context.Context, traktID int64, pattern string) (*domain.NZB, error) {
 	nzbs, err := s.nzbRepo.FindByTraktID(ctx, traktID, pattern, false)
-	if err != nil || len(nzbs) <= minResultsCount {
+	if err != nil || len(nzbs) == 0 {
 		return nil, err
 	}
-	return &nzbs[firstIndex], nil
+	return &nzbs[0], nil
 }
 
 func (s *NZBService) PopulateNZBs(ctx context.Context) error {
@@ -86,7 +84,7 @@ func (s *NZBService) processMediaForNZB(ctx context.Context, media *domain.Media
 		return fmt.Errorf("searching nzb: %w", err)
 	}
 
-	if len(results) <= minResultsCount {
+	if len(results) == 0 {
 		s.logNoNZBFound(media)
 		return nil
 	}
@@ -102,49 +100,41 @@ func (s *NZBService) searchNZB(ctx context.Context, media *domain.Media) ([]doma
 }
 
 func (s *NZBService) searchEpisodeWithSeasonPackPriority(ctx context.Context, media *domain.Media) ([]domain.SearchResult, error) {
-	log.WithFields(log.Fields{
-		"title":   media.Title,
-		"season":  media.Season,
-		"episode": media.Number,
-		"imdb":    media.IMDB,
-	}).Debug("searching for season pack first")
+	s.logSearchStart(media)
 
-	seasonPackResults, err := s.searcher.SearchSeasonPack(ctx, media.IMDB, media.Season)
-	if err != nil {
-		log.WithFields(log.Fields{
-			"error": err,
-			"title": media.Title,
-		}).Warn("failed to search for season pack, falling back to episode search")
-	} else {
-		log.WithFields(log.Fields{
-			"title":        media.Title,
-			"resultsCount": len(seasonPackResults),
-		}).Debug("received season pack search results")
-
-		if len(seasonPackResults) > minResultsCount {
-			filtered := filterSeasonPacks(seasonPackResults)
-			log.WithFields(log.Fields{
-				"title":        media.Title,
-				"beforeFilter": len(seasonPackResults),
-				"afterFilter":  len(filtered),
-			}).Debug("filtered season pack results")
-
-			if len(filtered) > minResultsCount {
-				log.WithFields(log.Fields{
-					"title":       media.Title,
-					"seasonPacks": len(filtered),
-				}).Info("found season packs, using season pack instead of single episode")
-				return filtered, nil
-			}
-		}
+	if results := s.trySeasonPackSearch(ctx, media); results != nil {
+		return results, nil
 	}
 
-	log.WithFields(log.Fields{
-		"title":   media.Title,
-		"season":  media.Season,
-		"episode": media.Number,
-	}).Debug("no season packs found, searching for single episode")
+	s.logFallbackToEpisode(media)
 	return s.searcher.SearchEpisode(ctx, media.IMDB, media.Season, media.Number)
+}
+
+func (s *NZBService) trySeasonPackSearch(ctx context.Context, media *domain.Media) []domain.SearchResult {
+	seasonPackResults, err := s.searcher.SearchSeasonPack(ctx, media.IMDB, media.Season)
+	if err != nil {
+		s.logSeasonPackError(media, err)
+		return nil
+	}
+
+	s.logSeasonPackResults(media, len(seasonPackResults))
+
+	if len(seasonPackResults) == 0 {
+		return nil
+	}
+
+	return s.filterAndLogSeasonPacks(media, seasonPackResults)
+}
+
+func (s *NZBService) filterAndLogSeasonPacks(media *domain.Media, results []domain.SearchResult) []domain.SearchResult {
+	filtered := filterSeasonPacks(results)
+	s.logFilterResults(media, len(results), len(filtered))
+
+	if len(filtered) > 0 {
+		s.logSeasonPacksFound(media, len(filtered))
+		return filtered
+	}
+	return nil
 }
 
 func filterSeasonPacks(results []domain.SearchResult) []domain.SearchResult {
@@ -158,13 +148,19 @@ func filterSeasonPacks(results []domain.SearchResult) []domain.SearchResult {
 }
 
 func isSeasonPackTitle(title string) bool {
-	hasSeasonNotation, _ := regexp.MatchString(regexSeasonNotation, title)
-	hasEpisodeMarker, _ := regexp.MatchString(regexEpisodeMarker, title)
+	hasSeasonNotation, err := regexp.MatchString(regexSeasonNotation, title)
+	if err != nil {
+		return false
+	}
+	hasEpisodeMarker, err := regexp.MatchString(regexEpisodeMarker, title)
+	if err != nil {
+		return false
+	}
 	return hasSeasonNotation && !hasEpisodeMarker
 }
 
 func isEpisode(media *domain.Media) bool {
-	return media.Number > minResultsCount && media.Season > minResultsCount
+	return media.Number > 0 && media.Season > 0
 }
 
 func (s *NZBService) insertResults(ctx context.Context, media *domain.Media, results []domain.SearchResult) error {
@@ -238,4 +234,50 @@ func (s *NZBService) logNoNZBFound(media *domain.Media) {
 		"traktID": media.TraktID,
 		"title":   media.Title,
 	}).Warn("no nzb results found for media")
+}
+
+func (s *NZBService) logSearchStart(media *domain.Media) {
+	log.WithFields(log.Fields{
+		"title":   media.Title,
+		"season":  media.Season,
+		"episode": media.Number,
+		"imdb":    media.IMDB,
+	}).Debug("searching for season pack first")
+}
+
+func (s *NZBService) logSeasonPackError(media *domain.Media, err error) {
+	log.WithFields(log.Fields{
+		"error": err,
+		"title": media.Title,
+	}).Warn("failed to search for season pack, falling back to episode search")
+}
+
+func (s *NZBService) logSeasonPackResults(media *domain.Media, count int) {
+	log.WithFields(log.Fields{
+		"title":        media.Title,
+		"resultsCount": count,
+	}).Debug("received season pack search results")
+}
+
+func (s *NZBService) logFilterResults(media *domain.Media, before, after int) {
+	log.WithFields(log.Fields{
+		"title":        media.Title,
+		"beforeFilter": before,
+		"afterFilter":  after,
+	}).Debug("filtered season pack results")
+}
+
+func (s *NZBService) logSeasonPacksFound(media *domain.Media, count int) {
+	log.WithFields(log.Fields{
+		"title":       media.Title,
+		"seasonPacks": count,
+	}).Info("found season packs, using season pack instead of single episode")
+}
+
+func (s *NZBService) logFallbackToEpisode(media *domain.Media) {
+	log.WithFields(log.Fields{
+		"title":   media.Title,
+		"season":  media.Season,
+		"episode": media.Number,
+	}).Debug("no season packs found, searching for single episode")
 }

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
-	"github.com/amaumene/momenarr/internal/clients"
 	"github.com/amaumene/momenarr/internal/config"
 	"github.com/amaumene/momenarr/internal/domain"
 	log "github.com/sirupsen/logrus"
@@ -15,6 +15,7 @@ import (
 
 const (
 	nzbFileExtension = ".nzb"
+	decimalBase      = 10
 )
 
 type DownloadService struct {
@@ -34,9 +35,11 @@ func NewDownloadService(cfg *config.Config, mediaRepo domain.MediaRepository, do
 }
 
 func (s *DownloadService) CreateDownload(ctx context.Context, traktID int64, nzb *domain.NZB) error {
-	if isInQueue, err := s.checkIfInQueue(ctx, nzb.Title, traktID); err != nil {
+	isInQueue, err := s.checkIfInQueue(ctx, nzb.Title, traktID)
+	if err != nil {
 		return err
-	} else if isInQueue {
+	}
+	if isInQueue {
 		return nil
 	}
 
@@ -135,7 +138,7 @@ func (s *DownloadService) buildDownloadInput(traktID int64, title string, conten
 		Category: s.cfg.NZBCategory,
 		DupeMode: s.cfg.NZBDupeMode,
 		Parameters: map[string]string{
-			"Trakt": clients.FormatTraktID(traktID),
+			"Trakt": formatTraktID(traktID),
 		},
 	}
 }
@@ -175,4 +178,8 @@ func (s *DownloadService) logDownloadStarted(traktID int64, title string, downlo
 		"title":      title,
 		"downloadID": downloadID,
 	}).Info("download added to nzbget queue")
+}
+
+func formatTraktID(traktID int64) string {
+	return strconv.FormatInt(traktID, decimalBase)
 }

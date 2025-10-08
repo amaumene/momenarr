@@ -110,6 +110,6 @@ func convertFromNZBGetHistory(history []*nzbget.History) []domain.HistoryItem {
 	return items
 }
 
-func FormatTraktID(traktID int64) string {
+func formatTraktID(traktID int64) string {
 	return strconv.FormatInt(traktID, decimalBase)
 }
