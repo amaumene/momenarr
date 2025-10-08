@@ -126,7 +126,7 @@ func (a *App) createServices(mediaRepo domain.MediaRepository, nzbRepo domain.NZ
 }
 
 func (a *App) setupHTTPServer(mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, svc services) {
-	httpHandler := handler.NewHTTPHandler(a.cfg, mediaRepo, nzbRepo, svc.notification, svc.media, svc.nzb, svc.download)
+	httpHandler := handler.NewHTTPHandler(mediaRepo, nzbRepo, svc.notification, svc.media, svc.nzb, svc.download)
 
 	mux := http.NewServeMux()
 	httpHandler.RegisterRoutes(mux)

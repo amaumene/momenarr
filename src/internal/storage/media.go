@@ -8,10 +8,6 @@ import (
 	"github.com/amaumene/momenarr/internal/domain"
 )
 
-const (
-	errDuplicateKey = "This Key already exists in this bolthold for this type"
-)
-
 type mediaRepository struct {
 	store *bolthold.Store
 }

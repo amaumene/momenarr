@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	traktParameterName   = "Trakt"
 	historyDeleteCommand = "HistoryFinalDelete"
 	decimalBase          = 10
 )

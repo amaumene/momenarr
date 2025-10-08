@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/amaumene/momenarr/internal/config"
 	"github.com/amaumene/momenarr/internal/domain"
 	"github.com/amaumene/momenarr/internal/service"
 	log "github.com/sirupsen/logrus"
@@ -21,7 +20,6 @@ const (
 )
 
 type HTTPHandler struct {
-	cfg             *config.Config
 	mediaRepo       domain.MediaRepository
 	nzbRepo         domain.NZBRepository
 	notificationSvc *service.NotificationService
@@ -30,9 +28,8 @@ type HTTPHandler struct {
 	downloadSvc     *service.DownloadService
 }
 
-func NewHTTPHandler(cfg *config.Config, mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, notificationSvc *service.NotificationService, mediaSvc *service.MediaService, nzbSvc *service.NZBService, downloadSvc *service.DownloadService) *HTTPHandler {
+func NewHTTPHandler(mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, notificationSvc *service.NotificationService, mediaSvc *service.MediaService, nzbSvc *service.NZBService, downloadSvc *service.DownloadService) *HTTPHandler {
 	return &HTTPHandler{
-		cfg:             cfg,
 		mediaRepo:       mediaRepo,
 		nzbRepo:         nzbRepo,
 		notificationSvc: notificationSvc,
