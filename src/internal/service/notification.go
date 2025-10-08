@@ -52,6 +52,7 @@ func (s *NotificationService) Process(ctx context.Context, notification *domain.
 		if err := s.handleSuccess(ctx, notification, media); err != nil {
 			return fmt.Errorf("handling success: %w", err)
 		}
+		s.logSuccessfulDownload(media)
 	} else {
 		if err := s.handleFailure(ctx, notification); err != nil {
 			return fmt.Errorf("handling failure: %w", err)
@@ -196,4 +197,12 @@ func (s *NotificationService) deleteItem(ctx context.Context, downloadID int64) 
 		return true, fmt.Errorf("deleting from history: %w", err)
 	}
 	return true, nil
+}
+
+func (s *NotificationService) logSuccessfulDownload(media *domain.Media) {
+	log.WithFields(log.Fields{
+		"traktID": media.TraktID,
+		"title":   media.Title,
+		"file":    media.File,
+	}).Info("download completed and file moved successfully")
 }

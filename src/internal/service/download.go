@@ -49,6 +49,14 @@ func (s *DownloadService) CreateDownload(ctx context.Context, traktID int64, nzb
 }
 
 func (s *DownloadService) checkIfInQueue(ctx context.Context, title string, traktID int64) (bool, error) {
+	if found, err := s.checkQueue(ctx, title, traktID); err != nil || found {
+		return found, err
+	}
+
+	return s.checkHistory(ctx, title, traktID)
+}
+
+func (s *DownloadService) checkQueue(ctx context.Context, title string, traktID int64) (bool, error) {
 	queue, err := s.downloadClient.ListGroups(ctx)
 	if err != nil {
 		return false, fmt.Errorf("listing queue: %w", err)
@@ -57,6 +65,25 @@ func (s *DownloadService) checkIfInQueue(ctx context.Context, title string, trak
 	for _, item := range queue {
 		if item.NZBName == title {
 			s.logAlreadyInQueue(traktID, title)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *DownloadService) checkHistory(ctx context.Context, title string, traktID int64) (bool, error) {
+	history, err := s.downloadClient.History(ctx, false)
+	if err != nil {
+		return false, fmt.Errorf("listing history: %w", err)
+	}
+
+	for _, item := range history {
+		media, err := s.mediaRepo.Get(ctx, traktID)
+		if err != nil {
+			continue
+		}
+		if item.NZBID == media.DownloadID {
+			s.logAlreadyInHistory(traktID, title)
 			return true, nil
 		}
 	}
@@ -133,6 +160,13 @@ func (s *DownloadService) logAlreadyInQueue(traktID int64, title string) {
 		"traktID": traktID,
 		"title":   title,
 	}).Info("media already in download queue, skipping")
+}
+
+func (s *DownloadService) logAlreadyInHistory(traktID int64, title string) {
+	log.WithFields(log.Fields{
+		"traktID": traktID,
+		"title":   title,
+	}).Info("media already in download history, skipping")
 }
 
 func (s *DownloadService) logDownloadStarted(traktID int64, title string, downloadID int64) {

@@ -114,6 +114,15 @@ func (o *Orchestrator) downloadMedia(ctx context.Context) error {
 			continue
 		}
 
+		if media.DownloadID > 0 {
+			log.WithFields(log.Fields{
+				"traktID":    media.TraktID,
+				"title":      media.Title,
+				"downloadID": media.DownloadID,
+			}).Info("skipping media, download already created")
+			continue
+		}
+
 		nzb, err := o.nzbSvc.GetNZB(ctx, media.TraktID)
 		if err != nil {
 			log.WithFields(log.Fields{
