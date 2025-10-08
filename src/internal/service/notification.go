@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -76,56 +74,7 @@ func (s *NotificationService) getMedia(ctx context.Context, traktIDStr string) (
 }
 
 func (s *NotificationService) handleSuccess(ctx context.Context, notification *domain.Notification, media *domain.Media) error {
-	biggestFile, err := findBiggestFile(notification.Dir)
-	if err != nil {
-		return fmt.Errorf("finding biggest file: %w", err)
-	}
-
-	destPath, err := s.moveFile(biggestFile)
-	if err != nil {
-		return fmt.Errorf("moving file: %w", err)
-	}
-
-	if err := removeDirectory(notification.Dir); err != nil {
-		return fmt.Errorf("removing directory: %w", err)
-	}
-
-	return s.updateMediaFile(ctx, media, destPath)
-}
-
-func findBiggestFile(dir string) (string, error) {
-	var biggestFile string
-	var maxSize int64
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && info.Size() > maxSize {
-			biggestFile = path
-			maxSize = info.Size()
-		}
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("walking directory: %w", err)
-	}
-	return biggestFile, nil
-}
-
-func (s *NotificationService) moveFile(sourcePath string) (string, error) {
-	destPath := filepath.Join(s.cfg.DownloadDir, filepath.Base(sourcePath))
-	if err := os.Rename(sourcePath, destPath); err != nil {
-		return "", fmt.Errorf("moving file: %w", err)
-	}
-	return destPath, nil
-}
-
-func removeDirectory(dir string) error {
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("removing directory: %w", err)
-	}
-	return nil
+	return s.updateMediaFile(ctx, media, notification.Dir)
 }
 
 func (s *NotificationService) updateMediaFile(ctx context.Context, media *domain.Media, filePath string) error {
