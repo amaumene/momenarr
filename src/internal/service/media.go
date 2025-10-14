@@ -221,13 +221,21 @@ func (s *MediaService) collectEpisodesFromWatchlist(ctx context.Context, iterato
 		}
 
 		nextEp := s.getNextEpisode(item.Show)
-		if nextEp != nil {
-			if err := s.insertEpisode(ctx, item.Show, nextEp); err != nil {
-				log.WithField("error", err).Error("failed to insert watchlist episode")
-				continue
-			}
-			episodeIDs = append(episodeIDs, int64(nextEp.Trakt))
+		if nextEp == nil {
+			continue
 		}
+
+		_, err = s.mediaRepo.Get(ctx, int64(nextEp.Trakt))
+		if err == nil {
+			episodeIDs = append(episodeIDs, int64(nextEp.Trakt))
+			continue
+		}
+
+		if err := s.insertEpisode(ctx, item.Show, nextEp); err != nil {
+			log.WithField("error", err).Error("failed to insert watchlist episode")
+			continue
+		}
+		episodeIDs = append(episodeIDs, int64(nextEp.Trakt))
 	}
 
 	return episodeIDs, iterator.Err()
@@ -279,6 +287,11 @@ func (s *MediaService) fetchNextEpisodes(ctx context.Context, sh *trakt.Show) []
 	nextEp := s.getNextEpisode(sh)
 	if nextEp == nil {
 		return nil
+	}
+
+	_, err := s.mediaRepo.Get(ctx, int64(nextEp.Trakt))
+	if err == nil {
+		return []int64{int64(nextEp.Trakt)}
 	}
 
 	var episodeIDs []int64

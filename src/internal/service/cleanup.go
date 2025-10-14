@@ -61,9 +61,12 @@ func (s *CleanupService) buildHistoryParams() *trakt.ListHistoryParams {
 	lookback := time.Duration(s.cfg.HistoryLookbackDays) * 24 * time.Hour
 
 	return &trakt.ListHistoryParams{
-		ListParams: trakt.ListParams{OAuth: s.token.AccessToken},
-		EndAt:      now,
-		StartAt:    now.Add(-lookback),
+		ListParams: trakt.ListParams{
+			OAuth: s.token.AccessToken,
+			Limit: 50,
+		},
+		EndAt:   now,
+		StartAt: now.Add(-lookback),
 	}
 }
 
@@ -80,7 +83,7 @@ func (s *CleanupService) handleHistoryItem(ctx context.Context, item *trakt.Hist
 func (s *CleanupService) removeMedia(ctx context.Context, traktID int64, name string) error {
 	media, err := s.mediaRepo.Get(ctx, traktID)
 	if err != nil {
-		return fmt.Errorf("getting media %d %s: %w", traktID, name, err)
+		return nil
 	}
 
 	if err := s.mediaRepo.Delete(ctx, traktID); err != nil {
@@ -88,11 +91,20 @@ func (s *CleanupService) removeMedia(ctx context.Context, traktID int64, name st
 	}
 
 	if err := s.nzbRepo.DeleteByTraktID(ctx, traktID); err != nil {
-		return fmt.Errorf("deleting nzbs for %d %s: %w", traktID, name, err)
+		log.WithFields(log.Fields{
+			"traktID": traktID,
+			"name":    name,
+			"error":   err,
+		}).Warn("failed to delete nzbs, continuing")
 	}
 
 	if err := s.deleteFile(media.File, name); err != nil {
-		return fmt.Errorf("deleting file for %d %s: %w", traktID, name, err)
+		log.WithFields(log.Fields{
+			"traktID": traktID,
+			"name":    name,
+			"file":    media.File,
+			"error":   err,
+		}).Warn("failed to delete file, continuing")
 	}
 
 	s.logRemoval(traktID, name)
@@ -105,6 +117,9 @@ func (s *CleanupService) deleteFile(filePath, name string) error {
 	}
 
 	if err := os.Remove(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return fmt.Errorf("removing file %s: %w", filePath, err)
 	}
 	return nil
