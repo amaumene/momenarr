@@ -439,12 +439,9 @@ func (n *NZBGet) AppendContext(ctx context.Context, input *AppendInput) (int64, 
 
 // ppparameters turns input Parameters into an RPC-compatible format.
 func ppparameters(parameters []*Parameter) interface{} {
-	if len(parameters) == 0 {
-		return [][2]string{}
-	}
-	output := make([][2]string, len(parameters))
+	output := make([][]string, len(parameters))
 	for idx, param := range parameters {
-		output[idx] = [2]string{param.Name, param.Value}
+		output[idx] = []string{param.Name, param.Value}
 	}
 
 	return output
