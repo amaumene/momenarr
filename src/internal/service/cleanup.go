@@ -59,11 +59,12 @@ func (s *CleanupService) CleanWatched(ctx context.Context) error {
 func (s *CleanupService) buildHistoryParams() *trakt.ListHistoryParams {
 	now := time.Now()
 	lookback := time.Duration(s.cfg.HistoryLookbackDays) * 24 * time.Hour
+	limit := int64(50)
 
 	return &trakt.ListHistoryParams{
 		ListParams: trakt.ListParams{
 			OAuth: s.token.AccessToken,
-			Limit: 50,
+			Limit: &limit,
 		},
 		EndAt:   now,
 		StartAt: now.Add(-lookback),
