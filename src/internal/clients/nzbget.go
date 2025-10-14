@@ -3,7 +3,6 @@ package clients
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/amaumene/momenarr/internal/domain"
 	"github.com/amaumene/momenarr/nzbget"
@@ -11,7 +10,6 @@ import (
 
 const (
 	historyDeleteCommand = "HistoryFinalDelete"
-	decimalBase          = 10
 )
 
 type nzbgetAdapter struct {
@@ -86,7 +84,7 @@ func convertToNZBGetInput(input *domain.DownloadInput) *nzbget.AppendInput {
 		Category:     input.Category,
 		DupeMode:     input.DupeMode,
 		AutoCategory: false,
-		Parameters:   params,
+		PPParameters: params,
 	}
 }
 
@@ -109,8 +107,4 @@ func convertFromNZBGetHistory(history []*nzbget.History) []domain.HistoryItem {
 		}
 	}
 	return items
-}
-
-func formatTraktID(traktID int64) string {
-	return strconv.FormatInt(traktID, decimalBase)
 }
