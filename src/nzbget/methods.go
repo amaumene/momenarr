@@ -399,16 +399,17 @@ func (n *NZBGet) ResetServerVolumeContext(ctx context.Context, serverID int64, s
 // AppendInput is the input data for the append method.
 // See https://nzbget.net/api/append for more information about this data.
 type AppendInput struct {
-	Filename   string
-	Content    string
-	Category   string
-	Priority   int64
-	AddToTop   bool
-	AddPaused  bool
-	DupeKey    string // See: https://nzbget.net/rss#duplicate-keys
-	DupeScore  int64  // See: https://nzbget.net/rss#duplicate-scores
-	DupeMode   string // See: https://nzbget.net/rss#duplicate-modes
-	Parameters []*Parameter
+	Filename     string
+	Content      string
+	Category     string
+	Priority     int64
+	AddToTop     bool
+	AddPaused    bool
+	DupeKey      string // See: https://nzbget.net/rss#duplicate-keys
+	DupeScore    int64  // See: https://nzbget.net/rss#duplicate-scores
+	DupeMode     string // See: https://nzbget.net/rss#duplicate-modes
+	AutoCategory bool
+	Parameters   []*Parameter
 }
 
 // Append adds a nzb-file or URL to the download queue.
@@ -431,6 +432,7 @@ func (n *NZBGet) AppendContext(ctx context.Context, input *AppendInput) (int64, 
 		input.DupeKey,
 		input.DupeScore,
 		input.DupeMode,
+		input.AutoCategory,
 		ppparameters(input.Parameters),
 	)
 
@@ -439,6 +441,9 @@ func (n *NZBGet) AppendContext(ctx context.Context, input *AppendInput) (int64, 
 
 // ppparameters turns input Parameters into an RPC-compatible format.
 func ppparameters(parameters []*Parameter) interface{} {
+	if len(parameters) == 0 {
+		return ""
+	}
 	output := make([][]string, len(parameters))
 	for idx, param := range parameters {
 		output[idx] = []string{param.Name, param.Value}

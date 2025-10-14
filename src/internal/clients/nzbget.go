@@ -81,11 +81,12 @@ func convertToNZBGetInput(input *domain.DownloadInput) *nzbget.AppendInput {
 	}
 
 	return &nzbget.AppendInput{
-		Filename:   input.Filename,
-		Content:    input.Content,
-		Category:   input.Category,
-		DupeMode:   input.DupeMode,
-		Parameters: params,
+		Filename:     input.Filename,
+		Content:      input.Content,
+		Category:     input.Category,
+		DupeMode:     input.DupeMode,
+		AutoCategory: false,
+		Parameters:   params,
 	}
 }
 

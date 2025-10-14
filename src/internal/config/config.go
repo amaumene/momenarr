@@ -16,7 +16,7 @@ const (
 	defaultNextEpisodesCount   = 3
 	defaultServerPort          = "0.0.0.0:3000"
 	defaultNZBCategory         = "momenarr"
-	defaultNZBDupeMode         = "score"
+	defaultNZBDupeMode         = "SCORE"
 	defaultDBFilePermissions   = 0666
 )
 
