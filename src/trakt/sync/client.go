@@ -247,7 +247,16 @@ func History(params *trakt.ListHistoryParams) *trakt.HistoryIterator {
 //   - Pagination
 //   - Extended Info
 func (c *client) History(params *trakt.ListHistoryParams) *trakt.HistoryIterator {
-	path := trakt.FormatURLPath("/sync/history/%s/%s", params.Type, params.ID)
+	var path string
+
+	if params.Type == "" && params.ID == nil {
+		path = "/sync/history"
+	} else if params.ID == nil {
+		path = trakt.FormatURLPath("/sync/history/%s", params.Type)
+	} else {
+		path = trakt.FormatURLPath("/sync/history/%s/%s", params.Type, params.ID)
+	}
+
 	return &trakt.HistoryIterator{Iterator: c.b.NewIterator(http.MethodGet, path, params)}
 }
 
