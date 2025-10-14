@@ -409,7 +409,7 @@ type AppendInput struct {
 	DupeScore    int64  // See: https://nzbget.net/rss#duplicate-scores
 	DupeMode     string // See: https://nzbget.net/rss#duplicate-modes
 	AutoCategory bool
-	PPParameters []*Parameter
+	Parameters   []*Parameter
 }
 
 // Append adds a nzb-file or URL to the download queue.
@@ -433,7 +433,7 @@ func (n *NZBGet) AppendContext(ctx context.Context, input *AppendInput) (int64, 
 		input.DupeScore,
 		input.DupeMode,
 		input.AutoCategory,
-		input.PPParameters,
+		input.Parameters,
 	)
 
 	return output, err

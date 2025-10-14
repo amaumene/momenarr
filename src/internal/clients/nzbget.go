@@ -84,7 +84,7 @@ func convertToNZBGetInput(input *domain.DownloadInput) *nzbget.AppendInput {
 		Category:     input.Category,
 		DupeMode:     input.DupeMode,
 		AutoCategory: false,
-		PPParameters: params,
+		Parameters:   params,
 	}
 }
 
