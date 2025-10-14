@@ -433,23 +433,10 @@ func (n *NZBGet) AppendContext(ctx context.Context, input *AppendInput) (int64, 
 		input.DupeScore,
 		input.DupeMode,
 		input.AutoCategory,
-		ppparameters(input.Parameters),
+		input.Parameters,
 	)
 
 	return output, err
-}
-
-// ppparameters turns input Parameters into an RPC-compatible format.
-func ppparameters(parameters []*Parameter) interface{} {
-	if len(parameters) == 0 {
-		return ""
-	}
-	output := make([][]string, len(parameters))
-	for idx, param := range parameters {
-		output[idx] = []string{param.Name, param.Value}
-	}
-
-	return output
 }
 
 // EditQueue edits items in download queue or in history.
