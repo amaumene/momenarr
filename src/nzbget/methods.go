@@ -433,21 +433,10 @@ func (n *NZBGet) AppendContext(ctx context.Context, input *AppendInput) (int64, 
 		input.DupeScore,
 		input.DupeMode,
 		input.AutoCategory,
-		ppparameters(input.PPParameters),
+		input.PPParameters,
 	)
 
 	return output, err
-}
-
-func ppparameters(parameters []*Parameter) interface{} {
-	if parameters == nil || len(parameters) == 0 {
-		return []interface{}{}
-	}
-	output := make([][]string, len(parameters))
-	for idx, param := range parameters {
-		output[idx] = []string{param.Name, param.Value}
-	}
-	return output
 }
 
 // EditQueue edits items in download queue or in history.

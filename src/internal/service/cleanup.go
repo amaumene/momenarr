@@ -76,7 +76,7 @@ func (s *CleanupService) handleHistoryItem(ctx context.Context, item *trakt.Hist
 	case mediaTypeMovie:
 		return s.removeMedia(ctx, int64(item.Movie.Trakt), item.Movie.Title)
 	case mediaTypeEpisode:
-		return s.removeMedia(ctx, int64(item.Episode.Trakt), item.Show.Title)
+		return s.removeMedia(ctx, int64(item.Show.Trakt), item.Show.Title)
 	}
 	return nil
 }
@@ -99,7 +99,7 @@ func (s *CleanupService) removeMedia(ctx context.Context, traktID int64, name st
 		}).Warn("failed to delete nzbs, continuing")
 	}
 
-	if err := s.deleteFile(media.File, name); err != nil {
+	if err := s.deleteFile(media.File); err != nil {
 		log.WithFields(log.Fields{
 			"traktID": traktID,
 			"name":    name,
@@ -112,7 +112,7 @@ func (s *CleanupService) removeMedia(ctx context.Context, traktID int64, name st
 	return nil
 }
 
-func (s *CleanupService) deleteFile(filePath, name string) error {
+func (s *CleanupService) deleteFile(filePath string) error {
 	if filePath == "" {
 		return nil
 	}
