@@ -35,6 +35,10 @@ func NewDownloadService(cfg *config.Config, mediaRepo domain.MediaRepository, do
 }
 
 func (s *DownloadService) CreateDownload(ctx context.Context, traktID int64, nzb *domain.NZB) error {
+	if traktID <= 0 {
+		return fmt.Errorf("invalid traktID: %d", traktID)
+	}
+
 	isInQueue, err := s.checkIfInQueue(ctx, nzb.Title, traktID)
 	if err != nil {
 		return err
@@ -94,10 +98,6 @@ func (s *DownloadService) checkHistory(ctx context.Context, title string, traktI
 }
 
 func (s *DownloadService) appendToDownloader(ctx context.Context, traktID int64, nzb *domain.NZB) (int64, error) {
-	if traktID <= 0 {
-		return 0, fmt.Errorf("invalid traktID: %d", traktID)
-	}
-
 	content, err := s.downloadNZBFile(ctx, nzb.Link)
 	if err != nil {
 		return 0, fmt.Errorf("downloading nzb file: %w", err)
