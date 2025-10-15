@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/amaumene/momenarr/internal/config"
@@ -106,7 +107,9 @@ func (s *DownloadService) appendToDownloader(ctx context.Context, traktID int64,
 	input := s.buildDownloadInput(traktID, nzb.Title, content)
 	downloadID, err := s.downloadClient.Append(ctx, input)
 	if err != nil || downloadID <= 0 {
-		return 0, fmt.Errorf("appending to downloader: %w", err)
+		//return 0, fmt.Errorf("appending to downloader: %w", err)
+		log.WithError(err).Error("append to downloader failed")
+		os.Exit(1)
 	}
 
 	return downloadID, nil

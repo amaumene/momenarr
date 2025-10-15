@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	encodingjson "encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+	"os"
 
-	"github.com/gorilla/rpc/json"
+	gorillajson "github.com/gorilla/rpc/json"
 )
 
 // Package defaults.
@@ -62,11 +64,18 @@ func New(config *Config) *NZBGet {
 
 // GetInto is a helper method to make a JSON-RPC request and turn the response into structured data.
 func (n *NZBGet) GetInto(ctx context.Context, method string, output interface{}, args ...interface{}) error {
-	message, err := json.EncodeClientRequest(method, args)
+	request := map[string]interface{}{
+		"method": method,
+		"params": args,
+		"id":     1,
+	}
+
+	message, err := encodingjson.Marshal(request)
 	if err != nil {
 		return fmt.Errorf("encoding request: %w", err)
 	}
 
+	os.WriteFile("/tmp/nzbget-request.json", message, 0644)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.url, bytes.NewBuffer(message))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -85,7 +94,7 @@ func (n *NZBGet) GetInto(ctx context.Context, method string, output interface{},
 	}
 	defer resp.Body.Close()
 
-	if err := json.DecodeClientResponse(resp.Body, &output); err != nil {
+	if err := gorillajson.DecodeClientResponse(resp.Body, &output); err != nil {
 		return fmt.Errorf("parsing response: %w: %s", err, resp.Status)
 	}
 
