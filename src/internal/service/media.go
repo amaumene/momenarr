@@ -23,13 +23,15 @@ const (
 type MediaService struct {
 	cfg           *config.Config
 	mediaRepo     domain.MediaRepository
+	nzbRepo       domain.NZBRepository
 	tokenProvider domain.TokenProvider
 }
 
-func NewMediaService(cfg *config.Config, mediaRepo domain.MediaRepository, tokenProvider domain.TokenProvider) *MediaService {
+func NewMediaService(cfg *config.Config, mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, tokenProvider domain.TokenProvider) *MediaService {
 	return &MediaService{
 		cfg:           cfg,
 		mediaRepo:     mediaRepo,
+		nzbRepo:       nzbRepo,
 		tokenProvider: tokenProvider,
 	}
 }
@@ -374,11 +376,12 @@ func (s *MediaService) removeStaleMedia(ctx context.Context, validIDs []int64) e
 	}
 
 	for _, media := range staleMedia {
-		if err := s.mediaRepo.Delete(ctx, media.TraktID); err != nil {
+		if err := completeMediaCleanup(ctx, s.mediaRepo, s.nzbRepo, media.TraktID, media.Title); err != nil {
 			log.WithFields(log.Fields{
 				"traktID": media.TraktID,
+				"title":   media.Title,
 				"error":   err,
-			}).Error("failed to delete stale media from database")
+			}).Error("failed to clean up stale media")
 		}
 	}
 	return nil
