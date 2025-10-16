@@ -1,6 +1,10 @@
 package domain
 
-import "context"
+import (
+	"context"
+
+	"github.com/amaumene/momenarr/trakt"
+)
 
 type DownloadInput struct {
 	Filename   string
@@ -36,4 +40,8 @@ type NZBSearcher interface {
 	SearchMovie(ctx context.Context, imdb string) ([]SearchResult, error)
 	SearchEpisode(ctx context.Context, imdb string, season, episode int64) ([]SearchResult, error)
 	SearchSeasonPack(ctx context.Context, imdb string, season int64) ([]SearchResult, error)
+}
+
+type TokenProvider interface {
+	Token() *trakt.Token
 }

@@ -112,8 +112,8 @@ type services struct {
 func (a *App) createServices(mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, downloadClient domain.DownloadClient, searcher domain.NZBSearcher) services {
 	downloadSvc := service.NewDownloadService(a.cfg, mediaRepo, downloadClient)
 	nzbSvc := service.NewNZBService(a.cfg, mediaRepo, nzbRepo, searcher)
-	mediaSvc := service.NewMediaService(a.cfg, mediaRepo, a.traktClient.Token())
-	cleanupSvc := service.NewCleanupService(a.cfg, mediaRepo, nzbRepo, a.traktClient.Token())
+	mediaSvc := service.NewMediaService(a.cfg, mediaRepo, a.traktClient)
+	cleanupSvc := service.NewCleanupService(a.cfg, mediaRepo, nzbRepo, a.traktClient)
 	notificationSvc := service.NewNotificationService(a.cfg, mediaRepo, nzbRepo, downloadClient, downloadSvc)
 
 	return services{

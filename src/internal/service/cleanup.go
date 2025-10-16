@@ -19,18 +19,18 @@ const (
 )
 
 type CleanupService struct {
-	cfg       *config.Config
-	mediaRepo domain.MediaRepository
-	nzbRepo   domain.NZBRepository
-	token     *trakt.Token
+	cfg           *config.Config
+	mediaRepo     domain.MediaRepository
+	nzbRepo       domain.NZBRepository
+	tokenProvider domain.TokenProvider
 }
 
-func NewCleanupService(cfg *config.Config, mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, token *trakt.Token) *CleanupService {
+func NewCleanupService(cfg *config.Config, mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, tokenProvider domain.TokenProvider) *CleanupService {
 	return &CleanupService{
-		cfg:       cfg,
-		mediaRepo: mediaRepo,
-		nzbRepo:   nzbRepo,
-		token:     token,
+		cfg:           cfg,
+		mediaRepo:     mediaRepo,
+		nzbRepo:       nzbRepo,
+		tokenProvider: tokenProvider,
 	}
 }
 
@@ -63,7 +63,7 @@ func (s *CleanupService) buildHistoryParams() *trakt.ListHistoryParams {
 
 	return &trakt.ListHistoryParams{
 		ListParams: trakt.ListParams{
-			OAuth: s.token.AccessToken,
+			OAuth: s.tokenProvider.Token().AccessToken,
 			Limit: &limit,
 		},
 		EndAt:   now,

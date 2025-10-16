@@ -21,16 +21,16 @@ const (
 )
 
 type MediaService struct {
-	cfg       *config.Config
-	mediaRepo domain.MediaRepository
-	token     *trakt.Token
+	cfg           *config.Config
+	mediaRepo     domain.MediaRepository
+	tokenProvider domain.TokenProvider
 }
 
-func NewMediaService(cfg *config.Config, mediaRepo domain.MediaRepository, token *trakt.Token) *MediaService {
+func NewMediaService(cfg *config.Config, mediaRepo domain.MediaRepository, tokenProvider domain.TokenProvider) *MediaService {
 	return &MediaService{
-		cfg:       cfg,
-		mediaRepo: mediaRepo,
-		token:     token,
+		cfg:           cfg,
+		mediaRepo:     mediaRepo,
+		tokenProvider: tokenProvider,
 	}
 }
 
@@ -91,7 +91,7 @@ func (s *MediaService) syncMoviesFromWatchlist(ctx context.Context) ([]int64, er
 
 func (s *MediaService) buildMovieWatchlistParams() *trakt.ListWatchListParams {
 	return &trakt.ListWatchListParams{
-		ListParams: trakt.ListParams{OAuth: s.token.AccessToken},
+		ListParams: trakt.ListParams{OAuth: s.tokenProvider.Token().AccessToken},
 		Type:       typeMovie,
 	}
 }
@@ -148,7 +148,7 @@ func buildMediaFromMovie(movie *trakt.Movie) *domain.Media {
 
 func (s *MediaService) syncMoviesFromFavorites(ctx context.Context) ([]int64, error) {
 	params := &trakt.ListFavoritesParams{
-		ListParams: trakt.ListParams{OAuth: s.token.AccessToken},
+		ListParams: trakt.ListParams{OAuth: s.tokenProvider.Token().AccessToken},
 		Type:       typeMovies,
 	}
 	iterator := sync.Favorites(params)
@@ -199,7 +199,7 @@ func (s *MediaService) syncEpisodes(ctx context.Context) ([]int64, error) {
 
 func (s *MediaService) syncEpisodesFromWatchlist(ctx context.Context) ([]int64, error) {
 	params := &trakt.ListWatchListParams{
-		ListParams: trakt.ListParams{OAuth: s.token.AccessToken},
+		ListParams: trakt.ListParams{OAuth: s.tokenProvider.Token().AccessToken},
 		Type:       typeShow,
 	}
 	iterator := sync.WatchList(params)
@@ -243,7 +243,7 @@ func (s *MediaService) collectEpisodesFromWatchlist(ctx context.Context, iterato
 
 func (s *MediaService) getNextEpisode(sh *trakt.Show) *trakt.Episode {
 	params := &trakt.ProgressParams{
-		Params: trakt.Params{OAuth: s.token.AccessToken},
+		Params: trakt.Params{OAuth: s.tokenProvider.Token().AccessToken},
 	}
 	progress, err := show.WatchedProgress(sh.Trakt, params)
 	if err != nil {
@@ -255,7 +255,7 @@ func (s *MediaService) getNextEpisode(sh *trakt.Show) *trakt.Episode {
 
 func (s *MediaService) syncEpisodesFromFavorites(ctx context.Context) ([]int64, error) {
 	params := &trakt.ListFavoritesParams{
-		ListParams: trakt.ListParams{OAuth: s.token.AccessToken},
+		ListParams: trakt.ListParams{OAuth: s.tokenProvider.Token().AccessToken},
 		Type:       typeShows,
 	}
 	iterator := sync.Favorites(params)
