@@ -15,11 +15,21 @@ type Media struct {
 }
 
 type NZB struct {
-	TraktID int64 `boltholdIndex:"Trakt"`
-	Link    string
-	Length  int64
-	Title   string
-	Failed  bool
+	TraktID         int64 `boltholdIndex:"Trakt"`
+	Link            string
+	Length          int64
+	Title           string
+	Failed          bool
+	ParsedTitle     string
+	ParsedYear      int64
+	ParsedSeason    int64
+	ParsedEpisode   int64
+	Resolution      string
+	Source          string
+	Codec           string
+	ValidationScore int `boltholdIndex:"ValidationScore"`
+	QualityScore    int `boltholdIndex:"QualityScore"`
+	TotalScore      int `boltholdIndex:"TotalScore"`
 }
 
 type Notification struct {

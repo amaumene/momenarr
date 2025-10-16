@@ -18,6 +18,11 @@ const (
 	defaultNZBCategory         = "momenarr"
 	defaultNZBDupeMode         = "SCORE"
 	defaultDBFilePermissions   = 0666
+	defaultTitleSimilarityMin  = 0.70
+	defaultYearTolerance       = 1
+	defaultMinValidationScore  = 65
+	defaultMinQualityScore     = 40
+	defaultMinTotalScore       = 105
 )
 
 type Config struct {
@@ -39,6 +44,11 @@ type Config struct {
 	NZBCategory         string
 	NZBDupeMode         string
 	DBFilePermissions   os.FileMode
+	TitleSimilarityMin  float64
+	YearTolerance       int64
+	MinValidationScore  int
+	MinQualityScore     int
+	MinTotalScore       int
 }
 
 func Load() (*Config, error) {
@@ -54,6 +64,11 @@ func Load() (*Config, error) {
 		NZBCategory:         defaultNZBCategory,
 		NZBDupeMode:         defaultNZBDupeMode,
 		DBFilePermissions:   defaultDBFilePermissions,
+		TitleSimilarityMin:  defaultTitleSimilarityMin,
+		YearTolerance:       defaultYearTolerance,
+		MinValidationScore:  defaultMinValidationScore,
+		MinQualityScore:     defaultMinQualityScore,
+		MinTotalScore:       defaultMinTotalScore,
 	}
 
 	if err := cfg.loadRequired(); err != nil {

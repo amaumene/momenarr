@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	regexRemux          = "(?i)remux"
-	regexWebDL          = "(?i)web-dl"
 	regexSeasonNotation = `(?i)S\d{1,2}|Season[.\s]+\d+`
 	regexEpisodeMarker  = `(?i)E\d{1,2}`
 	guidPrefix          = "https://v2.nzbs.in/releases/"
@@ -38,27 +36,32 @@ func NewNZBService(cfg *config.Config, mediaRepo domain.MediaRepository, nzbRepo
 }
 
 func (s *NZBService) GetNZB(ctx context.Context, traktID int64) (*domain.NZB, error) {
-	if nzb, err := s.findNZBByPattern(ctx, traktID, regexRemux); err == nil && nzb != nil {
-		return nzb, nil
+	nzbs, err := s.nzbRepo.FindByTraktID(ctx, traktID, "", false)
+	if err != nil {
+		return nil, fmt.Errorf("querying nzbs: %w", err)
 	}
 
-	if nzb, err := s.findNZBByPattern(ctx, traktID, regexWebDL); err == nil && nzb != nil {
-		return nzb, nil
+	if len(nzbs) == 0 {
+		return nil, fmt.Errorf("no nzb found for traktID %d: %w", traktID, domain.ErrNoNZBFound)
 	}
 
-	if nzb, err := s.findNZBByPattern(ctx, traktID, ""); err == nil && nzb != nil {
-		return nzb, nil
-	}
-
-	return nil, fmt.Errorf("no nzb found for traktID %d: %w", traktID, domain.ErrNoNZBFound)
+	best := findBestScoredNZB(nzbs)
+	s.logBestNZBSelected(traktID, best)
+	return best, nil
 }
 
-func (s *NZBService) findNZBByPattern(ctx context.Context, traktID int64, pattern string) (*domain.NZB, error) {
-	nzbs, err := s.nzbRepo.FindByTraktID(ctx, traktID, pattern, false)
-	if err != nil || len(nzbs) == 0 {
-		return nil, err
+func findBestScoredNZB(nzbs []domain.NZB) *domain.NZB {
+	if len(nzbs) == 0 {
+		return nil
 	}
-	return &nzbs[0], nil
+
+	best := &nzbs[0]
+	for i := 1; i < len(nzbs); i++ {
+		if nzbs[i].TotalScore > best.TotalScore {
+			best = &nzbs[i]
+		}
+	}
+	return best
 }
 
 func (s *NZBService) PopulateNZBs(ctx context.Context) error {
@@ -165,12 +168,21 @@ func isEpisode(media *domain.Media) bool {
 
 func (s *NZBService) insertResults(ctx context.Context, media *domain.Media, results []domain.SearchResult) error {
 	blacklist := s.loadBlacklist()
+	inserted := 0
 
 	for _, result := range results {
-		if err := s.insertResult(ctx, media.TraktID, &result, blacklist); err != nil {
-			return err
+		if err := s.insertValidatedResult(ctx, media, &result, blacklist); err != nil {
+			log.WithFields(log.Fields{
+				"error":   err,
+				"title":   result.Title,
+				"traktID": media.TraktID,
+			}).Debug("failed to insert result")
+			continue
 		}
+		inserted++
 	}
+
+	s.logInsertionSummary(media, len(results), inserted)
 	return nil
 }
 
@@ -194,25 +206,63 @@ func scanBlacklist(file *os.File) []string {
 	return blacklist
 }
 
-func (s *NZBService) insertResult(ctx context.Context, traktID int64, result *domain.SearchResult, blacklist []string) error {
+func (s *NZBService) insertValidatedResult(ctx context.Context, media *domain.Media, result *domain.SearchResult, blacklist []string) error {
 	if isBlacklisted(result.Title, blacklist) {
-		return nil
+		return fmt.Errorf("blacklisted")
 	}
 
-	nzb := &domain.NZB{
-		TraktID: traktID,
-		Link:    result.Link,
-		Length:  result.Length,
-		Title:   result.Title,
-		Failed:  false,
+	parsed, err := parseSearchResult(result)
+	if err != nil {
+		return fmt.Errorf("parsing failed: %w", err)
 	}
 
+	valid, validationScore := validateParsedNZB(parsed, media, s.cfg)
+	if !valid {
+		return fmt.Errorf("validation failed: score %d", validationScore)
+	}
+
+	qualityScore := scoreQuality(parsed)
+	if qualityScore < s.cfg.MinQualityScore {
+		return fmt.Errorf("quality too low: score %d", qualityScore)
+	}
+
+	totalScore := validationScore + qualityScore
+	if totalScore < s.cfg.MinTotalScore {
+		return fmt.Errorf("total score too low: %d", totalScore)
+	}
+
+	return s.insertScoredNZB(ctx, media.TraktID, result, parsed, validationScore, qualityScore, totalScore)
+}
+
+func (s *NZBService) insertScoredNZB(ctx context.Context, traktID int64, result *domain.SearchResult, parsed *ParsedNZB, validationScore, qualityScore, totalScore int) error {
+	nzb := buildNZBFromParsed(traktID, result, parsed, validationScore, qualityScore, totalScore)
 	key := generateNZBKey(result.Title)
+
 	err := s.nzbRepo.Insert(ctx, key, nzb)
 	if err != nil && err != domain.ErrDuplicateKey {
 		return fmt.Errorf("inserting nzb: %w", err)
 	}
 	return nil
+}
+
+func buildNZBFromParsed(traktID int64, result *domain.SearchResult, parsed *ParsedNZB, validationScore, qualityScore, totalScore int) *domain.NZB {
+	return &domain.NZB{
+		TraktID:         traktID,
+		Link:            result.Link,
+		Length:          result.Length,
+		Title:           result.Title,
+		Failed:          false,
+		ParsedTitle:     parsed.Title,
+		ParsedYear:      parsed.Year,
+		ParsedSeason:    parsed.Season,
+		ParsedEpisode:   parsed.Episode,
+		Resolution:      parsed.Resolution,
+		Source:          parsed.Source,
+		Codec:           parsed.Codec,
+		ValidationScore: validationScore,
+		QualityScore:    qualityScore,
+		TotalScore:      totalScore,
+	}
 }
 
 func isBlacklisted(title string, blacklist []string) bool {
@@ -280,4 +330,27 @@ func (s *NZBService) logFallbackToEpisode(media *domain.Media) {
 		"season":  media.Season,
 		"episode": media.Number,
 	}).Debug("no season packs found, searching for single episode")
+}
+
+func (s *NZBService) logInsertionSummary(media *domain.Media, total, inserted int) {
+	log.WithFields(log.Fields{
+		"traktID":  media.TraktID,
+		"title":    media.Title,
+		"total":    total,
+		"inserted": inserted,
+		"rejected": total - inserted,
+	}).Info("nzb validation and insertion complete")
+}
+
+func (s *NZBService) logBestNZBSelected(traktID int64, nzb *domain.NZB) {
+	log.WithFields(log.Fields{
+		"traktID":         traktID,
+		"title":           nzb.Title,
+		"resolution":      nzb.Resolution,
+		"source":          nzb.Source,
+		"codec":           nzb.Codec,
+		"validationScore": nzb.ValidationScore,
+		"qualityScore":    nzb.QualityScore,
+		"totalScore":      nzb.TotalScore,
+	}).Debug("selected best scored nzb")
 }

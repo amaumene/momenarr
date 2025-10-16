@@ -9,10 +9,6 @@ import (
 	"github.com/amaumene/momenarr/internal/domain"
 )
 
-const (
-	nzbQueryLimit = 1
-)
-
 type nzbRepository struct {
 	store *bolthold.Store
 }
@@ -55,7 +51,7 @@ func (r *nzbRepository) buildQuery(traktID int64, pattern string, failed bool) *
 	if pattern != "" {
 		query = query.And("Title").RegExp(regexp.MustCompile(pattern))
 	}
-	return query.SortBy("Length").Reverse().Limit(nzbQueryLimit).Index("Trakt")
+	return query.SortBy("TotalScore").Reverse().Index("TotalScore")
 }
 
 func (r *nzbRepository) FindAll(ctx context.Context) ([]domain.NZB, error) {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,7 +22,8 @@ import (
 )
 
 const (
-	shutdownTimeout = 30 * time.Second
+	shutdownTimeout         = 30 * time.Second
+	goroutineShutdownTimeout = 10 * time.Second
 )
 
 type App struct {
@@ -30,6 +32,7 @@ type App struct {
 	store        *bolthold.Store
 	traktClient  *clients.TraktClient
 	orchestrator *Orchestrator
+	wg           sync.WaitGroup
 }
 
 func New() (*App, error) {
@@ -141,12 +144,29 @@ func (a *App) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go a.traktClient.RefreshPeriodically(ctx, a.cfg.TaskInterval)
-	go a.orchestrator.RunPeriodically(ctx)
+	a.wg.Add(2)
+	go a.runTraktRefresh(ctx)
+	go a.runOrchestrator(ctx)
 
 	go a.startServer()
 
 	return a.waitForShutdown(ctx, cancel)
+}
+
+func (a *App) runTraktRefresh(ctx context.Context) {
+	defer a.wg.Done()
+	defer log.WithField("component", "trakt-refresh").Info("goroutine stopped")
+
+	log.WithField("component", "trakt-refresh").Info("goroutine started")
+	a.traktClient.RefreshPeriodically(ctx, a.cfg.TaskInterval)
+}
+
+func (a *App) runOrchestrator(ctx context.Context) {
+	defer a.wg.Done()
+	defer log.WithField("component", "orchestrator").Info("goroutine stopped")
+
+	log.WithField("component", "orchestrator").Info("goroutine started")
+	a.orchestrator.RunPeriodically(ctx)
 }
 
 func (a *App) startServer() {
@@ -159,8 +179,9 @@ func (a *App) startServer() {
 		log.WithFields(log.Fields{
 			"component": "server",
 			"error":     err,
-		}).Fatal("http server failed to start")
+		}).Error("http server failed")
 	}
+	log.WithField("component", "server").Info("http server stopped")
 }
 
 func (a *App) waitForShutdown(ctx context.Context, cancel context.CancelFunc) error {
@@ -181,8 +202,8 @@ func (a *App) waitForShutdown(ctx context.Context, cancel context.CancelFunc) er
 func (a *App) shutdown() error {
 	log.Info("graceful shutdown started")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
 
 	if err := a.server.Shutdown(shutdownCtx); err != nil {
 		log.WithFields(log.Fields{
@@ -190,6 +211,8 @@ func (a *App) shutdown() error {
 			"error":     err,
 		}).Error("http server shutdown failed")
 	}
+
+	a.waitForGoroutines()
 
 	if err := a.store.Close(); err != nil {
 		log.WithFields(log.Fields{
@@ -201,4 +224,19 @@ func (a *App) shutdown() error {
 
 	log.Info("graceful shutdown completed")
 	return nil
+}
+
+func (a *App) waitForGoroutines() {
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Info("all goroutines stopped successfully")
+	case <-time.After(goroutineShutdownTimeout):
+		log.Warn("timeout waiting for goroutines to stop")
+	}
 }

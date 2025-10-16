@@ -8,4 +8,7 @@ require (
 	go.etcd.io/bbolt v1.3.11
 )
 
-require golang.org/x/sys v0.4.0 // indirect
+require (
+	github.com/ProfChaos/torrent-name-parser v0.5.0 // indirect
+	golang.org/x/sys v0.4.0 // indirect
+)

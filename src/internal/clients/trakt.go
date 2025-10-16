@@ -151,6 +151,7 @@ func (c *TraktClient) RefreshPeriodically(ctx context.Context, interval time.Dur
 	for {
 		select {
 		case <-ctx.Done():
+			log.WithField("component", "trakt-client").Info("context cancelled, stopping token refresh")
 			return
 		case <-ticker.C:
 			if err := c.RefreshToken(ctx); err != nil {

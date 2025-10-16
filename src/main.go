@@ -16,11 +16,15 @@ func main() {
 
 	application, err := app.New()
 	if err != nil {
-		log.WithField("error", err).Fatal("application initialization failed")
+		log.WithField("error", err).Error("application initialization failed")
+		os.Exit(1)
 	}
 
 	ctx := context.Background()
 	if err := application.Run(ctx); err != nil {
-		log.WithField("error", err).Fatal("application runtime error")
+		log.WithField("error", err).Error("application runtime error")
+		os.Exit(1)
 	}
+
+	log.Info("application exited cleanly")
 }
