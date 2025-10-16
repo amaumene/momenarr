@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	encodingjson "encoding/json"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
-	"os"
-
-	gorillajson "github.com/gorilla/rpc/json"
 )
 
 // Package defaults.
@@ -40,7 +38,6 @@ type client struct {
 }
 
 func New(config *Config) *NZBGet {
-	// Set username and password if one's configured.
 	auth := config.User + ":" + config.Pass
 	if auth != ":" {
 		auth = "Basic " + base64.StdEncoding.EncodeToString([]byte(auth))
@@ -70,12 +67,11 @@ func (n *NZBGet) GetInto(ctx context.Context, method string, output interface{},
 		"id":     1,
 	}
 
-	message, err := encodingjson.Marshal(request)
+	message, err := json.Marshal(request)
 	if err != nil {
 		return fmt.Errorf("encoding request: %w", err)
 	}
 
-	os.WriteFile("/tmp/nzbget-request.json", message, 0644)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.url, bytes.NewBuffer(message))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -94,9 +90,30 @@ func (n *NZBGet) GetInto(ctx context.Context, method string, output interface{},
 	}
 	defer resp.Body.Close()
 
-	if err := gorillajson.DecodeClientResponse(resp.Body, &output); err != nil {
+	if err := decodeResponse(resp.Body, &output); err != nil {
 		return fmt.Errorf("parsing response: %w: %s", err, resp.Status)
 	}
 
 	return nil
+}
+
+func decodeResponse(r io.Reader, reply interface{}) error {
+	var response struct {
+		Result *json.RawMessage `json:"result"`
+		Error  interface{}      `json:"error"`
+	}
+
+	if err := json.NewDecoder(r).Decode(&response); err != nil {
+		return err
+	}
+
+	if response.Error != nil {
+		return fmt.Errorf("%v", response.Error)
+	}
+
+	if response.Result == nil {
+		return fmt.Errorf("result is null")
+	}
+
+	return json.Unmarshal(*response.Result, reply)
 }
