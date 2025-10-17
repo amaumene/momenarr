@@ -98,62 +98,105 @@ func TestValidateYear(t *testing.T) {
 		parsedYear  int64
 		mediaYear   int64
 		tolerance   int64
+		isEpisode   bool
 		expectValid bool
 		expectScore int
 	}{
 		{
-			name:        "exact match",
+			name:        "movie: exact match",
 			parsedYear:  2008,
 			mediaYear:   2008,
 			tolerance:   1,
+			isEpisode:   false,
 			expectValid: true,
 			expectScore: 30,
 		},
 		{
-			name:        "one year off",
+			name:        "movie: one year off",
 			parsedYear:  2009,
 			mediaYear:   2008,
 			tolerance:   1,
+			isEpisode:   false,
 			expectValid: true,
 			expectScore: 20,
 		},
 		{
-			name:        "two years off",
+			name:        "movie: two years off",
 			parsedYear:  2010,
 			mediaYear:   2008,
 			tolerance:   1,
+			isEpisode:   false,
 			expectValid: true,
 			expectScore: 10,
 		},
 		{
-			name:        "outside tolerance",
+			name:        "movie: outside tolerance",
 			parsedYear:  2015,
 			mediaYear:   2008,
 			tolerance:   1,
+			isEpisode:   false,
 			expectValid: false,
 			expectScore: 0,
 		},
 		{
-			name:        "no year in media",
+			name:        "movie: no year in media",
 			parsedYear:  2008,
 			mediaYear:   0,
 			tolerance:   1,
+			isEpisode:   false,
 			expectValid: true,
 			expectScore: 30,
 		},
 		{
-			name:        "no year in parsed",
+			name:        "movie: no year in parsed",
 			parsedYear:  0,
 			mediaYear:   2008,
 			tolerance:   1,
+			isEpisode:   false,
 			expectValid: false,
 			expectScore: 0,
+		},
+		{
+			name:        "episode: exact match",
+			parsedYear:  2008,
+			mediaYear:   2008,
+			tolerance:   1,
+			isEpisode:   true,
+			expectValid: true,
+			expectScore: 30,
+		},
+		{
+			name:        "episode: one year off should fail",
+			parsedYear:  2009,
+			mediaYear:   2008,
+			tolerance:   1,
+			isEpisode:   true,
+			expectValid: false,
+			expectScore: 0,
+		},
+		{
+			name:        "episode: no year in parsed should pass",
+			parsedYear:  0,
+			mediaYear:   2008,
+			tolerance:   1,
+			isEpisode:   true,
+			expectValid: true,
+			expectScore: 30,
+		},
+		{
+			name:        "episode: no year in media",
+			parsedYear:  2008,
+			mediaYear:   0,
+			tolerance:   1,
+			isEpisode:   true,
+			expectValid: true,
+			expectScore: 30,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			valid, score := validateYear(tt.parsedYear, tt.mediaYear, tt.tolerance)
+			valid, score := validateYear(tt.parsedYear, tt.mediaYear, tt.tolerance, tt.isEpisode)
 			if valid != tt.expectValid {
 				t.Errorf("valid: got %v, want %v", valid, tt.expectValid)
 			}

@@ -21,7 +21,8 @@ func validateParsedNZB(parsed *ParsedNZB, media *domain.Media, cfg *config.Confi
 		return false, 0
 	}
 
-	yearValid, yearScore := validateYear(parsed.Year, media.Year, cfg.YearTolerance)
+	isEpisode := isMediaEpisode(media)
+	yearValid, yearScore := validateYear(parsed.Year, media.Year, cfg.YearTolerance, isEpisode)
 	if !yearValid {
 		return false, 0
 	}
@@ -97,12 +98,15 @@ func levenshteinDistance(a, b string) int {
 	return matrix[len(a)][len(b)]
 }
 
-func validateYear(parsedYear, mediaYear, tolerance int64) (bool, int) {
+func validateYear(parsedYear, mediaYear, tolerance int64, isEpisode bool) (bool, int) {
 	if mediaYear == 0 {
 		return true, maxYearScore
 	}
 
 	if parsedYear == 0 {
+		if isEpisode {
+			return true, maxYearScore
+		}
 		return false, 0
 	}
 
@@ -111,6 +115,11 @@ func validateYear(parsedYear, mediaYear, tolerance int64) (bool, int) {
 	if diff == 0 {
 		return true, yearExactMatchScore
 	}
+
+	if isEpisode {
+		return false, 0
+	}
+
 	if diff <= tolerance {
 		return true, yearOneYearOffScore
 	}

@@ -363,7 +363,7 @@ func buildMediaFromEpisode(sh *trakt.Show, ep *trakt.Episode) *domain.Media {
 		Number:  ep.Number,
 		Season:  ep.Season,
 		IMDB:    string(sh.IMDB),
-		Title:   ep.Title,
+		Title:   sh.Title,
 		Year:    sh.Year,
 		OnDisk:  false,
 	}
