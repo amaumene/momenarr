@@ -49,7 +49,7 @@ func (s *NZBService) GetNZB(ctx context.Context, traktID int64) (*domain.NZB, er
 	}
 
 	best := findBestScoredNZB(nzbs)
-	s.logBestNZBSelected(traktID, best)
+	s.logBestNZBSelected(traktID, best, nzbs)
 	return best, nil
 }
 
@@ -112,8 +112,16 @@ func (s *NZBService) searchNZB(ctx context.Context, media *domain.Media) ([]doma
 func (s *NZBService) searchEpisodeWithSeasonPackPriority(ctx context.Context, media *domain.Media) ([]domain.SearchResult, error) {
 	s.logSearchStart(media)
 
-	if results := s.trySeasonPackSearch(ctx, media); len(results) > 0 {
-		return results, nil
+	blacklist := s.loadBlacklist()
+	results := s.trySeasonPackSearch(ctx, media)
+
+	if len(results) > 0 {
+		nonBlacklisted := s.filterBlacklisted(results, blacklist)
+		if len(nonBlacklisted) > 0 {
+			s.logSeasonPacksPassedBlacklist(media, len(results), len(nonBlacklisted))
+			return nonBlacklisted, nil
+		}
+		s.logAllSeasonPacksBlacklisted(media, len(results))
 	}
 
 	s.logFallbackToEpisode(media)
@@ -163,6 +171,20 @@ func isSeasonPackTitle(title string) bool {
 	return hasSeasonNotation && !hasEpisodeMarker
 }
 
+func (s *NZBService) filterBlacklisted(results []domain.SearchResult, blacklist []string) []domain.SearchResult {
+	if len(blacklist) == 0 {
+		return results
+	}
+
+	filtered := make([]domain.SearchResult, 0, len(results))
+	for _, result := range results {
+		if !isBlacklisted(result.Title, blacklist) {
+			filtered = append(filtered, result)
+		}
+	}
+	return filtered
+}
+
 func isEpisode(media *domain.Media) bool {
 	return media.Number > 0 && media.Season > 0
 }
@@ -173,11 +195,6 @@ func (s *NZBService) insertResults(ctx context.Context, media *domain.Media, res
 
 	for _, result := range results {
 		if err := s.insertValidatedResult(ctx, media, &result, blacklist); err != nil {
-			log.WithFields(log.Fields{
-				"error":   err,
-				"title":   result.Title,
-				"traktID": media.TraktID,
-			}).Debug("failed to insert result")
 			continue
 		}
 		inserted++
@@ -209,29 +226,34 @@ func scanBlacklist(file *os.File) []string {
 
 func (s *NZBService) insertValidatedResult(ctx context.Context, media *domain.Media, result *domain.SearchResult, blacklist []string) error {
 	if isBlacklisted(result.Title, blacklist) {
+		s.logRejectionBlacklisted(media, result, blacklist)
 		return fmt.Errorf("blacklisted")
 	}
 
 	parsed, err := parseSearchResult(result)
 	if err != nil {
+		s.logRejectionParseFailed(media, result, err)
 		return fmt.Errorf("parsing failed: %w", err)
 	}
 
-	valid, validationScore := validateParsedNZB(parsed, media, s.cfg)
+	valid, validationScore := s.validateWithLogging(parsed, media)
 	if !valid {
 		return fmt.Errorf("validation failed: score %d", validationScore)
 	}
 
 	qualityScore := scoreQuality(parsed)
 	if qualityScore < s.cfg.MinQualityScore {
+		s.logRejectionQualityTooLow(media, result, parsed, qualityScore)
 		return fmt.Errorf("quality too low: score %d", qualityScore)
 	}
 
 	totalScore := validationScore + qualityScore
 	if totalScore < s.cfg.MinTotalScore {
+		s.logRejectionTotalScoreTooLow(media, result, validationScore, qualityScore, totalScore)
 		return fmt.Errorf("total score too low: %d", totalScore)
 	}
 
+	s.logReleaseAccepted(media, result, parsed, validationScore, qualityScore, totalScore)
 	return s.insertScoredNZB(ctx, media.TraktID, result, parsed, validationScore, qualityScore, totalScore)
 }
 
@@ -280,6 +302,139 @@ func generateNZBKey(title string) string {
 	return strings.TrimPrefix(title, guidPrefix)
 }
 
+func (s *NZBService) validateWithLogging(parsed *ParsedNZB, media *domain.Media) (bool, int) {
+	isEpisode := isMediaEpisode(media)
+
+	titleValid, titleScore := validateTitle(parsed.Title, media.Title, s.cfg.TitleSimilarityMin)
+	if !titleValid {
+		similarity := calculateSimilarity(parsed.Title, normalizeTitle(media.Title))
+		log.WithFields(log.Fields{
+			"traktID":       media.TraktID,
+			"mediaTitle":    media.Title,
+			"parsedTitle":   parsed.Title,
+			"similarity":    fmt.Sprintf("%.2f", similarity),
+			"minSimilarity": fmt.Sprintf("%.2f", s.cfg.TitleSimilarityMin),
+		}).Debug("release rejected: title similarity too low")
+		return false, 0
+	}
+
+	yearValid, yearScore := validateYear(parsed.Year, media.Year, s.cfg.YearTolerance, isEpisode)
+	if !yearValid {
+		log.WithFields(log.Fields{
+			"traktID":    media.TraktID,
+			"mediaTitle": media.Title,
+			"mediaYear":  media.Year,
+			"parsedYear": parsed.Year,
+			"isEpisode":  isEpisode,
+		}).Debug("release rejected: year mismatch")
+		return false, 0
+	}
+
+	seValid, seScore := validateSeasonEpisode(parsed, media)
+	if !seValid {
+		log.WithFields(log.Fields{
+			"traktID":       media.TraktID,
+			"mediaTitle":    media.Title,
+			"mediaSeason":   media.Season,
+			"mediaEpisode":  media.Number,
+			"parsedSeason":  parsed.Season,
+			"parsedEpisode": parsed.Episode,
+		}).Debug("release rejected: season/episode mismatch")
+		return false, 0
+	}
+
+	totalScore := titleScore + yearScore + seScore
+	if totalScore < s.cfg.MinValidationScore {
+		log.WithFields(log.Fields{
+			"traktID":          media.TraktID,
+			"mediaTitle":       media.Title,
+			"titleScore":       titleScore,
+			"yearScore":        yearScore,
+			"seasonEpisodeScore": seScore,
+			"validationScore":  totalScore,
+			"minRequired":      s.cfg.MinValidationScore,
+		}).Debug("release rejected: validation score too low")
+		return false, totalScore
+	}
+
+	return true, totalScore
+}
+
+func (s *NZBService) logRejectionBlacklisted(media *domain.Media, result *domain.SearchResult, blacklist []string) {
+	matchedWord := ""
+	lowerTitle := strings.ToLower(result.Title)
+	for _, word := range blacklist {
+		if strings.Contains(lowerTitle, strings.ToLower(word)) {
+			matchedWord = word
+			break
+		}
+	}
+
+	log.WithFields(log.Fields{
+		"traktID":     media.TraktID,
+		"mediaTitle":  media.Title,
+		"nzbTitle":    result.Title,
+		"matchedWord": matchedWord,
+	}).Debug("release rejected: blacklisted")
+}
+
+func (s *NZBService) logRejectionParseFailed(media *domain.Media, result *domain.SearchResult, err error) {
+	log.WithFields(log.Fields{
+		"traktID":    media.TraktID,
+		"mediaTitle": media.Title,
+		"nzbTitle":   result.Title,
+		"error":      err,
+	}).Debug("release rejected: parse failed")
+}
+
+func (s *NZBService) logRejectionQualityTooLow(media *domain.Media, result *domain.SearchResult, parsed *ParsedNZB, qualityScore int) {
+	resScore := scoreResolution(parsed.Resolution)
+	srcScore := scoreSource(parsed.Source)
+	codecScore := scoreCodec(parsed.Codec)
+	flagsScore := scoreFlags(parsed.Proper, parsed.Repack)
+
+	log.WithFields(log.Fields{
+		"traktID":         media.TraktID,
+		"mediaTitle":      media.Title,
+		"nzbTitle":        result.Title,
+		"resolution":      parsed.Resolution,
+		"source":          parsed.Source,
+		"codec":           parsed.Codec,
+		"resolutionScore": resScore,
+		"sourceScore":     srcScore,
+		"codecScore":      codecScore,
+		"flagsScore":      flagsScore,
+		"qualityScore":    qualityScore,
+		"minRequired":     s.cfg.MinQualityScore,
+	}).Debug("release rejected: quality score too low")
+}
+
+func (s *NZBService) logRejectionTotalScoreTooLow(media *domain.Media, result *domain.SearchResult, validationScore, qualityScore, totalScore int) {
+	log.WithFields(log.Fields{
+		"traktID":         media.TraktID,
+		"mediaTitle":      media.Title,
+		"nzbTitle":        result.Title,
+		"validationScore": validationScore,
+		"qualityScore":    qualityScore,
+		"totalScore":      totalScore,
+		"minRequired":     s.cfg.MinTotalScore,
+	}).Debug("release rejected: total score too low")
+}
+
+func (s *NZBService) logReleaseAccepted(media *domain.Media, result *domain.SearchResult, parsed *ParsedNZB, validationScore, qualityScore, totalScore int) {
+	log.WithFields(log.Fields{
+		"traktID":         media.TraktID,
+		"mediaTitle":      media.Title,
+		"nzbTitle":        result.Title,
+		"resolution":      parsed.Resolution,
+		"source":          parsed.Source,
+		"codec":           parsed.Codec,
+		"validationScore": validationScore,
+		"qualityScore":    qualityScore,
+		"totalScore":      totalScore,
+	}).Info("release accepted")
+}
+
 func (s *NZBService) logNoNZBFound(media *domain.Media) {
 	log.WithFields(log.Fields{
 		"traktID": media.TraktID,
@@ -325,6 +480,23 @@ func (s *NZBService) logSeasonPacksFound(media *domain.Media, count int) {
 	}).Info("found season packs, using season pack instead of single episode")
 }
 
+func (s *NZBService) logSeasonPacksPassedBlacklist(media *domain.Media, total, passed int) {
+	log.WithFields(log.Fields{
+		"title":       media.Title,
+		"totalFound":  total,
+		"passed":      passed,
+		"blacklisted": total - passed,
+	}).Info("season packs passed blacklist filter, using season packs")
+}
+
+func (s *NZBService) logAllSeasonPacksBlacklisted(media *domain.Media, total int) {
+	log.WithFields(log.Fields{
+		"title":       media.Title,
+		"totalFound":  total,
+		"blacklisted": total,
+	}).Info("all season packs blacklisted, falling back to single episode search")
+}
+
 func (s *NZBService) logFallbackToEpisode(media *domain.Media) {
 	log.WithFields(log.Fields{
 		"title":   media.Title,
@@ -343,15 +515,39 @@ func (s *NZBService) logInsertionSummary(media *domain.Media, total, inserted in
 	}).Info("nzb validation and insertion complete")
 }
 
-func (s *NZBService) logBestNZBSelected(traktID int64, nzb *domain.NZB) {
-	log.WithFields(log.Fields{
+func (s *NZBService) logBestNZBSelected(traktID int64, best *domain.NZB, allNZBs []domain.NZB) {
+	fields := log.Fields{
 		"traktID":         traktID,
-		"title":           nzb.Title,
-		"resolution":      nzb.Resolution,
-		"source":          nzb.Source,
-		"codec":           nzb.Codec,
-		"validationScore": nzb.ValidationScore,
-		"qualityScore":    nzb.QualityScore,
-		"totalScore":      nzb.TotalScore,
-	}).Debug("selected best scored nzb")
+		"candidateCount":  len(allNZBs),
+		"title":           best.Title,
+		"resolution":      best.Resolution,
+		"source":          best.Source,
+		"codec":           best.Codec,
+		"validationScore": best.ValidationScore,
+		"qualityScore":    best.QualityScore,
+		"totalScore":      best.TotalScore,
+	}
+
+	if len(allNZBs) > 1 {
+		sortedNZBs := make([]domain.NZB, len(allNZBs))
+		copy(sortedNZBs, allNZBs)
+
+		for i := 0; i < len(sortedNZBs)-1; i++ {
+			for j := i + 1; j < len(sortedNZBs); j++ {
+				if sortedNZBs[j].TotalScore > sortedNZBs[i].TotalScore {
+					sortedNZBs[i], sortedNZBs[j] = sortedNZBs[j], sortedNZBs[i]
+				}
+			}
+		}
+
+		for i := 1; i < len(sortedNZBs) && i < 3; i++ {
+			prefix := fmt.Sprintf("runner%d", i)
+			fields[prefix+"Title"] = sortedNZBs[i].Title
+			fields[prefix+"TotalScore"] = sortedNZBs[i].TotalScore
+			fields[prefix+"Resolution"] = sortedNZBs[i].Resolution
+			fields[prefix+"Source"] = sortedNZBs[i].Source
+		}
+	}
+
+	log.WithFields(fields).Info("selected best scored nzb")
 }
