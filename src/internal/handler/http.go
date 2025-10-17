@@ -14,11 +14,14 @@ import (
 )
 
 const (
-	contentTypeJSON = "application/json"
-	mediaListFormat = "IMDB: %s, Title: %s, OnDisk: %t, File: %s\n"
-	nzbListFormat   = "TraktID: %d, Title: %s, Link: %s, Length: %d\n"
+	contentTypeJSON     = "application/json"
+	mediaListFormat     = "IMDB: %s, Title: %s, OnDisk: %t, File: %s\n"
+	nzbListFormat       = "TraktID: %d, Title: %s, Link: %s, Length: %d\n"
+	maxConcurrentWorkers = 10
 )
 
+// HTTPHandler handles HTTP API endpoints for the application.
+// It provides endpoints for notifications, health checks, and manual refresh operations.
 type HTTPHandler struct {
 	mediaRepo       domain.MediaRepository
 	nzbRepo         domain.NZBRepository
@@ -26,8 +29,11 @@ type HTTPHandler struct {
 	mediaSvc        *service.MediaService
 	nzbSvc          *service.NZBService
 	downloadSvc     *service.DownloadService
+	workerSem       chan struct{}
 }
 
+// NewHTTPHandler creates a new HTTPHandler with the provided dependencies.
+// It initializes a worker pool to limit concurrent background operations.
 func NewHTTPHandler(mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, notificationSvc *service.NotificationService, mediaSvc *service.MediaService, nzbSvc *service.NZBService, downloadSvc *service.DownloadService) *HTTPHandler {
 	return &HTTPHandler{
 		mediaRepo:       mediaRepo,
@@ -36,6 +42,7 @@ func NewHTTPHandler(mediaRepo domain.MediaRepository, nzbRepo domain.NZBReposito
 		mediaSvc:        mediaSvc,
 		nzbSvc:          nzbSvc,
 		downloadSvc:     downloadSvc,
+		workerSem:       make(chan struct{}, maxConcurrentWorkers),
 	}
 }
 
@@ -59,7 +66,11 @@ func (h *HTTPHandler) handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.processNotificationAsync(r.Context(), notification)
+	go func() {
+		h.workerSem <- struct{}{}
+		defer func() { <-h.workerSem }()
+		h.processNotificationAsync(r.Context(), notification)
+	}()
 
 	h.writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Processing started",
@@ -140,7 +151,11 @@ func (h *HTTPHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HTTPHandler) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	go h.runTasksAsync(r.Context())
+	go func() {
+		h.workerSem <- struct{}{}
+		defer func() { <-h.workerSem }()
+		h.runTasksAsync(r.Context())
+	}()
 
 	h.writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Refresh initiated",

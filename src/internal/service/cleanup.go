@@ -73,8 +73,16 @@ func (s *CleanupService) buildHistoryParams() *trakt.ListHistoryParams {
 func (s *CleanupService) handleHistoryItem(ctx context.Context, item *trakt.History) error {
 	switch item.Type.String() {
 	case mediaTypeMovie:
+		if item.Movie == nil {
+			log.Warn("movie history item has nil Movie field")
+			return nil
+		}
 		return s.removeMedia(ctx, int64(item.Movie.Trakt), item.Movie.Title)
 	case mediaTypeEpisode:
+		if item.Show == nil {
+			log.Warn("episode history item has nil Show field")
+			return nil
+		}
 		return s.removeMedia(ctx, int64(item.Show.Trakt), item.Show.Title)
 	}
 	return nil

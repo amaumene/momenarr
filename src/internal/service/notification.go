@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/amaumene/momenarr/internal/config"
@@ -12,12 +14,16 @@ import (
 )
 
 const (
-	statusSuccess        = "SUCCESS"
-	includeHiddenHistory = false
-	parseIntBase         = 10
-	parseIntBitSize      = 64
+	statusSuccess            = "SUCCESS"
+	includeHiddenHistory     = false
+	parseIntBase             = 10
+	parseIntBitSize          = 64
+	maxNotificationNameLen   = 500
+	maxNotificationCategoryLen = 100
 )
 
+// NotificationService processes download completion notifications from NZBGet.
+// It handles both successful and failed downloads, updating media status and retrying failures.
 type NotificationService struct {
 	cfg            *config.Config
 	mediaRepo      domain.MediaRepository
@@ -26,6 +32,7 @@ type NotificationService struct {
 	downloadSvc    *DownloadService
 }
 
+// NewNotificationService creates a new NotificationService with the provided dependencies.
 func NewNotificationService(cfg *config.Config, mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, downloadClient domain.DownloadClient, downloadSvc *DownloadService) *NotificationService {
 	return &NotificationService{
 		cfg:            cfg,
@@ -37,6 +44,10 @@ func NewNotificationService(cfg *config.Config, mediaRepo domain.MediaRepository
 }
 
 func (s *NotificationService) Process(ctx context.Context, notification *domain.Notification) error {
+	if err := validateNotification(notification); err != nil {
+		return fmt.Errorf("invalid notification: %w", err)
+	}
+
 	if notification.Category != s.cfg.NZBCategory {
 		return nil
 	}
@@ -78,11 +89,54 @@ func (s *NotificationService) handleSuccess(ctx context.Context, notification *d
 }
 
 func (s *NotificationService) updateMediaFile(ctx context.Context, media *domain.Media, filePath string) error {
+	if err := validateFilePath(filePath); err != nil {
+		return fmt.Errorf("invalid file path: %w", err)
+	}
+
 	media.File = filePath
 	media.OnDisk = true
 
 	if err := s.mediaRepo.Update(ctx, media.TraktID, media); err != nil {
 		return fmt.Errorf("updating media: %w", err)
+	}
+	return nil
+}
+
+func validateNotification(n *domain.Notification) error {
+	if n == nil {
+		return fmt.Errorf("notification is nil")
+	}
+	if n.Name == "" {
+		return fmt.Errorf("notification name is empty")
+	}
+	if n.Category == "" {
+		return fmt.Errorf("notification category is empty")
+	}
+	if n.Status == "" {
+		return fmt.Errorf("notification status is empty")
+	}
+	if n.TraktID == "" {
+		return fmt.Errorf("notification traktID is empty")
+	}
+	if len(n.Name) > maxNotificationNameLen {
+		return fmt.Errorf("notification name too long: %d", len(n.Name))
+	}
+	if len(n.Category) > maxNotificationCategoryLen {
+		return fmt.Errorf("notification category too long: %d", len(n.Category))
+	}
+	return nil
+}
+
+func validateFilePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("empty path")
+	}
+	cleaned := filepath.Clean(path)
+	if strings.Contains(cleaned, "..") {
+		return fmt.Errorf("path traversal detected: %s", path)
+	}
+	if !filepath.IsAbs(cleaned) {
+		return fmt.Errorf("path must be absolute: %s", path)
 	}
 	return nil
 }
@@ -98,6 +152,10 @@ func (s *NotificationService) handleFailure(ctx context.Context, notification *d
 	}
 
 	for _, media := range medias {
+		if err := ctx.Err(); err != nil {
+			log.WithField("error", err).Debug("context cancelled during retry downloads")
+			break
+		}
 		if err := s.retryDownload(ctx, &media); err != nil {
 			log.WithFields(log.Fields{
 				"error":   err,

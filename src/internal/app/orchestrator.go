@@ -100,7 +100,8 @@ func (o *Orchestrator) downloadMedia(ctx context.Context) error {
 
 	planner := newDownloadPlanner(o)
 	for i := range medias {
-		planner.handle(ctx, &medias[i])
+		media := medias[i] // Create local copy to avoid pointer aliasing
+		planner.handle(ctx, &media)
 	}
 	return nil
 }

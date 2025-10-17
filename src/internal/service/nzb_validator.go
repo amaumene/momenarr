@@ -71,31 +71,36 @@ func levenshteinDistance(a, b string) int {
 		return len(a)
 	}
 
-	matrix := make([][]int, len(a)+1)
-	for i := range matrix {
-		matrix[i] = make([]int, len(b)+1)
-		matrix[i][0] = i
+	// Ensure a is the shorter string for space optimization
+	if len(a) > len(b) {
+		a, b = b, a
 	}
 
-	for j := range matrix[0] {
-		matrix[0][j] = j
+	// Use two rows instead of full matrix: O(min(n,m)) space instead of O(n×m)
+	prevRow := make([]int, len(a)+1)
+	currRow := make([]int, len(a)+1)
+
+	for i := range prevRow {
+		prevRow[i] = i
 	}
 
-	for i := 1; i <= len(a); i++ {
-		for j := 1; j <= len(b); j++ {
+	for j := 1; j <= len(b); j++ {
+		currRow[0] = j
+		for i := 1; i <= len(a); i++ {
 			cost := 1
 			if a[i-1] == b[j-1] {
 				cost = 0
 			}
-			matrix[i][j] = min(
-				matrix[i-1][j]+1,
-				matrix[i][j-1]+1,
-				matrix[i-1][j-1]+cost,
+			currRow[i] = min(
+				prevRow[i]+1,      // deletion
+				currRow[i-1]+1,    // insertion
+				prevRow[i-1]+cost, // substitution
 			)
 		}
+		prevRow, currRow = currRow, prevRow
 	}
 
-	return matrix[len(a)][len(b)]
+	return prevRow[len(a)]
 }
 
 func validateYear(parsedYear, mediaYear, tolerance int64, isEpisode bool) (bool, int) {

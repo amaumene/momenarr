@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/amaumene/momenarr/internal/config"
 	"github.com/amaumene/momenarr/internal/domain"
@@ -22,13 +23,19 @@ const (
 	guidPrefix = "https://v2.nzbs.in/releases/"
 )
 
+// NZBService handles NZB search, validation, and storage operations.
+// It caches the blacklist for performance and coordinates between search providers and storage.
 type NZBService struct {
-	cfg       *config.Config
-	mediaRepo domain.MediaRepository
-	nzbRepo   domain.NZBRepository
-	searcher  domain.NZBSearcher
+	cfg            *config.Config
+	mediaRepo      domain.MediaRepository
+	nzbRepo        domain.NZBRepository
+	searcher       domain.NZBSearcher
+	blacklistCache []string
+	blacklistMutex sync.RWMutex
+	blacklistOnce  sync.Once
 }
 
+// NewNZBService creates a new NZBService with the provided dependencies.
 func NewNZBService(cfg *config.Config, mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, searcher domain.NZBSearcher) *NZBService {
 	return &NZBService{
 		cfg:       cfg,
@@ -67,6 +74,31 @@ func findBestScoredNZB(nzbs []domain.NZB) *domain.NZB {
 	return best
 }
 
+func findTopNZBs(nzbs []domain.NZB, count int) []domain.NZB {
+	if len(nzbs) == 0 {
+		return nil
+	}
+	if count > len(nzbs) {
+		count = len(nzbs)
+	}
+
+	top := make([]domain.NZB, 0, count)
+	for _, nzb := range nzbs {
+		if len(top) < count {
+			top = append(top, nzb)
+			for i := len(top) - 1; i > 0 && top[i].TotalScore > top[i-1].TotalScore; i-- {
+				top[i], top[i-1] = top[i-1], top[i]
+			}
+		} else if nzb.TotalScore > top[count-1].TotalScore {
+			top[count-1] = nzb
+			for i := count - 1; i > 0 && top[i].TotalScore > top[i-1].TotalScore; i-- {
+				top[i], top[i-1] = top[i-1], top[i]
+			}
+		}
+	}
+	return top
+}
+
 func (s *NZBService) PopulateNZBs(ctx context.Context) error {
 	medias, err := s.mediaRepo.FindNotOnDisk(ctx)
 	if err != nil {
@@ -74,6 +106,9 @@ func (s *NZBService) PopulateNZBs(ctx context.Context) error {
 	}
 
 	for _, media := range medias {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context cancelled during NZB population: %w", err)
+		}
 		if err := s.processMediaForNZB(ctx, &media); err != nil {
 			s.logPopulationError(&media, err)
 		}
@@ -194,6 +229,10 @@ func (s *NZBService) insertResults(ctx context.Context, media *domain.Media, res
 	inserted := 0
 
 	for _, result := range results {
+		if err := ctx.Err(); err != nil {
+			log.WithField("inserted", inserted).Debug("context cancelled during NZB insertion")
+			break
+		}
 		if err := s.insertValidatedResult(ctx, media, &result, blacklist); err != nil {
 			continue
 		}
@@ -205,6 +244,16 @@ func (s *NZBService) insertResults(ctx context.Context, media *domain.Media, res
 }
 
 func (s *NZBService) loadBlacklist() []string {
+	s.blacklistOnce.Do(func() {
+		s.blacklistCache = s.readBlacklistFromFile()
+	})
+
+	s.blacklistMutex.RLock()
+	defer s.blacklistMutex.RUnlock()
+	return s.blacklistCache
+}
+
+func (s *NZBService) readBlacklistFromFile() []string {
 	file, err := os.Open(s.cfg.BlacklistPath())
 	if err != nil {
 		log.WithField("error", err).Warn("blacklist file not found, using empty blacklist")
@@ -529,23 +578,16 @@ func (s *NZBService) logBestNZBSelected(traktID int64, best *domain.NZB, allNZBs
 	}
 
 	if len(allNZBs) > 1 {
-		sortedNZBs := make([]domain.NZB, len(allNZBs))
-		copy(sortedNZBs, allNZBs)
-
-		for i := 0; i < len(sortedNZBs)-1; i++ {
-			for j := i + 1; j < len(sortedNZBs); j++ {
-				if sortedNZBs[j].TotalScore > sortedNZBs[i].TotalScore {
-					sortedNZBs[i], sortedNZBs[j] = sortedNZBs[j], sortedNZBs[i]
-				}
+		topNZBs := findTopNZBs(allNZBs, 3)
+		for i, nzb := range topNZBs {
+			if i == 0 {
+				continue // Skip the best (already logged above)
 			}
-		}
-
-		for i := 1; i < len(sortedNZBs) && i < 3; i++ {
 			prefix := fmt.Sprintf("runner%d", i)
-			fields[prefix+"Title"] = sortedNZBs[i].Title
-			fields[prefix+"TotalScore"] = sortedNZBs[i].TotalScore
-			fields[prefix+"Resolution"] = sortedNZBs[i].Resolution
-			fields[prefix+"Source"] = sortedNZBs[i].Source
+			fields[prefix+"Title"] = nzb.Title
+			fields[prefix+"TotalScore"] = nzb.TotalScore
+			fields[prefix+"Resolution"] = nzb.Resolution
+			fields[prefix+"Source"] = nzb.Source
 		}
 	}
 

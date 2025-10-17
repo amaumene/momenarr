@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/amaumene/momenarr/internal/config"
 	"github.com/amaumene/momenarr/internal/domain"
@@ -16,6 +17,8 @@ import (
 const (
 	nzbFileExtension = ".nzb"
 	decimalBase      = 10
+	maxHTTPRetries   = 3
+	retryBackoff     = 1
 )
 
 var (
@@ -24,6 +27,8 @@ var (
 	emptyHistoryErr      = fmt.Errorf("download already completed")
 )
 
+// DownloadService manages downloading NZB files and adding them to the download client.
+// It includes retry logic and duplicate detection.
 type DownloadService struct {
 	cfg            *config.Config
 	mediaRepo      domain.MediaRepository
@@ -31,6 +36,7 @@ type DownloadService struct {
 	httpClient     *http.Client
 }
 
+// NewDownloadService creates a new DownloadService with the provided dependencies.
 func NewDownloadService(cfg *config.Config, mediaRepo domain.MediaRepository, downloadClient domain.DownloadClient) *DownloadService {
 	return &DownloadService{
 		cfg:            cfg,
@@ -131,6 +137,30 @@ func (s *DownloadService) appendToDownloader(ctx context.Context, traktID int64,
 }
 
 func (s *DownloadService) downloadNZBFile(ctx context.Context, url string) ([]byte, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxHTTPRetries; attempt++ {
+		content, err := s.tryDownloadNZBFile(ctx, url)
+		if err == nil {
+			return content, nil
+		}
+		lastErr = err
+		if attempt < maxHTTPRetries {
+			log.WithFields(log.Fields{
+				"url":     url,
+				"attempt": attempt,
+				"error":   err,
+			}).Warn("nzb download failed, retrying")
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(retryBackoff*attempt) * time.Second):
+			}
+		}
+	}
+	return nil, fmt.Errorf("failed after %d attempts: %w", maxHTTPRetries, lastErr)
+}
+
+func (s *DownloadService) tryDownloadNZBFile(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)

@@ -111,6 +111,11 @@ func (s *MediaService) collectMovies(ctx context.Context, iterator *trakt.WatchL
 			continue
 		}
 
+		if item.Movie == nil {
+			log.Warn("watchlist entry has nil Movie field")
+			continue
+		}
+
 		if err := s.insertMovie(ctx, item.Movie); err != nil {
 			log.WithField("error", err).Error("failed to insert watchlist movie")
 			continue
@@ -171,6 +176,11 @@ func (s *MediaService) collectMoviesFromFavorites(ctx context.Context, iterator 
 			continue
 		}
 
+		if item.Movie == nil {
+			log.Warn("favorites entry has nil Movie field")
+			continue
+		}
+
 		if err := s.insertMovie(ctx, item.Movie); err != nil {
 			log.WithField("error", err).Error("failed to insert favorites movie")
 			continue
@@ -219,6 +229,11 @@ func (s *MediaService) collectEpisodesFromWatchlist(ctx context.Context, iterato
 		item, err := iterator.Entry()
 		if err != nil {
 			log.WithField("error", err).Error("failed to scan watchlist episode entry")
+			continue
+		}
+
+		if item.Show == nil {
+			log.Warn("watchlist episode entry has nil Show field")
 			continue
 		}
 
@@ -275,6 +290,11 @@ func (s *MediaService) collectEpisodesFromFavorites(ctx context.Context, iterato
 		item, err := iterator.Entry()
 		if err != nil {
 			log.WithField("error", err).Error("failed to scan favorites episode entry")
+			continue
+		}
+
+		if item.Show == nil {
+			log.Warn("favorites episode entry has nil Show field")
 			continue
 		}
 
@@ -376,6 +396,9 @@ func (s *MediaService) removeStaleMedia(ctx context.Context, validIDs []int64) e
 	}
 
 	for _, media := range staleMedia {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context cancelled during stale media cleanup: %w", err)
+		}
 		if err := completeMediaCleanup(ctx, s.mediaRepo, s.nzbRepo, media.TraktID, media.Title); err != nil {
 			log.WithFields(log.Fields{
 				"traktID": media.TraktID,
