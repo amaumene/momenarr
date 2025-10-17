@@ -13,10 +13,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+var (
+	seasonNotationPattern = regexp.MustCompile(`(?i)S\d{1,2}|Season[.\s]+\d+`)
+	episodeMarkerPattern  = regexp.MustCompile(`(?i)E\d{1,2}`)
+)
+
 const (
-	regexSeasonNotation = `(?i)S\d{1,2}|Season[.\s]+\d+`
-	regexEpisodeMarker  = `(?i)E\d{1,2}`
-	guidPrefix          = "https://v2.nzbs.in/releases/"
+	guidPrefix = "https://v2.nzbs.in/releases/"
 )
 
 type NZBService struct {
@@ -72,13 +75,17 @@ func (s *NZBService) PopulateNZBs(ctx context.Context) error {
 
 	for _, media := range medias {
 		if err := s.processMediaForNZB(ctx, &media); err != nil {
-			log.WithFields(log.Fields{
-				"error":   err,
-				"traktID": media.TraktID,
-			}).Error("failed to process media for nzb search")
+			s.logPopulationError(&media, err)
 		}
 	}
 	return nil
+}
+
+func (s *NZBService) logPopulationError(media *domain.Media, err error) {
+	log.WithFields(log.Fields{
+		"error":   err,
+		"traktID": media.TraktID,
+	}).Error("failed to process media for nzb search")
 }
 
 func (s *NZBService) processMediaForNZB(ctx context.Context, media *domain.Media) error {
@@ -105,7 +112,7 @@ func (s *NZBService) searchNZB(ctx context.Context, media *domain.Media) ([]doma
 func (s *NZBService) searchEpisodeWithSeasonPackPriority(ctx context.Context, media *domain.Media) ([]domain.SearchResult, error) {
 	s.logSearchStart(media)
 
-	if results := s.trySeasonPackSearch(ctx, media); results != nil {
+	if results := s.trySeasonPackSearch(ctx, media); len(results) > 0 {
 		return results, nil
 	}
 
@@ -151,14 +158,8 @@ func filterSeasonPacks(results []domain.SearchResult) []domain.SearchResult {
 }
 
 func isSeasonPackTitle(title string) bool {
-	hasSeasonNotation, err := regexp.MatchString(regexSeasonNotation, title)
-	if err != nil {
-		return false
-	}
-	hasEpisodeMarker, err := regexp.MatchString(regexEpisodeMarker, title)
-	if err != nil {
-		return false
-	}
+	hasSeasonNotation := seasonNotationPattern.MatchString(title)
+	hasEpisodeMarker := episodeMarkerPattern.MatchString(title)
 	return hasSeasonNotation && !hasEpisodeMarker
 }
 

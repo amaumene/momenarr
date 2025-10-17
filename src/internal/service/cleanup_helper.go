@@ -9,8 +9,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+var errMediaMissing = fmt.Errorf("media record missing during cleanup")
+
 func completeMediaCleanup(ctx context.Context, mediaRepo domain.MediaRepository, nzbRepo domain.NZBRepository, traktID int64, title string) error {
-	media, err := getMedia(ctx, mediaRepo, traktID)
+	media, err := fetchExistingMedia(ctx, mediaRepo, traktID, title)
 	if err != nil {
 		return err
 	}
@@ -26,10 +28,15 @@ func completeMediaCleanup(ctx context.Context, mediaRepo domain.MediaRepository,
 	return nil
 }
 
-func getMedia(ctx context.Context, mediaRepo domain.MediaRepository, traktID int64) (*domain.Media, error) {
+func fetchExistingMedia(ctx context.Context, mediaRepo domain.MediaRepository, traktID int64, title string) (*domain.Media, error) {
 	media, err := mediaRepo.Get(ctx, traktID)
 	if err != nil {
-		return nil, nil
+		log.WithFields(log.Fields{
+			"traktID": traktID,
+			"title":   title,
+			"error":   err,
+		}).Warn("media record missing during cleanup")
+		return nil, errMediaMissing
 	}
 	return media, nil
 }

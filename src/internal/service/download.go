@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/amaumene/momenarr/internal/config"
@@ -17,6 +16,12 @@ import (
 const (
 	nzbFileExtension = ".nzb"
 	decimalBase      = 10
+)
+
+var (
+	hiddenHistoryEnabled = false
+	emptyDuplicateErr    = fmt.Errorf("download already queued")
+	emptyHistoryErr      = fmt.Errorf("download already completed")
 )
 
 type DownloadService struct {
@@ -40,31 +45,46 @@ func (s *DownloadService) CreateDownload(ctx context.Context, traktID int64, nzb
 		return fmt.Errorf("invalid traktID: %d", traktID)
 	}
 
-	isInQueue, err := s.checkIfInQueue(ctx, nzb.Title, traktID)
+	media, err := s.mediaRepo.Get(ctx, traktID)
 	if err != nil {
-		return err
+		return fmt.Errorf("getting media: %w", err)
 	}
-	if isInQueue {
-		return nil
+
+	if err := s.preventDuplicate(ctx, media, nzb.Title); err != nil {
+		return err
 	}
 
 	downloadID, err := s.appendToDownloader(ctx, traktID, nzb)
 	if err != nil {
+		return fmt.Errorf("append download: %w", err)
+	}
+
+	return s.updateMediaDownloadID(ctx, media, downloadID)
+}
+
+func (s *DownloadService) preventDuplicate(ctx context.Context, media *domain.Media, title string) error {
+	queued, err := s.checkQueue(ctx, title)
+	if err != nil {
 		return err
 	}
-
-	return s.updateMediaDownloadID(ctx, traktID, downloadID)
-}
-
-func (s *DownloadService) checkIfInQueue(ctx context.Context, title string, traktID int64) (bool, error) {
-	if found, err := s.checkQueue(ctx, title, traktID); err != nil || found {
-		return found, err
+	if queued {
+		s.logAlreadyInQueue(media.TraktID, title)
+		return emptyDuplicateErr
 	}
 
-	return s.checkHistory(ctx, title, traktID)
+	history, err := s.checkHistory(ctx, media)
+	if err != nil {
+		return err
+	}
+	if history {
+		s.logAlreadyInHistory(media.TraktID, title)
+		return emptyHistoryErr
+	}
+
+	return nil
 }
 
-func (s *DownloadService) checkQueue(ctx context.Context, title string, traktID int64) (bool, error) {
+func (s *DownloadService) checkQueue(ctx context.Context, title string) (bool, error) {
 	queue, err := s.downloadClient.ListGroups(ctx)
 	if err != nil {
 		return false, fmt.Errorf("listing queue: %w", err)
@@ -72,26 +92,20 @@ func (s *DownloadService) checkQueue(ctx context.Context, title string, traktID 
 
 	for _, item := range queue {
 		if item.NZBName == title {
-			s.logAlreadyInQueue(traktID, title)
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (s *DownloadService) checkHistory(ctx context.Context, title string, traktID int64) (bool, error) {
-	history, err := s.downloadClient.History(ctx, false)
+func (s *DownloadService) checkHistory(ctx context.Context, media *domain.Media) (bool, error) {
+	history, err := s.downloadClient.History(ctx, hiddenHistoryEnabled)
 	if err != nil {
 		return false, fmt.Errorf("listing history: %w", err)
 	}
 
 	for _, item := range history {
-		media, err := s.mediaRepo.Get(ctx, traktID)
-		if err != nil {
-			continue
-		}
 		if item.NZBID == media.DownloadID {
-			s.logAlreadyInHistory(traktID, title)
 			return true, nil
 		}
 	}
@@ -106,10 +120,11 @@ func (s *DownloadService) appendToDownloader(ctx context.Context, traktID int64,
 
 	input := s.buildDownloadInput(traktID, nzb.Title, content)
 	downloadID, err := s.downloadClient.Append(ctx, input)
-	if err != nil || downloadID <= 0 {
-		//return 0, fmt.Errorf("appending to downloader: %w", err)
-		log.WithError(err).Error("append to downloader failed")
-		os.Exit(1)
+	if err != nil {
+		return 0, fmt.Errorf("appending to downloader: %w", err)
+	}
+	if downloadID <= 0 {
+		return 0, fmt.Errorf("invalid download id returned")
 	}
 
 	return downloadID, nil
@@ -150,18 +165,13 @@ func (s *DownloadService) buildDownloadInput(traktID int64, title string, conten
 	}
 }
 
-func (s *DownloadService) updateMediaDownloadID(ctx context.Context, traktID, downloadID int64) error {
-	media, err := s.mediaRepo.Get(ctx, traktID)
-	if err != nil {
-		return fmt.Errorf("getting media: %w", err)
-	}
-
+func (s *DownloadService) updateMediaDownloadID(ctx context.Context, media *domain.Media, downloadID int64) error {
 	media.DownloadID = downloadID
-	if err := s.mediaRepo.Update(ctx, traktID, media); err != nil {
+	if err := s.mediaRepo.Update(ctx, media.TraktID, media); err != nil {
 		return fmt.Errorf("updating media: %w", err)
 	}
 
-	s.logDownloadStarted(traktID, media.Title, downloadID)
+	s.logDownloadStarted(media.TraktID, media.Title, downloadID)
 	return nil
 }
 
