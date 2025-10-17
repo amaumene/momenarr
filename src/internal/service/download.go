@@ -160,7 +160,7 @@ func (s *DownloadService) buildDownloadInput(traktID int64, title string, conten
 		Category: s.cfg.NZBCategory,
 		DupeMode: s.cfg.NZBDupeMode,
 		Parameters: map[string]string{
-			"Trakt:": formatTraktID(traktID),
+			"Trakt": formatTraktID(traktID),
 		},
 	}
 }
