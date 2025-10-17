@@ -20,7 +20,9 @@ var (
 )
 
 const (
-	guidPrefix = "https://v2.nzbs.in/releases/"
+	guidPrefix              = "https://v2.nzbs.in/releases/"
+	topNZBCountForLogging   = 3
+	minNZBListForComparison = 1
 )
 
 // NZBService handles NZB search, validation, and storage operations.
@@ -276,7 +278,7 @@ func scanBlacklist(file *os.File) []string {
 func (s *NZBService) insertValidatedResult(ctx context.Context, media *domain.Media, result *domain.SearchResult, blacklist []string) error {
 	if isBlacklisted(result.Title, blacklist) {
 		s.logRejectionBlacklisted(media, result, blacklist)
-		return fmt.Errorf("blacklisted")
+		return fmt.Errorf("nzb validation failed: release blacklisted")
 	}
 
 	parsed, err := parseSearchResult(result)
@@ -287,19 +289,19 @@ func (s *NZBService) insertValidatedResult(ctx context.Context, media *domain.Me
 
 	valid, validationScore := s.validateWithLogging(parsed, media)
 	if !valid {
-		return fmt.Errorf("validation failed: score %d", validationScore)
+		return fmt.Errorf("nzb validation failed: validation score %d below minimum", validationScore)
 	}
 
 	qualityScore := scoreQuality(parsed)
 	if qualityScore < s.cfg.MinQualityScore {
 		s.logRejectionQualityTooLow(media, result, parsed, qualityScore)
-		return fmt.Errorf("quality too low: score %d", qualityScore)
+		return fmt.Errorf("nzb validation failed: quality score %d below minimum %d", qualityScore, s.cfg.MinQualityScore)
 	}
 
 	totalScore := validationScore + qualityScore
 	if totalScore < s.cfg.MinTotalScore {
 		s.logRejectionTotalScoreTooLow(media, result, validationScore, qualityScore, totalScore)
-		return fmt.Errorf("total score too low: %d", totalScore)
+		return fmt.Errorf("nzb validation failed: total score %d below minimum %d", totalScore, s.cfg.MinTotalScore)
 	}
 
 	s.logReleaseAccepted(media, result, parsed, validationScore, qualityScore, totalScore)
@@ -526,7 +528,7 @@ func (s *NZBService) logSeasonPacksFound(media *domain.Media, count int) {
 	log.WithFields(log.Fields{
 		"title":       media.Title,
 		"seasonPacks": count,
-	}).Info("found season packs, using season pack instead of single episode")
+	}).Debug("found season packs, using season pack instead of single episode")
 }
 
 func (s *NZBService) logSeasonPacksPassedBlacklist(media *domain.Media, total, passed int) {
@@ -535,7 +537,7 @@ func (s *NZBService) logSeasonPacksPassedBlacklist(media *domain.Media, total, p
 		"totalFound":  total,
 		"passed":      passed,
 		"blacklisted": total - passed,
-	}).Info("season packs passed blacklist filter, using season packs")
+	}).Debug("season packs passed blacklist filter, using season packs")
 }
 
 func (s *NZBService) logAllSeasonPacksBlacklisted(media *domain.Media, total int) {
@@ -543,7 +545,7 @@ func (s *NZBService) logAllSeasonPacksBlacklisted(media *domain.Media, total int
 		"title":       media.Title,
 		"totalFound":  total,
 		"blacklisted": total,
-	}).Info("all season packs blacklisted, falling back to single episode search")
+	}).Debug("all season packs blacklisted, falling back to single episode search")
 }
 
 func (s *NZBService) logFallbackToEpisode(media *domain.Media) {
@@ -561,7 +563,7 @@ func (s *NZBService) logInsertionSummary(media *domain.Media, total, inserted in
 		"total":    total,
 		"inserted": inserted,
 		"rejected": total - inserted,
-	}).Info("nzb validation and insertion complete")
+	}).Debug("nzb validation and insertion complete")
 }
 
 func (s *NZBService) logBestNZBSelected(traktID int64, best *domain.NZB, allNZBs []domain.NZB) {
@@ -577,8 +579,8 @@ func (s *NZBService) logBestNZBSelected(traktID int64, best *domain.NZB, allNZBs
 		"totalScore":      best.TotalScore,
 	}
 
-	if len(allNZBs) > 1 {
-		topNZBs := findTopNZBs(allNZBs, 3)
+	if len(allNZBs) > minNZBListForComparison {
+		topNZBs := findTopNZBs(allNZBs, topNZBCountForLogging)
 		for i, nzb := range topNZBs {
 			if i == 0 {
 				continue // Skip the best (already logged above)
@@ -591,5 +593,5 @@ func (s *NZBService) logBestNZBSelected(traktID int64, best *domain.NZB, allNZBs
 		}
 	}
 
-	log.WithFields(fields).Info("selected best scored nzb")
+	log.WithFields(fields).Debug("selected best scored nzb")
 }

@@ -7,6 +7,11 @@ const (
 	maxSourceScore     = 30
 	maxCodecScore      = 20
 	maxFlagsScore      = 10
+
+	// Bonus scores for quality flags
+	properBonusScore  = 5
+	repackBonusScore  = 5
+	defaultQualityScore = 5
 )
 
 const (
@@ -57,7 +62,7 @@ func scoreResolution(resolution string) int {
 	case contains(normalized, resolution576p) || contains(normalized, resolution480p):
 		return 10
 	default:
-		return 5
+		return defaultQualityScore
 	}
 }
 
@@ -76,7 +81,7 @@ func scoreSource(source string) int {
 	case contains(normalized, sourceHDTV):
 		return 10
 	default:
-		return 5
+		return defaultQualityScore
 	}
 }
 
@@ -91,17 +96,17 @@ func scoreCodec(codec string) int {
 	case contains(normalized, codecXVID):
 		return 10
 	default:
-		return 5
+		return defaultQualityScore
 	}
 }
 
 func scoreFlags(proper, repack bool) int {
 	score := 0
 	if proper {
-		score += 5
+		score += properBonusScore
 	}
 	if repack {
-		score += 5
+		score += repackBonusScore
 	}
 	if score > maxFlagsScore {
 		return maxFlagsScore

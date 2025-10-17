@@ -48,7 +48,7 @@ func (s *CleanupService) CleanWatched(ctx context.Context) error {
 		}
 
 		if err := s.handleHistoryItem(ctx, item); err != nil {
-			log.WithField("error", err).Error("failed to handle watched history item")
+			log.WithField("error", err).Warn("failed to handle watched history item")
 		}
 	}
 

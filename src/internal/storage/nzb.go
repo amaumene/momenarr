@@ -75,7 +75,7 @@ func (r *nzbRepository) MarkFailed(ctx context.Context, title string) error {
 	err := r.store.UpdateMatching(&domain.NZB{}, bolthold.Where("Title").Eq(title), func(record interface{}) error {
 		update, ok := record.(*domain.NZB)
 		if !ok {
-			return fmt.Errorf("invalid record type: %T", record)
+			return fmt.Errorf("database integrity error: invalid record type %T expected domain.NZB", record)
 		}
 		update.Failed = true
 		return nil

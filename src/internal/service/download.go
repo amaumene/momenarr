@@ -48,7 +48,7 @@ func NewDownloadService(cfg *config.Config, mediaRepo domain.MediaRepository, do
 
 func (s *DownloadService) CreateDownload(ctx context.Context, traktID int64, nzb *domain.NZB) error {
 	if traktID <= 0 {
-		return fmt.Errorf("invalid traktID: %d", traktID)
+		return fmt.Errorf("download creation failed: invalid traktID %d (must be positive)", traktID)
 	}
 
 	media, err := s.mediaRepo.Get(ctx, traktID)
@@ -130,7 +130,7 @@ func (s *DownloadService) appendToDownloader(ctx context.Context, traktID int64,
 		return 0, fmt.Errorf("appending to downloader: %w", err)
 	}
 	if downloadID <= 0 {
-		return 0, fmt.Errorf("invalid download id returned")
+		return 0, fmt.Errorf("download client error: invalid download id %d returned from nzbget", downloadID)
 	}
 
 	return downloadID, nil
@@ -173,7 +173,7 @@ func (s *DownloadService) tryDownloadNZBFile(ctx context.Context, url string) ([
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %s", resp.Status)
+		return nil, fmt.Errorf("nzb file download failed: unexpected status %s from %s", resp.Status, url)
 	}
 
 	content, err := io.ReadAll(resp.Body)
@@ -209,14 +209,14 @@ func (s *DownloadService) logAlreadyInQueue(traktID int64, title string) {
 	log.WithFields(log.Fields{
 		"traktID": traktID,
 		"title":   title,
-	}).Info("media already in download queue, skipping")
+	}).Debug("media already in download queue, skipping")
 }
 
 func (s *DownloadService) logAlreadyInHistory(traktID int64, title string) {
 	log.WithFields(log.Fields{
 		"traktID": traktID,
 		"title":   title,
-	}).Info("media already in download history, skipping")
+	}).Debug("media already in download history, skipping")
 }
 
 func (s *DownloadService) logDownloadStarted(traktID int64, title string, downloadID int64) {
@@ -224,7 +224,7 @@ func (s *DownloadService) logDownloadStarted(traktID int64, title string, downlo
 		"traktID":    traktID,
 		"title":      title,
 		"downloadID": downloadID,
-	}).Info("download added to nzbget queue")
+	}).Debug("download added to nzbget queue")
 }
 
 func formatTraktID(traktID int64) string {

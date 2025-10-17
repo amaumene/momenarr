@@ -160,7 +160,7 @@ func (s *NotificationService) handleFailure(ctx context.Context, notification *d
 			log.WithFields(log.Fields{
 				"error":   err,
 				"traktID": media.TraktID,
-			}).Error("failed to retry download")
+			}).Warn("failed to retry download")
 		}
 	}
 	return nil

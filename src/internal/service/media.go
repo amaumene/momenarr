@@ -18,6 +18,10 @@ const (
 	typeMovies = "movies"
 	typeShow   = "show"
 	typeShows  = "shows"
+
+	// Episode navigation constants
+	firstEpisodeNumber = 1
+	nextSeasonOffset   = 1
 )
 
 type MediaService struct {
@@ -42,7 +46,7 @@ func (s *MediaService) SyncFromTrakt(ctx context.Context) ([]int64, error) {
 		log.WithFields(log.Fields{
 			"operation": "sync_movies",
 			"error":     err,
-		}).Error("failed to sync movies from trakt, continuing")
+		}).Warn("failed to sync movies from trakt, continuing")
 	}
 
 	episodes, err := s.syncEpisodes(ctx)
@@ -50,7 +54,7 @@ func (s *MediaService) SyncFromTrakt(ctx context.Context) ([]int64, error) {
 		log.WithFields(log.Fields{
 			"operation": "sync_episodes",
 			"error":     err,
-		}).Error("failed to sync episodes from trakt, continuing")
+		}).Warn("failed to sync episodes from trakt, continuing")
 	}
 
 	merged := append(movies, episodes...)
@@ -59,7 +63,7 @@ func (s *MediaService) SyncFromTrakt(ctx context.Context) ([]int64, error) {
 			log.WithFields(log.Fields{
 				"operation": "remove_stale",
 				"error":     err,
-			}).Error("failed to remove stale media, continuing")
+			}).Warn("failed to remove stale media, continuing")
 		}
 	}
 
@@ -107,7 +111,7 @@ func (s *MediaService) collectMovies(ctx context.Context, iterator *trakt.WatchL
 
 		item, err := iterator.Entry()
 		if err != nil {
-			log.WithField("error", err).Error("failed to scan watchlist movie entry")
+			log.WithField("error", err).Warn("failed to scan watchlist movie entry")
 			continue
 		}
 
@@ -117,7 +121,7 @@ func (s *MediaService) collectMovies(ctx context.Context, iterator *trakt.WatchL
 		}
 
 		if err := s.insertMovie(ctx, item.Movie); err != nil {
-			log.WithField("error", err).Error("failed to insert watchlist movie")
+			log.WithField("error", err).Warn("failed to insert watchlist movie")
 			continue
 		}
 		movieIDs = append(movieIDs, int64(item.Movie.Trakt))
@@ -172,7 +176,7 @@ func (s *MediaService) collectMoviesFromFavorites(ctx context.Context, iterator 
 
 		item, err := iterator.Entry()
 		if err != nil {
-			log.WithField("error", err).Error("failed to scan favorites movie entry")
+			log.WithField("error", err).Warn("failed to scan favorites movie entry")
 			continue
 		}
 
@@ -182,7 +186,7 @@ func (s *MediaService) collectMoviesFromFavorites(ctx context.Context, iterator 
 		}
 
 		if err := s.insertMovie(ctx, item.Movie); err != nil {
-			log.WithField("error", err).Error("failed to insert favorites movie")
+			log.WithField("error", err).Warn("failed to insert favorites movie")
 			continue
 		}
 		movieIDs = append(movieIDs, int64(item.Movie.Trakt))
@@ -228,7 +232,7 @@ func (s *MediaService) collectEpisodesFromWatchlist(ctx context.Context, iterato
 
 		item, err := iterator.Entry()
 		if err != nil {
-			log.WithField("error", err).Error("failed to scan watchlist episode entry")
+			log.WithField("error", err).Warn("failed to scan watchlist episode entry")
 			continue
 		}
 
@@ -249,7 +253,7 @@ func (s *MediaService) collectEpisodesFromWatchlist(ctx context.Context, iterato
 		}
 
 		if err := s.insertEpisode(ctx, item.Show, nextEp); err != nil {
-			log.WithField("error", err).Error("failed to insert watchlist episode")
+			log.WithField("error", err).Warn("failed to insert watchlist episode")
 			continue
 		}
 		episodeIDs = append(episodeIDs, int64(nextEp.Trakt))
@@ -264,7 +268,7 @@ func (s *MediaService) getNextEpisode(sh *trakt.Show) *trakt.Episode {
 	}
 	progress, err := show.WatchedProgress(sh.Trakt, params)
 	if err != nil {
-		log.WithField("error", err).Error("failed to fetch show watch progress")
+		log.WithField("error", err).Warn("failed to fetch show watch progress")
 		return nil
 	}
 	return progress.NextEpisode
@@ -289,7 +293,7 @@ func (s *MediaService) collectEpisodesFromFavorites(ctx context.Context, iterato
 
 		item, err := iterator.Entry()
 		if err != nil {
-			log.WithField("error", err).Error("failed to scan favorites episode entry")
+			log.WithField("error", err).Warn("failed to scan favorites episode entry")
 			continue
 		}
 
@@ -328,7 +332,7 @@ func (s *MediaService) fetchNextEpisodes(ctx context.Context, sh *trakt.Show) []
 		}
 
 		if err := s.insertEpisode(ctx, sh, ep); err != nil {
-			log.WithField("error", err).Error("failed to insert favorites episode")
+			log.WithField("error", err).Warn("failed to insert favorites episode")
 			continue
 		}
 		episodeIDs = append(episodeIDs, int64(ep.Trakt))
@@ -352,7 +356,7 @@ func (s *MediaService) fetchEpisode(showID trakt.SearchID, season, number int64)
 }
 
 func (s *MediaService) fetchNextSeasonFirstEpisode(showID trakt.SearchID, season int64) *trakt.Episode {
-	ep, err := episode.Get(showID, season+1, 1, nil)
+	ep, err := episode.Get(showID, season+nextSeasonOffset, firstEpisodeNumber, nil)
 	if err != nil {
 		log.WithField("error", err).Info("no more episodes available for show")
 		return nil
@@ -404,7 +408,7 @@ func (s *MediaService) removeStaleMedia(ctx context.Context, validIDs []int64) e
 				"traktID": media.TraktID,
 				"title":   media.Title,
 				"error":   err,
-			}).Error("failed to clean up stale media")
+			}).Warn("failed to clean up stale media")
 		}
 	}
 	return nil

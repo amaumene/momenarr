@@ -13,6 +13,12 @@ const (
 	yearExactMatchScore  = 30
 	yearOneYearOffScore  = 20
 	yearTwoYearsOffScore = 10
+
+	// Levenshtein algorithm constants
+	levenshteinSubstitutionCost = 1
+	levenshteinInsertionCost    = 1
+	levenshteinDeletionCost     = 1
+	perfectSimilarityScore      = 1.0
 )
 
 func validateParsedNZB(parsed *ParsedNZB, media *domain.Media, cfg *config.Config) (bool, int) {
@@ -48,59 +54,59 @@ func validateTitle(parsedTitle, mediaTitle string, minSimilarity float64) (bool,
 	return true, score
 }
 
-func calculateSimilarity(a, b string) float64 {
-	if a == b {
-		return 1.0
+func calculateSimilarity(str1, str2 string) float64 {
+	if str1 == str2 {
+		return perfectSimilarityScore
 	}
 
-	distance := levenshteinDistance(a, b)
-	maxLen := max(len(a), len(b))
+	distance := levenshteinDistance(str1, str2)
+	maxLen := max(len(str1), len(str2))
 
 	if maxLen == 0 {
-		return 1.0
+		return perfectSimilarityScore
 	}
 
-	return 1.0 - (float64(distance) / float64(maxLen))
+	return perfectSimilarityScore - (float64(distance) / float64(maxLen))
 }
 
-func levenshteinDistance(a, b string) int {
-	if len(a) == 0 {
-		return len(b)
+func levenshteinDistance(source, target string) int {
+	if len(source) == 0 {
+		return len(target)
 	}
-	if len(b) == 0 {
-		return len(a)
+	if len(target) == 0 {
+		return len(source)
 	}
 
-	// Ensure a is the shorter string for space optimization
-	if len(a) > len(b) {
-		a, b = b, a
+	// Ensure source is the shorter string for space optimization
+	if len(source) > len(target) {
+		source, target = target, source
 	}
 
 	// Use two rows instead of full matrix: O(min(n,m)) space instead of O(n×m)
-	prevRow := make([]int, len(a)+1)
-	currRow := make([]int, len(a)+1)
+	prevRow := make([]int, len(source)+1)
+	currRow := make([]int, len(source)+1)
 
 	for i := range prevRow {
 		prevRow[i] = i
 	}
 
-	for j := 1; j <= len(b); j++ {
+	for j := 1; j <= len(target); j++ {
 		currRow[0] = j
-		for i := 1; i <= len(a); i++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
+		for i := 1; i <= len(source); i++ {
+			cost := levenshteinSubstitutionCost
+			if source[i-1] == target[j-1] {
 				cost = 0
 			}
 			currRow[i] = min(
-				prevRow[i]+1,      // deletion
-				currRow[i-1]+1,    // insertion
-				prevRow[i-1]+cost, // substitution
+				prevRow[i]+levenshteinDeletionCost,    // Deletion
+				currRow[i-1]+levenshteinInsertionCost, // Insertion
+				prevRow[i-1]+cost,                     // Substitution
 			)
 		}
 		prevRow, currRow = currRow, prevRow
 	}
 
-	return prevRow[len(a)]
+	return prevRow[len(source)]
 }
 
 func validateYear(parsedYear, mediaYear, tolerance int64, isEpisode bool) (bool, int) {
